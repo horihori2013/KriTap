@@ -13,6 +13,7 @@
 #include "IccColorProfile.h"
 
 #include <lcms2.h>
+#include "kritalcmsengine_export.h"
 
 #include <QByteArray>
 #include <QString>
@@ -20,7 +21,7 @@
 /**
  * This class contains an LCMS color profile. Don't use it outside LcmsColorSpace.
  */
-class LcmsColorProfileContainer : public IccColorProfile::Container
+class KRITALCMSENGINE_EXPORT LcmsColorProfileContainer : public IccColorProfile::Container
 {
     friend class IccColorProfile;
 protected:
@@ -67,6 +68,8 @@ public:
     virtual float version() const;
 
     bool isSuitableForOutput() const override;
+    bool isSuitableForInput() const override;
+    bool isSuitableForWorkspace() const override;
 
     bool isSuitableForPrinting() const override;
 
@@ -80,10 +83,11 @@ public:
     bool hasColorants() const override;
     virtual bool hasTRC() const;
     bool isLinear() const;
-    QVector <double> getColorantsXYZ() const override;
-    QVector <double> getColorantsxyY() const override;
-    QVector <double> getWhitePointXYZ() const override;
-    QVector <double> getWhitePointxyY() const override;
+    QVector<KoColorimetryUtils::XYZ> getColorantsXYZ() const override;
+    QVector <KoColorimetryUtils::xyY> getColorantsxyY() const override;
+    KoColorimetryUtils::XYZ getWhitePointXYZ() const override;
+    KoColorimetryUtils::xyY getWhitePointxyY() const override;
+    std::optional<double> hdrReferenceWhite() const override;
     QVector <double> getEstimatedTRC() const override;
     virtual void LinearizeFloatValue(QVector <double> & Value) const;
     virtual void DelinearizeFloatValue(QVector <double> & Value) const;
@@ -92,6 +96,10 @@ public:
     QString name() const override;
     QString info() const override;
     QByteArray getProfileUniqueId() const override;
+
+    bool hasCicpValues() const override;
+    ColorPrimaries cicpPrimaries() const override;
+    TransferCharacteristics cicpTransfer() const override;
 
     bool compareTRC(TransferCharacteristics characteristics, float error) const override;
 

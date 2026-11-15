@@ -13,6 +13,7 @@ Column {
     property int firstColumnWidth: 32;
     property int columnSpacing: 5;
     padding: columnSpacing;
+    bottomPadding: 0;
     width: ListView.view? ListView.view.width - (padding * 2): 100;
     height: visible? implicitHeight: 0;
 
@@ -33,7 +34,7 @@ Column {
     property var propertyState: []; /// All property states related to the current property.
 
     function setVisibleFromProperty() {
-        if (propertyType !== parentPropertyType && propertyType !== TextPropertyConfigModel.Mixed) {
+        if (propertyType !== parentPropertyType && propertyType === TextPropertyConfigModel.Paragraph) {
             visible = false;
             return;
         }
@@ -68,7 +69,7 @@ Column {
                 id: separator;
                 orientation: Qt.Horizontal;
                 width: parent && typeof parent != 'undefined'? parent.width: 100;
-                topPadding: parent.padding;
+                bottomPadding: 0;
                 }", root)
     }
 

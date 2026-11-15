@@ -79,23 +79,10 @@ KisToolPaint::KisToolPaint(KoCanvasBase *canvas, const QCursor &cursor)
     : KisTool(canvas, cursor),
       m_isOutlineEnabled(true),
       m_isOutlineVisible(true),
+      m_standardBrushSizes(1, KisImageConfig(true).maxBrushSize()),
       m_colorSamplerHelper(dynamic_cast<KisCanvas2*>(canvas)),
       m_d(new Private())
 {
-
-    {
-        const int maxSize = KisImageConfig(true).maxBrushSize();
-
-        int brushSize = 1;
-        do {
-            m_standardBrushSizes.push_back(brushSize);
-            int increment = qMax(1, int(std::ceil(qreal(brushSize) / 15)));
-            brushSize += increment;
-        } while (brushSize < maxSize);
-
-        m_standardBrushSizes.push_back(maxSize);
-    }
-
     KisCanvas2 *kiscanvas = dynamic_cast<KisCanvas2*>(canvas);
     KIS_ASSERT(kiscanvas);
     connect(this, SIGNAL(sigPaintingFinished()), kiscanvas->viewManager()->canvasResourceProvider(), SLOT(slotPainting()));
@@ -301,9 +288,26 @@ void KisToolPaint::activateAlternateAction(AlternateAction action)
         return;
     }
 
-    const bool sampleCurrentLayer = action == SampleFgNode || action == SampleBgNode;
-    const bool sampleFgColor = action == SampleFgNode || action == SampleFgImage;
-    m_colorSamplerHelper.activate(sampleCurrentLayer, sampleFgColor);
+    KisToolUtils::ColorSamplerSource sampleSource;
+
+    switch (action) {
+    case SampleFgGroup:
+    case SampleBgGroup:
+        sampleSource = KisToolUtils::SampleSourceGroup;
+        break;
+    case SampleFgNode:
+    case SampleBgNode:
+        sampleSource = KisToolUtils::SampleSourceNode;
+        break;
+    case SampleFgImage:
+    case SampleBgImage:
+    default:
+        sampleSource = KisToolUtils::SampleSourceImage;
+        break;
+    }
+
+    const bool sampleFgColor = action == SampleFgNode || action == SampleFgGroup || action == SampleFgImage;
+    m_colorSamplerHelper.activate(sampleSource, sampleFgColor);
 }
 
 void KisToolPaint::deactivateAlternateAction(AlternateAction action)
@@ -319,6 +323,8 @@ void KisToolPaint::deactivateAlternateAction(AlternateAction action)
 bool KisToolPaint::isSamplingAction(AlternateAction action) {
     return action == SampleFgNode ||
         action == SampleBgNode ||
+        action == SampleFgGroup ||
+        action == SampleBgGroup ||
         action == SampleFgImage ||
         action == SampleBgImage;
 }
@@ -536,14 +542,7 @@ void KisToolPaint::setOutlineVisible(bool visible)
 void KisToolPaint::increaseBrushSize()
 {
     qreal paintopSize = currentPaintOpPreset()->settings()->paintOpSize();
-
-    std::vector<int>::iterator result =
-        std::upper_bound(m_standardBrushSizes.begin(),
-                         m_standardBrushSizes.end(),
-                         qRound(paintopSize));
-
-    int newValue = result != m_standardBrushSizes.end() ? *result : m_standardBrushSizes.back();
-
+    int newValue = m_standardBrushSizes.increaseBrushSize(paintopSize);
     currentPaintOpPreset()->settings()->setPaintOpSize(newValue);
     requestUpdateOutline(m_outlineDocPoint, 0);
 }
@@ -551,25 +550,14 @@ void KisToolPaint::increaseBrushSize()
 void KisToolPaint::decreaseBrushSize()
 {
     qreal paintopSize = currentPaintOpPreset()->settings()->paintOpSize();
-
-    std::vector<int>::reverse_iterator result =
-        std::upper_bound(m_standardBrushSizes.rbegin(),
-                         m_standardBrushSizes.rend(),
-                         qRound(paintopSize),
-                         std::greater<int>());
-
-    int newValue = result != m_standardBrushSizes.rend() ? *result : m_standardBrushSizes.front();
-
+    int newValue = m_standardBrushSizes.decreaseBrushSize(paintopSize);
     currentPaintOpPreset()->settings()->setPaintOpSize(newValue);
     requestUpdateOutline(m_outlineDocPoint, 0);
 }
 
 void KisToolPaint::showBrushSize()
 {
-     KisCanvas2 *kisCanvas =dynamic_cast<KisCanvas2*>(canvas());
-     KIS_SAFE_ASSERT_RECOVER_RETURN(kisCanvas);
-     kisCanvas->viewManager()->showFloatingMessage(i18n("Brush Size: %1 px", currentPaintOpPreset()->settings()->paintOpSize())
-                                                   , QIcon(), 1000, KisFloatingMessage::High,  Qt::AlignLeft | Qt::TextWordWrap | Qt::AlignVCenter);
+    KisToolUtils::showBrushSizeFloatingMessage(canvas(), currentPaintOpPreset()->settings()->paintOpSize());
 }
 
 void KisToolPaint::rotateBrushTipClockwise()

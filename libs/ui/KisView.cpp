@@ -126,7 +126,7 @@ public:
     KisCanvasController canvasController;
     KisCanvas2 canvas;
     KisZoomManager zoomManager;
-    KisViewManager *viewManager {nullptr};
+    QPointer<KisViewManager> viewManager;
     KisNodeSP currentNode;
     KisPaintingAssistantsDecorationSP paintingAssistantsDecoration;
     KisReferenceImagesDecorationSP referenceImagesDecoration;
@@ -272,7 +272,7 @@ KisView::~KisView()
      */
     d->canvas.disconnectImage();
 
-    KoToolManager::instance()->removeCanvasController(&d->canvasController);
+    d->canvasController.setToolManager(0);
     d->canvasController.setCanvas(0);
 
     KisPart::instance()->removeView(this);
@@ -336,9 +336,16 @@ bool KisView::canvasIsMirrored() const
 
 void KisView::setViewManager(KisViewManager *view)
 {
+    // we never call this method with nullptr and the code here is not
+    // capable of detaching from the previous connections
+    KIS_SAFE_ASSERT_RECOVER_RETURN(view);
+
     d->viewManager = view;
 
-    KoToolManager::instance()->addController(&d->canvasController);
+    if (!d->canvasController.toolManager()) {
+        d->canvasController.setToolManager(d->viewManager->toolManager());
+    }
+
     KisShapeController* shapeController = dynamic_cast<KisShapeController*>(d->document->shapeController());
     shapeController->setInitialShapeForCanvas(&d->canvas);
 
@@ -361,7 +368,7 @@ void KisView::setViewManager(KisViewManager *view)
 
     d->viewManager->updateGUI();
 
-    KoToolManager::instance()->switchToolRequested("KritaShape/KisToolBrush");
+    d->canvasController.toolManager()->switchToolRequested("KritaShape/KisToolBrush");
 }
 
 KisViewManager* KisView::viewManager() const
@@ -449,15 +456,10 @@ void KisView::dragEnterEvent(QDragEnterEvent *event)
           << "Formats: " << event->mimeData()->formats()
           << "Urls: " << event->mimeData()->urls()
           << "Has images: " << event->mimeData()->hasImage();
-    if (event->mimeData()->hasImage()
-            || event->mimeData()->hasUrls()
-            || event->mimeData()->hasFormat("application/x-krita-node-internal-pointer")
-            || event->mimeData()->hasFormat("krita/x-colorsetentry")
-            || event->mimeData()->hasColor()) {
-        event->accept();
 
-        // activate view if it should accept the drop
-        this->setFocus();
+    if (shouldAcceptDrag(event)) {
+        event->accept();
+        setFocus(); // activate view if it should accept the drop
     } else {
         event->ignore();
     }
@@ -465,6 +467,15 @@ void KisView::dragEnterEvent(QDragEnterEvent *event)
 
 void KisView::dropEvent(QDropEvent *event)
 {
+    dbgUI << Q_FUNC_INFO;
+    dbgUI << "\t Formats: " << event->mimeData()->formats();
+    dbgUI << "\t Urls: " << event->mimeData()->urls();
+    dbgUI << "\t Has images: " << event->mimeData()->hasImage();
+
+    if (!shouldAcceptDrag(event)) {
+        return;
+    }
+
     KisImageWSP kisimage = image();
     Q_ASSERT(kisimage);
 
@@ -476,11 +487,6 @@ void KisView::dropEvent(QDropEvent *event)
         forcedCenter = imgCursorPos;
     }
 
-    dbgUI << Q_FUNC_INFO;
-    dbgUI << "\t Formats: " << event->mimeData()->formats();
-    dbgUI << "\t Urls: " << event->mimeData()->urls();
-    dbgUI << "\t Has images: " << event->mimeData()->hasImage();
-
     if (event->mimeData()->hasFormat("application/x-krita-node-internal-pointer")) {
         KisShapeController *kritaShapeController =
                 dynamic_cast<KisShapeController*>(d->document->shapeController());
@@ -489,9 +495,9 @@ void KisView::dropEvent(QDropEvent *event)
         QList<KisNodeSP> nodes;
 
         if (forcedCenter) {
-            nodes = KisMimeData::loadNodesFastAndRecenter(*forcedCenter, event->mimeData(), kisimage, kritaShapeController, copyNode);
+            nodes = KisMimeData::loadNodesFastAndRecenter(*forcedCenter, event->mimeData(), KisMimeData::MimeFromDragAndDrop, kisimage, kritaShapeController, copyNode);
         } else {
-            nodes = KisMimeData::loadNodesFast(event->mimeData(), kisimage, kritaShapeController, copyNode);
+            nodes = KisMimeData::loadNodesFast(event->mimeData(), KisMimeData::MimeFromDragAndDrop, kisimage, kritaShapeController, copyNode);
         }
 
         Q_FOREACH (KisNodeSP node, nodes) {
@@ -507,17 +513,21 @@ void KisView::dropEvent(QDropEvent *event)
             }
         }
     } else if (event->mimeData()->hasImage() || event->mimeData()->hasUrls()) {
-        const auto *data = event->mimeData();
+        const QMimeData *mData = event->mimeData();
+
+        // Opening a window on wayland causes the clipboard to be cleared, so we need to cache all the data we may need beforehand
+        QList<QUrl> urls =  mData->urls();
+        const QImage qimage = KisClipboard::instance()->getImageWithFallback(mData, false);
 
         KisCanvasDrop dlgAction;
 
         const auto callPos = QCursor::pos();
 
-        const KisCanvasDrop::Action action = dlgAction.dropAs(*data, callPos);
+        const KisCanvasDrop::Action action = dlgAction.dropAs(*mData, callPos);
 
         if (action == KisCanvasDrop::INSERT_AS_NEW_LAYER) {
             const QPair<bool, KisClipboard::PasteFormatBehaviour> source =
-                KisClipboard::instance()->askUserForSource(data);
+                KisClipboard::instance()->askUserForSourceWithData (qimage, urls);
 
             if (!source.first) {
                 dbgUI << "Paste event cancelled";
@@ -525,7 +535,6 @@ void KisView::dropEvent(QDropEvent *event)
             }
 
             if (source.second != KisClipboard::PASTE_FORMAT_CLIP) {
-                const QList<QUrl> &urls = data->urls();
                 const auto url = std::find_if(
                     urls.constBegin(),
                     urls.constEnd(),
@@ -571,18 +580,13 @@ void KisView::dropEvent(QDropEvent *event)
                 }
             }
 
-            KisPaintDeviceSP clip =
-                KisClipboard::instance()->clipFromBoardContents(data,
-                                                                QRect(),
-                                                                true,
-                                                                -1,
-                                                                false,
-                                                                source);
-            if (clip) {
+            KisImageSP clipImage = KisClipboard::instance()->clipFromBoardContentsWithData(qimage, urls, true, -1, source);
+            if (clipImage) {
                 const auto pos = this->viewConverter()
                                      ->imageToDocument(imgCursorPos)
                                      .toPoint();
 
+                KisPaintDeviceSP clip = new KisPaintDevice(*clipImage->projection());
                 clip->moveTo(pos.x(), pos.y());
 
                 KisImportCatcher::adaptClipToImageColorSpace(clip,
@@ -603,9 +607,11 @@ void KisView::dropEvent(QDropEvent *event)
                 return;
             }
         } else if (action == KisCanvasDrop::INSERT_AS_REFERENCE_IMAGE) {
-            KisPaintDeviceSP clip =
-                KisClipboard::instance()->clipFromMimeData(data, QRect(), true);
-            if (clip) {
+
+            KisImageSP clipImage = KisClipboard::instance()->clipFromBoardContentsWithData(qimage, urls, true);
+            if (clipImage) {
+                KisPaintDeviceSP clip = new KisPaintDevice(*clipImage->projection());
+
                 KisImportCatcher::adaptClipToImageColorSpace(clip,
                                                              this->image());
 
@@ -615,8 +621,7 @@ void KisView::dropEvent(QDropEvent *event)
                                                        this);
 
                 if (reference) {
-                    if (data->hasUrls()) {
-                        const auto &urls = data->urls();
+                    if (!urls.isEmpty()) {
                         const auto url = std::find_if(urls.constBegin(), urls.constEnd(), std::mem_fn(&QUrl::isLocalFile));
                         if (url != urls.constEnd()) {
                             reference->setFilename((*url).toLocalFile());
@@ -630,7 +635,7 @@ void KisView::dropEvent(QDropEvent *event)
                     this->canvasBase()
                         ->referenceImagesDecoration()
                         ->addReferenceImage(reference);
-                    KoToolManager::instance()->switchToolRequested(
+                    d->viewManager->toolManager()->switchToolRequested(
                         "ToolReferenceImages");
                     return;
                 }
@@ -638,7 +643,7 @@ void KisView::dropEvent(QDropEvent *event)
         } else if (action != KisCanvasDrop::NONE) {
             // multiple URLs detected OR about to open a document
 
-            for (QUrl url : data->urls()) { // do copy it
+            for (QUrl url : urls) { // do copy it
                 QScopedPointer<QTemporaryFile> tmp(new QTemporaryFile());
                 tmp->setAutoRemove(true);
 
@@ -734,7 +739,7 @@ void KisView::dropEvent(QDropEvent *event)
                                 ->referenceImagesDecoration()
                                 ->addReferenceImage(reference);
 
-                            KoToolManager::instance()->switchToolRequested(
+                            d->viewManager->toolManager()->switchToolRequested(
                                 "ToolReferenceImages");
                         }
                     }
@@ -1066,15 +1071,12 @@ void KisView::dragMoveEvent(QDragMoveEvent *event)
           << "Formats: " << event->mimeData()->formats()
           << "Urls: " << event->mimeData()->urls()
           << "Has images: " << event->mimeData()->hasImage();
-    if (event->mimeData()->hasImage()
-            || event->mimeData()->hasUrls()
-            || event->mimeData()->hasFormat("application/x-krita-node-internal-pointer")
-            || event->mimeData()->hasFormat("krita/x-colorsetentry")
-            || event->mimeData()->hasColor()) {
-        return event->accept();
-    }
 
-    return event->ignore();
+    if (shouldAcceptDrag(event)) {
+        event->accept();
+    } else {
+        event->ignore();
+    }
 }
 
 KisDocument *KisView::document() const
@@ -1195,6 +1197,9 @@ bool KisView::queryClose()
             return false;
         }
     }
+
+
+    Q_EMIT sigDocumentAboutToClose((KoCanvasBase*)&d->canvas);
 
     return true;
 
@@ -1441,4 +1446,26 @@ void KisView::slotImageSizeChanged(const QPointF &oldStillPoint, const QPointF &
 void KisView::closeView()
 {
     d->subWindow->close();
+}
+
+bool KisView::shouldAcceptDrag(const QDropEvent *event) const
+{
+    const QMimeData *data = event->mimeData();
+    if (data->hasFormat(QStringLiteral("application/x-krita-node-internal-pointer"))) {
+        // Don't allow dragging layers onto their own canvas, that really only
+        // gets triggered accidentally if you're a bit sloppy about selecting
+        // or reordering layers and then you're left confused about the layer
+        // duplicates that seem to show up at random. The user can override
+        // this by explicitly holding down Ctrl if necessary. We always accept
+        // the enter event so that this works properly, otherwise we don't get
+        // any further drag events unless Ctrl was held to begin with.
+        return event->type() == QEvent::DragEnter
+            || event->keyboardModifiers().testFlag(Qt::ControlModifier)
+            || !KisMimeData::isNodeMimeDataFromSameImage(data, image());
+    } else {
+        return data->hasImage()
+            || data->hasUrls()
+            || data->hasFormat("krita/x-colorsetentry")
+            || data->hasColor();
+    }
 }

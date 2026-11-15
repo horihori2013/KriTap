@@ -11,6 +11,7 @@
 #include "kis_undo_stores.h"
 #include "kritacommand_export.h"
 #include <functional>
+#include <memory>
 
 namespace KisCommandUtils
 {
@@ -132,13 +133,50 @@ namespace KisCommandUtils
     };
 
     /**
+     * A simple helper function for monadic composition of undo commands
+     *
+     * \p parent and \p cmd commands are composed into a single CompositeCommand
+     * command. The name of the new command is inherited from \p parent.
+     *
+     * If \p parent is already a CompositeCommand, then \p cmd is just
+     * appended to the end of of it.
+     *
+     * If \p parent is nullptr, then a mere \p cmd is returned
+     *
+     * WARNIGN: neither of the commands should have a parent! We simply
+     * cannot compose a command with a parent!
+     *
+     * Usage:
+     *
+     *        \code{.cpp}
+     *
+     *        KUndo2Command *cmd = nullptr;
+     *        if (propertyXChanged) {
+     *            cmd = composeCommands(cmd, new ChangePropertyXCommand(...));
+     *        }
+     *        if (propertyYChanged) {
+     *            cmd = composeCommands(cmd, new ChangePropertyYCommand(...));
+     *        }
+     *        if (propertyZChanged) {
+     *            cmd = composeCommands(cmd, new ChangePropertyZCommand(...));
+     *        }
+     *        if (cmd) {
+     *            m_view->undoAdapter()->addCommand(cmd);
+     *        }
+     *
+     *        \endcode
+     */
+    KRITACOMMAND_EXPORT
+    KUndo2Command* composeCommands(KUndo2Command *parent, KUndo2Command *cmd);
+
+    /**
      * A simple function to merge down commands in iterative actions, like the
      * ones we use in shape manipulations. The function takes ownership of \p cmd
      * and either merges it into \p accumulatingCommand (if exists) or just
      * sets the accumulating command to that command
      */
     KRITACOMMAND_EXPORT
-    void redoAndMergeIntoAccumulatingCommand(KUndo2Command *cmd, QScopedPointer<KUndo2Command> &accumulatingCommand);
+    void redoAndMergeIntoAccumulatingCommand(KUndo2Command *cmd, std::unique_ptr<KUndo2Command> &accumulatingCommand);
 }
 
 #endif /* __KIS_COMMAND_UTILS_H */

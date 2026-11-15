@@ -6,6 +6,7 @@
 
 #include "WGColorSelectorDock.h"
 
+#include "KisDocument.h"
 #include "WGActionManager.h"
 #include "WGColorSelectorSettings.h"
 #include "WGColorPatches.h"
@@ -44,10 +45,13 @@ WGColorSelectorDock::WGColorSelectorDock()
     , m_actionManager(new WGActionManager(this))
     , m_colorTooltip(new WGColorPreviewToolTip(this))
     , m_colorModelBG(new KisVisualColorModel)
+    , m_mainWidget(new QWidget())
 {
     setWindowTitle(i18n("Wide Gamut Color Selector"));
 
-    QWidget *mainWidget = new QWidget();
+    QWidget *mainWidget = m_mainWidget;
+    mainWidget->installEventFilter(this);
+
     m_mainWidgetLayout = new QVBoxLayout(mainWidget);
     m_verticalElementsLayout = new QHBoxLayout();
     m_selectorAreaLayout = new QBoxLayout(QBoxLayout::TopToBottom);
@@ -93,9 +97,11 @@ WGColorSelectorDock::WGColorSelectorDock()
     connect(m_shadeSelector, SIGNAL(sigColorInteraction(bool)), SLOT(slotColorInteraction(bool)));
 
     // eventually it should made be a global history, not specific to any plugin
-    m_colorHistory = new KisUniqueColorSet(this);
+    m_fallbackColorHistoryModel.reset(new KisUniqueColorSet());
+    m_globalColorHistoryModel = m_fallbackColorHistoryModel.get();
+    m_documentColorHistoryModel = nullptr;
 
-    m_history = new WGColorPatches(m_displayConfig, m_colorHistory, mainWidget);
+    m_history = new WGColorPatches(m_displayConfig, m_globalColorHistoryModel, mainWidget);
     m_history->setPreset(WGColorPatches::History);
     connect(m_history, SIGNAL(sigColorChanged(KoColor)), SLOT(slotColorSelected(KoColor)));
     connect(m_history, SIGNAL(sigColorInteraction(bool)), SLOT(slotColorInteraction(bool)));
@@ -155,10 +161,10 @@ void WGColorSelectorDock::setChannelValues(const QVector4D &values)
     m_pendingFgUpdate = false;
 }
 
-void WGColorSelectorDock::leaveEvent(QEvent *event)
+KisUniqueColorSet *WGColorSelectorDock::colorHistoryModel() const
 {
-    Q_UNUSED(event)
-    m_colorTooltip->hide();
+    return m_colorHistoryFromDocument && m_documentColorHistoryModel ? m_documentColorHistoryModel
+                                                                     : m_globalColorHistoryModel;
 }
 
 void WGColorSelectorDock::setCanvas(KoCanvasBase *canvas)
@@ -177,6 +183,13 @@ void WGColorSelectorDock::setCanvas(KoCanvasBase *canvas)
     if (m_canvas) {
         KoColorDisplayRendererInterface *dri = m_canvas->displayColorConverter()->displayRendererInterface();
         KisCanvasResourceProvider *resourceProvider = m_canvas->imageView()->resourceProvider();
+
+        m_globalColorHistoryModel = resourceProvider->colorHistoryModel();
+        m_documentColorHistoryModel = m_canvas->imageView()->document()->colorHistoryModel();
+
+        m_history->setColorHistoryModel(colorHistoryModel());
+        m_actionManager->updateColorHistoryModel();
+
         m_selector->setDisplayRenderer(dri);
         m_displayConfig->setDisplayConverter(m_canvas->displayColorConverter());
         m_commonColorSet->setImage(m_canvas->image());
@@ -216,6 +229,9 @@ void WGColorSelectorDock::unsetCanvas()
     m_displayConfig->setDisplayConverter(0);
     m_selector->setDisplayRenderer(0);
     m_commonColorSet->setImage(KisImageSP());
+
+    m_documentColorHistoryModel = nullptr;
+    m_history->setColorHistoryModel(m_globalColorHistoryModel);
     m_canvas = 0;
 }
 
@@ -298,7 +314,12 @@ void WGColorSelectorDock::slotConfigurationChanged()
     m_selector->setProofColors(proofColors);
     m_displayConfig->setPreviewInPaintingCS(proofColors);
     m_shadeSelector->updateSettings();
+
+    m_colorHistoryFromDocument = cfg.get(WGConfig::colorHistoryFromDocument);
     m_history->updateSettings();
+    m_history->setColorHistoryModel(colorHistoryModel());
+    m_actionManager->updateColorHistoryModel();
+
     m_commonColors->updateSettings();
     m_commonColorSet->setAutoUpdate(cfg.get(WGConfig::commonColorsAutoUpdate));
     // Quick settings menu
@@ -424,7 +445,7 @@ void WGColorSelectorDock::slotColorInteraction(bool active)
         if (sender() == m_shadeSelector) {
             m_colorTooltip->show(m_shadeSelector);
         } else {
-            m_colorTooltip->show(this);
+            m_colorTooltip->show(m_mainWidget);
         }
     }
 }
@@ -434,7 +455,11 @@ void WGColorSelectorDock::slotFGColorUsed(const KoColor &color)
     QColor lastCol = m_displayConfig->displayConverter()->toQColor(color);
     m_colorTooltip->setLastUsedColor(lastCol);
     m_actionManager->setLastUsedColor(color);
-    m_colorHistory->addColor(color);
+    if (m_colorHistoryFromDocument) {
+        m_documentColorHistoryModel->addColor(color);
+    } else {
+        m_globalColorHistoryModel->addColor(color);
+    }
 }
 
 void WGColorSelectorDock::slotSetNewColors()
@@ -484,6 +509,18 @@ void WGColorSelectorDock::slotOpenSettings()
 void WGColorSelectorDock::slotShowGamutMaskToolbar(bool show)
 {
     m_gamutToolbar->setVisible(show);
+}
+
+bool WGColorSelectorDock::eventFilter(QObject *obj, QEvent *e)
+{
+    Q_UNUSED(obj);
+
+    // Get the leave event of the inner widget, for when the docker is borrowed and doesn't properly handle leave events
+    if (e->type() == QEvent::Leave) {
+        m_colorTooltip->hide();
+    }
+
+    return false;
 }
 
 namespace WGConfig {

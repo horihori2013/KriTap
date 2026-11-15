@@ -15,6 +15,7 @@
 
 #include <Eigen/Dense>
 
+#include "KoColorDisplayRendererInterface.h"
 #include "kis_coordinates_converter.h"
 #include "tool_transform_args.h"
 #include "transform_transaction_properties.h"
@@ -112,6 +113,8 @@ struct KisPerspectiveTransformStrategy::Private
 
     void transformIntoArgs(const Eigen::Matrix3f &t);
     QTransform transformFromArgs();
+
+    static constexpr qreal MaxPolygonVertexAngle {177.0};
 };
 
 KisPerspectiveTransformStrategy::KisPerspectiveTransformStrategy(const KisCoordinatesConverter *converter,
@@ -214,7 +217,7 @@ QCursor KisPerspectiveTransformStrategy::getCurrentCursor() const
     return cursor;
 }
 
-void KisPerspectiveTransformStrategy::paint(QPainter &gc)
+void KisPerspectiveTransformStrategy::paint(QPainter &gc, const KoColorDisplayRendererInterface *displayRendererInterface)
 {
     gc.save();
 
@@ -277,7 +280,7 @@ void KisPerspectiveTransformStrategy::paint(QPainter &gc)
     pen[0].setCosmetic(true);
     pen[1].setWidth(decorationThickness() * 2);
     pen[1].setCosmetic(true);
-    pen[1].setColor(Qt::lightGray);
+    pen[1].setColor(displayRendererInterface->convertColorToDisplayColorSpace(KoColor(Qt::lightGray, KoColorSpaceRegistry::instance()->rgb8())));
 
     for (int i = 1; i >= 0; --i) {
         gc.setPen(pen[i]);
@@ -327,8 +330,6 @@ void KisPerspectiveTransformStrategy::externalConfigChanged()
 
 bool KisPerspectiveTransformStrategy::beginPrimaryAction(const QPointF &pt)
 {
-    Q_UNUSED(pt);
-
     if (m_d->function == NONE) return false;
 
     m_d->clickPos = pt;
@@ -524,6 +525,17 @@ void KisPerspectiveTransformStrategy::continuePrimaryAction(const QPointF &mouse
         Eigen::Matrix3f B = getTransitionMatrix(m_d->dstHandlePoints);
         Eigen::Matrix3f result = B * A.inverse();
 
+        // Points in dstHandlePoints are not arranged in an organized way, so if we used it directly as a polygon it
+        // will never be considered convex
+        QPolygonF poly;
+        poly << m_d->dstHandlePoints[HANDLE_TOP_LEFT] << m_d->dstHandlePoints[HANDLE_TOP_RIGHT]
+             << m_d->dstHandlePoints[HANDLE_BOTTOM_RIGHT] << m_d->dstHandlePoints[HANDLE_BOTTOM_LEFT];
+
+        //Don't apply the handle movement if it makes the transform area not convex
+        if (!KisAlgebra2D::isPolygonTrulyConvex(poly, true, Private::MaxPolygonVertexAngle)) {
+            break;
+        }
+
         m_d->transformIntoArgs(result);
 
         break;
@@ -675,17 +687,9 @@ void KisPerspectiveTransformStrategy::Private::recalculateTransformations()
     paintingTransform = tl.inverted() * q->thumbToImageTransform() * tl * transform * viewScaleTransform;
     paintingOffset = transaction.originalTopLeft();
 
-    // check whether image is too big to be displayed or not
-    const qreal maxScale = 20.0;
-
     imageTooBig = false;
 
-    if (qAbs(currentArgs.scaleX()) > maxScale ||
-        qAbs(currentArgs.scaleY()) > maxScale) {
-
-        imageTooBig = true;
-
-    } else {
+    {
         QVector<QPointF> points;
         points << transaction.originalRect().topLeft();
         points << transaction.originalRect().topRight();
@@ -696,33 +700,15 @@ void KisPerspectiveTransformStrategy::Private::recalculateTransformations()
             points[i] = transform.map(points[i]);
         }
 
-        for (int i = 0; i < points.size(); i++) {
-            const QPointF &pt = points[i];
-            const QPointF &prev = points[(i - 1 + 4) % 4];
-            const QPointF &next = points[(i + 1) % 4];
-            const QPointF &other = points[(i + 2) % 4];
+        QPolygonF poly (points);
+        if (!KisAlgebra2D::isPolygonTrulyConvex(poly, true, Private::MaxPolygonVertexAngle)) {
+            imageTooBig = true;
+        }
 
-            QLineF l1(pt, other);
-            QLineF l2(prev, next);
-
-            QPointF intersection;
-            l1.intersects(l2, &intersection);
-
-            qreal maxDistance = kisSquareDistance(pt, other);
-
-            if (kisSquareDistance(pt, intersection) > maxDistance ||
-                kisSquareDistance(other, intersection) > maxDistance) {
-
-                imageTooBig = true;
-                break;
-            }
-
-            const qreal thresholdDistance = 0.02 * l2.length();
-
-            if (kisDistanceToLine(pt, l2) < thresholdDistance) {
-                imageTooBig = true;
-                break;
-            }
+        const QRectF transformedRect = poly.boundingRect();
+        const QRectF limitRect = KisAlgebra2D::blowRect(converter->imageRectInImagePixels(), 2.0);
+        if (!limitRect.contains(transformedRect)) {
+            imageTooBig = true;
         }
     }
 

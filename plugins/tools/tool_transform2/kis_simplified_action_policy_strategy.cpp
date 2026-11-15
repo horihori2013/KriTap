@@ -26,6 +26,7 @@ struct KisSimplifiedActionPolicyStrategy::Private
     bool sampleFromNodeModifierActive;
     bool changeSizeModifierActive;
     bool anySamplerModifierActive;
+    Qt::KeyboardModifiers modifiersAtStart;
     QPointF dragOffset;
     QPointF lastImagePos;
 };
@@ -84,6 +85,8 @@ bool KisSimplifiedActionPolicyStrategy::beginPrimaryAction(KoPointerEvent *event
     QPointF imagePos = m_d->converter->documentToImage(pos);
     m_d->lastImagePos = imagePos;
 
+    m_d->modifiersAtStart = event->modifiers();
+
     return beginPrimaryAction(imagePos);
 }
 
@@ -108,7 +111,13 @@ void KisSimplifiedActionPolicyStrategy::continuePrimaryAction(KoPointerEvent *ev
     QPointF imagePos = m_d->converter->documentToImage(pos);
     m_d->lastImagePos = imagePos;
 
-    return continuePrimaryAction(imagePos, shiftIsActive, altIsActive);
+    continuePrimaryAction(imagePos, shiftIsActive, altIsActive, m_d->modifiersAtStart == event->modifiers());
+}
+
+void KisSimplifiedActionPolicyStrategy::continuePrimaryAction(const QPointF &imagePos, bool shiftModifierActive, bool altModifierActive, bool hasOriginalModifiersSet)
+{
+    Q_UNUSED(hasOriginalModifiersSet);
+    continuePrimaryAction(imagePos, shiftModifierActive, altModifierActive);
 }
 
 void KisSimplifiedActionPolicyStrategy::hoverActionCommon(KoPointerEvent *event)
@@ -140,6 +149,9 @@ void KisSimplifiedActionPolicyStrategy::activateAlternateAction(KisTool::Alterna
     } else if (action == KisTool::SampleFgNode || action == KisTool::SampleBgNode) {
         m_d->anySamplerModifierActive = true;
         m_d->sampleFromNodeModifierActive = true;
+    } else if (action == KisTool::SampleFgGroup || action == KisTool::SampleBgGroup) {
+        m_d->anySamplerModifierActive = true;
+        m_d->sampleFromNodeModifierActive = false;
     } else if (action == KisTool::SampleFgImage || action == KisTool::SampleBgImage) {
         m_d->anySamplerModifierActive = true;
         m_d->sampleFromNodeModifierActive = false;
@@ -153,6 +165,7 @@ void KisSimplifiedActionPolicyStrategy::deactivateAlternateAction(KisTool::Alter
     if (action == KisTool::ChangeSize) {
         m_d->changeSizeModifierActive = false;
     } else if (action == KisTool::SampleFgNode || action == KisTool::SampleBgNode ||
+               action == KisTool::SampleFgGroup || action == KisTool::SampleBgGroup ||
                action == KisTool::SampleFgImage || action == KisTool::SampleBgImage) {
 
         m_d->anySamplerModifierActive = false;
@@ -170,6 +183,8 @@ bool KisSimplifiedActionPolicyStrategy::beginAlternateAction(KoPointerEvent *eve
     QPointF imagePos = m_d->converter->documentToImage(pos);
     m_d->lastImagePos = imagePos;
 
+    m_d->modifiersAtStart = event->modifiers();
+
     return beginPrimaryAction(imagePos);
 }
 
@@ -184,7 +199,7 @@ void KisSimplifiedActionPolicyStrategy::continueAlternateAction(KoPointerEvent *
     QPointF imagePos = m_d->converter->documentToImage(pos);
     m_d->lastImagePos = imagePos;
 
-    continuePrimaryAction(imagePos, m_d->changeSizeModifierActive, altIsActive);
+    continuePrimaryAction(imagePos, m_d->changeSizeModifierActive, altIsActive, m_d->modifiersAtStart == event->modifiers());
 }
 
 bool KisSimplifiedActionPolicyStrategy::endAlternateAction(KoPointerEvent *event, KisTool::AlternateAction action)

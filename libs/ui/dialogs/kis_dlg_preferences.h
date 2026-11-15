@@ -18,8 +18,10 @@
 #include <kpagedialog.h>
 #include <kis_config.h>
 
+#include "kis_cie_tongue_widget.h"
 #include "kis_global.h"
 #include <KisSqueezedComboBox.h>
+#include <KisScreenMigrationTracker.h>
 
 #include "ui_wdggeneralsettings.h"
 #include "ui_wdgdisplaysettings.h"
@@ -54,7 +56,7 @@ public:
     }
 };
 
-class GeneralTab : public WdgGeneralSettings
+class KRITAUI_EXPORT GeneralTab : public WdgGeneralSettings
 {
     Q_OBJECT
 
@@ -66,8 +68,17 @@ public:
     OutlineStyle outlineStyle();
     CursorStyle eraserCursorStyle();
     OutlineStyle eraserOutlineStyle();
+    KisConfig::ColorSamplerPreviewStyle colorSamplerPreviewStyle() const;
+    int colorSamplerPreviewCircleDiameter() const;
+    qreal colorSamplerPreviewCircleThickness() const;
+    bool colorSamplerPreviewCircleOutlineEnabled() const;
+    bool colorSamplerPreviewCircleExtraCirclesEnabled() const;
+    qreal colorSamplerZoomPreviewScale() const;
+    bool colorSamplerZoomPreviewEnabled() const;
+    KisConfig::ColorSamplerPreviewCirclePosition colorSamplerPreviewCirclePosition() const;
 
     KisConfig::SessionOnStartup sessionOnStartup() const;
+    KisConfig::IconsInMenu iconsInMenu() const;
     bool saveSessionOnQuit() const;
 
     bool showRootLayer();
@@ -104,6 +115,10 @@ public:
     QString exportMimeType();
     int forcedFontDpi();
 
+    static void setColorSamplerPreviewStyleItems(QComboBox *cmb);
+    static void setColorSamplerPreviewStyleIndexByValue(QComboBox *cmb, KisConfig::ColorSamplerPreviewStyle style);
+    static KisConfig::ColorSamplerPreviewStyle getColorSamplerPreviewStyleValue(const QComboBox *cmb);
+
 private Q_SLOTS:
     void getBackgroundImage();
     void clearBackgroundImage();
@@ -111,6 +126,13 @@ private Q_SLOTS:
     void enableSubWindowOptions(int);
     void updateTouchPressureSensitivityEnabled(int);
     void showAdvancedCumulativeUndoSettings();
+
+    void colorSamplePreviewStyleChanged(int index);
+    void colorSamplePreviewSizeChanged(int value);
+    void colorSamplePreviewThicknessChanged(qreal value);
+    void colorSamplePreviewOutlineEnabledChanged(int value);
+
+    static void setButtonGroupEnabled(const QButtonGroup& buttonGroup, bool value);
 
 public:
     QButtonGroup m_pasteFormatGroup;
@@ -180,18 +202,20 @@ public:
 
     ColorSettingsTab(QWidget *parent = 0, const char  *name = 0);
 
+    enum PreferredSpaceType {
+        PreferredSpace,
+        MasteringSpace
+    };
+
 private Q_SLOTS:
 
     void refillMonitorProfiles(const KoID & s);
     void installProfile();
-    void toggleAllowMonitorProfileSelection(bool useSystemProfile);
     void toggleUseDefaultColorSpace(bool useDefColorSpace);
 
-    void updateProofingWidgets();
-    void proofingDisplayModeUpdated();
-    void proofingConversionIntentUpdated();
-    void proofingDisplayIntentUpdated();
     void updateProofingDisplayInfo();
+
+    void updatePreferredSpaceGraphic();
 
 public:
     void setDefault();
@@ -200,12 +224,17 @@ public:
     QList<QLabel*> m_monitorProfileLabels;
     QList<KisSqueezedComboBox*> m_monitorProfileWidgets;
     QScopedPointer<KisProofingConfigModel> m_proofModel;
+    QScopedPointer<KisScreenMigrationTracker> m_screenMigrationTracker;
 
     using CanvasSurfaceMode = KisConfig::CanvasSurfaceMode;
+    using CanvasSurfaceBitDepthMode = KisConfig::CanvasSurfaceBitDepthMode;
 
     bool m_colorManagedByOS {false};
     QPointer<QCheckBox> m_chkEnableCanvasColorSpaceManagement;
     QPointer<KisSqueezedComboBox> m_canvasSurfaceColorSpace;
+    QPointer<KisSqueezedComboBox> m_canvasSurfaceBitDepth;
+    QPointer<KisCIETongueWidget> m_preferredSpaceGraphic;
+    QButtonGroup m_preferredSpaceGraphicMode;
 };
 
 //=======================
@@ -365,6 +394,8 @@ public:
     void load();
     void save();
     void setDefault();
+protected Q_SLOTS:
+    void slotSelectorTypeChanged(int index);
 };
 
 //=======================
@@ -378,15 +409,60 @@ class KisDlgPreferences : public KPageDialog
     Q_OBJECT
 
 public:
+    enum Page {
+        General,
+        Shortucts,
+        Color,
+        Performance,
+        Display,
+        Tablet,
+        Fullscreen,
+        Input,
+        PopupPalette,
+    };
+    enum GeneralTabs {
+        File,
+        Pasting,
+        Window,
+        Cursor,
+        Tools,
+        Animation,
+        Resources,
+        MiscellaneousGeneral
+    };
+    enum ColorTabs {
+        GeneralColor,
+        DisplayTab,
+        SoftProofing
+    };
+    enum DisplayTabs {
+        CanvasAcceleration,
+        HDR,
+        CanvasDecoration,
+        MiscellaneousDisplay
+    };
+    enum PerformaceTabs {
+        GeneralPerformance,
+        Advanced,
+        AnimationCache,
+        InstantPreview,
+    };
+
+    struct PageDesc {
+        Page page;
+        int tab;
+    };
 
     KisDlgPreferences(QWidget *parent = 0, const char *name = 0);
     ~KisDlgPreferences() override;
 
-    bool editPreferences();
+    bool editPreferences(std::optional<PageDesc> page);
 
     void showEvent(QShowEvent *event) override;
 
 private:
+    KPageWidgetItem* getPage(Page page_enum);
+    void switchTab (PageDesc tab);
 
     GeneralTab *m_general;
     ShortcutSettingsTab  *m_shortcutSettings;

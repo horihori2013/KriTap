@@ -168,6 +168,15 @@ bool KisTagFilterResourceProxyModel::addResource(KoResourceSP resource, const QS
     return false;
 }
 
+bool KisTagFilterResourceProxyModel::addResourceDeduplicateFileName(KoResourceSP resource, const QString &storageId)
+{
+    KisAbstractResourceModel *source = dynamic_cast<KisAbstractResourceModel*>(sourceModel());
+    if (source) {
+        return source->addResourceDeduplicateFileName(resource, storageId);
+    }
+    return false;
+}
+
 bool KisTagFilterResourceProxyModel::updateResource(KoResourceSP resource)
 {
     KisAbstractResourceModel *source = dynamic_cast<KisAbstractResourceModel*>(sourceModel());
@@ -394,6 +403,7 @@ bool KisTagFilterResourceProxyModel::lessThan(const QModelIndex &source_left, co
 {
     QString nameLeft = sourceModel()->data(source_left, Qt::UserRole + KisAbstractResourceModel::Name).toString();
     QString nameRight = sourceModel()->data(source_right, Qt::UserRole + KisAbstractResourceModel::Name).toString();
-    return nameLeft.toLower() < nameRight.toLower();
+
+    return nameLeft.compare(nameRight, Qt::CaseInsensitive) < 0;
 }
 

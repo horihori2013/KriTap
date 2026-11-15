@@ -23,16 +23,16 @@ public:
     enum Shortcuts {
         ZoomModeShortcut, ///< Toggle zoom mode.
         DiscreteZoomModeShortcut, ///< Toggle discrete zoom mode
-        ZoomInShortcut, ///< Zoom in by a fixed amount.
-        ZoomOutShortcut, ///< Zoom out by a fixed amount.
+        ZoomInToCursorShortcut, ///< Zoom in to cursor
+        ZoomOutFromCursorShortcut, ///< Zoom out from cursor
         Zoom100PctShortcut, ///< Reset zoom to 100%.
         FitToViewShortcut, ///< Zoom fit to page.
         FitToWidthShortcut, ///< Zoom fit to width.
         RelativeZoomModeShortcut, ///< Toggle zoom mode relative to cursor
         RelativeDiscreteZoomModeShortcut, ///< Toggle discrete zoom mode relative to cursor
         FitToHeightShortcut, ///< Zoom fit to height.
-        ZoomInToCursorShortcut, ///< Zoom in to cursor
-        ZoomOutFromCursorShortcut ///< Zoom out from cursor
+        ZoomInShortcut, ///< Zoom in by a fixed amount.
+        ZoomOutShortcut, ///< Zoom out by a fixed amount.
     };
     explicit KisZoomAction();
     ~KisZoomAction() override;
@@ -43,6 +43,7 @@ public:
     void deactivate(int shortcut) override;
 
     void begin(int shortcut, QEvent *event = 0) override;
+    void end(QEvent *event) override;
     void inputEvent(QEvent* event) override;
     void cursorMovedAbsolute(const QPointF &startPos, const QPointF &pos) override;
 

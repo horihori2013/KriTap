@@ -31,6 +31,7 @@ struct KisVisualColorModel::Private
     const KoColorSpace *currentCS {0};
     bool exposureSupported {false};
     bool isRGBA {false};
+    bool isLABlike {false};
     bool isLinear {false};
     bool applyGamma {false};
     bool allowUpdates {true};
@@ -82,8 +83,7 @@ void KisVisualColorModel::slotSetColorSpace(const KoColorSpace *cs)
 
         // PQ color space is not very suitable for color picking, substitute with linear one
         if (cs->colorModelId() == RGBAColorModelID
-                && KoColorSpaceRegistry::instance()->p2020PQProfile()
-                && cs->profile()->uniqueId() == KoColorSpaceRegistry::instance()->p2020PQProfile()->uniqueId()) {
+                && cs->profile()->getTransferCharacteristics() == TRC_ITU_R_BT_2100_0_PQ) {
 
             csNew = KoColorSpaceRegistry::instance()->
                     colorSpace(RGBAColorModelID.id(), Float32BitsColorDepthID.id(),
@@ -250,10 +250,16 @@ KoColor KisVisualColorModel::convertChannelValuesToKoColor(const QVector4D &valu
                 baseValues[i] = pow(baseValues[i], 2.2);
             }
         }
+    } else if (m_d->model != ColorModel::Channel && m_d->isLABlike) {
+        QVector<qreal> tempVec({baseValues[0], baseValues[1], baseValues[2]});
+        LCHToLab(values.z(), values.y(), values.x(), &tempVec[0], &tempVec[1], &tempVec[2]);
+        baseValues = QVector4D(tempVec[0], tempVec[1], tempVec[2], 0);
     }
 
     if (m_d->exposureSupported) {
-        baseValues *= m_d->channelMaxValues;
+        for (int i = 0; i < m_d->colorChannelCount; i++) {
+            baseValues[i] *= m_d->channelMaxValues[i];
+        }
     }
 
     for (int i=0; i<m_d->colorChannelCount; i++) {
@@ -281,7 +287,9 @@ QVector4D KisVisualColorModel::convertKoColorToChannelValues(KoColor c) const
     }
 
     if (m_d->exposureSupported) {
-        channelValuesDisplay /= m_d->channelMaxValues;
+        for (int i = 0; i < m_d->colorChannelCount; i++) {
+            channelValuesDisplay[i] /= m_d->channelMaxValues[i];
+        }
     }
     if (m_d->model != ColorModel::Channel && m_d->isRGBA) {
         if (m_d->applyGamma) {
@@ -318,6 +326,17 @@ QVector4D KisVisualColorModel::convertKoColorToChannelValues(KoColor c) const
             coordinates = QVector4D(hsy[0], hsy[1], hsy[2], 0.f);
         }
         // if we couldn't determine a hue, keep last value
+        if (coordinates[0] < 0) {
+            coordinates[0] = m_d->channelValues[0];
+        }
+        for (int i=0; i<3; i++) {
+            coordinates[i] = qBound(0.f, coordinates[i], 1.f);
+        }
+    } else if (m_d->model != ColorModel::Channel && m_d->isLABlike) {
+        qreal lch[3];
+        LabToLCH(channelValuesDisplay[0], channelValuesDisplay[1], channelValuesDisplay[2], &lch[0], &lch[1], &lch[2]);
+        coordinates = QVector4D(lch[2], lch[1], lch[0], 0.f);
+
         if (coordinates[0] < 0) {
             coordinates[0] = m_d->channelValues[0];
         }
@@ -410,6 +429,7 @@ void KisVisualColorModel::loadColorSpace(const KoColorSpace *cs)
         m_d->exposureSupported = false;
     }
     m_d->isRGBA = (cs->colorModelId() == RGBAColorModelID);
+    m_d->isLABlike = (cs->colorModelId() == LABAColorModelID || cs->colorModelId() == YCbCrAColorModelID);
 
     const KoColorProfile *profile = cs->profile();
     m_d->isLinear = (profile && profile->isLinear());
@@ -420,6 +440,8 @@ void KisVisualColorModel::loadColorSpace(const KoColorSpace *cs)
         // Maybe using the explicitly set values of the Advanced Color Selector is better?
         QVector <qreal> luma = cs->lumaCoefficients();
         memcpy(m_d->lumaRGB, luma.constData(), 3*sizeof(qreal));
+        m_d->model = m_d->modelRGB;
+    } else if (m_d->isLABlike) {
         m_d->model = m_d->modelRGB;
     } else {
         m_d->model = KisVisualColorModel::Channel;

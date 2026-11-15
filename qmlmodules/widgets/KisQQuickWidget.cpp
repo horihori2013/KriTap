@@ -9,6 +9,7 @@
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QQuickItem>
 #include <QQmlFileSelector>
 #include <QFileSelector>
 
@@ -20,7 +21,7 @@
 
 KisQQuickWidget::KisQQuickWidget(QWidget *parent): QQuickWidget(parent)
 {
-#if !defined(Q_OS_MACOS) || QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#if !defined(Q_OS_MACOS)
     QSurfaceFormat format;
 
     {
@@ -70,6 +71,12 @@ KisQQuickWidget::KisQQuickWidget(QWidget *parent): QQuickWidget(parent)
 #elif QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     extraSelectors << "qt5";
 #endif
+    /**
+     * WARNING: The following selector is *only* for KisQQuickWidget. Do not
+     * copy it to other engines.
+     */
+    extraSelectors << "qquickwidget";
+
     selector->setExtraSelectors(extraSelectors);
 
 
@@ -85,7 +92,37 @@ KisQQuickWidget::~KisQQuickWidget()
     setParent(nullptr);
 }
 
+void KisQQuickWidget::connectMinimumHeightToRootObject()
+{
+    if (rootObject()) {
+        connect(rootObject(), SIGNAL(implicitHeightChanged()), this, SLOT(setMinimumHeightFromRoot()));
+        setMinimumHeightFromRoot();
+    }
+}
+
+void KisQQuickWidget::connectMinimumWidthToRootObject()
+{
+    if (rootObject()) {
+        connect(rootObject(), SIGNAL(implicitWidthChanged()), this, SLOT(setMinimumWidthFromRoot()));
+        setMinimumWidthFromRoot();
+    }
+}
+
 void KisQQuickWidget::updatePaletteFromConfig()
 {
     setClearColor(palette().window().color());
+}
+
+void KisQQuickWidget::setMinimumHeightFromRoot()
+{
+    if (rootObject()) {
+        setMinimumHeight(rootObject()->implicitHeight());
+    }
+}
+
+void KisQQuickWidget::setMinimumWidthFromRoot()
+{
+    if (rootObject()) {
+        setMinimumWidth(rootObject()->implicitWidth());
+    }
 }

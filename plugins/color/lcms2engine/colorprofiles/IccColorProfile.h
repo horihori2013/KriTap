@@ -11,12 +11,15 @@
 #include "KoColorProfile.h"
 #include "KoChannelInfo.h"
 
+#include "kritalcmsengine_export.h"
+
 class LcmsColorProfileContainer;
+struct KoColorProfileQuery;
 
 /**
  * This class contains an ICC color profile.
  */
-class IccColorProfile : public KoColorProfile
+class KRITALCMSENGINE_EXPORT IccColorProfile : public KoColorProfile
 {
 public:
 
@@ -54,24 +57,28 @@ public:
         virtual QString copyright() const = 0;
         virtual bool valid() const = 0;
         virtual bool isSuitableForOutput() const = 0;
+        virtual bool isSuitableForInput() const = 0;
+        virtual bool isSuitableForWorkspace() const = 0;
         virtual bool isSuitableForPrinting() const = 0;
         virtual bool isSuitableForDisplay() const = 0;
         virtual bool hasColorants() const = 0;
-        virtual QVector <double> getColorantsXYZ() const = 0;
-        virtual QVector <double> getColorantsxyY() const = 0;
-        virtual QVector <double> getWhitePointXYZ() const = 0;
-        virtual QVector <double> getWhitePointxyY() const = 0;
+        virtual QVector <KoColorimetryUtils::XYZ> getColorantsXYZ() const = 0;
+        virtual QVector <KoColorimetryUtils::xyY> getColorantsxyY() const = 0;
+        virtual std::optional<double> hdrReferenceWhite() const = 0;
+        virtual KoColorimetryUtils::XYZ getWhitePointXYZ() const = 0;
+        virtual KoColorimetryUtils::xyY getWhitePointxyY() const = 0;
         virtual QVector <double> getEstimatedTRC() const = 0;
         virtual bool compareTRC(TransferCharacteristics characteristics, float error) const = 0;
         virtual QByteArray getProfileUniqueId() const = 0;
+        virtual bool hasCicpValues() const = 0;
+        virtual ColorPrimaries cicpPrimaries() const = 0;
+        virtual TransferCharacteristics cicpTransfer() const = 0;
     };
 public:
 
     explicit IccColorProfile(const QString &fileName = QString());
     explicit IccColorProfile(const QByteArray &rawData);
-    explicit IccColorProfile(const QVector<double> &colorants,
-                             const ColorPrimaries colorPrimariesType = PRIMARIES_UNSPECIFIED,
-                             const TransferCharacteristics transferFunction = TRC_LINEAR);
+    explicit IccColorProfile(const KoColorProfileQuery &query);
     IccColorProfile(const IccColorProfile &rhs);
     ~IccColorProfile() override;
 
@@ -88,6 +95,8 @@ public:
     float version() const override;
     QString colorModelID() const override;
     bool isSuitableForOutput() const override;
+    bool isSuitableForInput() const override;
+    bool isSuitableForWorkspace() const override;
     bool isSuitableForPrinting() const override;
     bool isSuitableForDisplay() const override;
     bool supportsPerceptual() const override;
@@ -97,10 +106,11 @@ public:
     bool hasColorants() const override;
     bool hasTRC() const override;
     bool isLinear() const override;
-    QVector <qreal> getColorantsXYZ() const override;
-    QVector <qreal> getColorantsxyY() const override;
-    QVector <qreal> getWhitePointXYZ() const override;
-    QVector <qreal> getWhitePointxyY() const override;
+    QVector <KoColorimetryUtils::XYZ> getColorantsXYZ() const override;
+    QVector <KoColorimetryUtils::xyY> getColorantsxyY() const override;
+    KoColorimetryUtils::XYZ getWhitePointXYZ() const override;
+    KoColorimetryUtils::xyY getWhitePointxyY() const override;
+    std::optional<double> hdrReferenceWhite() const override;
     QVector <qreal> getEstimatedTRC() const override;
     bool compareTRC(TransferCharacteristics characteristics, float error) const override;
     void linearizeFloatValue(QVector <qreal> & Value) const override;

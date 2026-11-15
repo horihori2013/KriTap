@@ -84,12 +84,10 @@ void KisZoomManager::setup(KisKActionCollection * actionCollection)
 
     m_horizontalRuler = new KoRuler(m_view, Qt::Horizontal, m_zoomHandler);
     m_horizontalRuler->setShowMousePosition(true);
-    m_horizontalRuler->createGuideToolConnection(m_view->canvasBase());
     m_horizontalRuler->setVisible(false); // this prevents the rulers from flashing on to off when a new document is created
 
     m_verticalRuler = new KoRuler(m_view, Qt::Vertical, m_zoomHandler);
     m_verticalRuler->setShowMousePosition(true);
-    m_verticalRuler->createGuideToolConnection(m_view->canvasBase());
     m_verticalRuler->setVisible(false);
 
 
@@ -252,10 +250,9 @@ void KisZoomManager::slotUpdateGuiAfterZoomChange()
 
     if (m_view->viewManager()) {
         m_view->viewManager()->
-                showFloatingMessage(
+                showFloatingZoomMessage(
                     i18nc("floating message about zoom", "Zoom: %1 %",
-                          KritaUtils::prettyFormatReal(humanZoom)),
-                    QIcon(), 500, KisFloatingMessage::Low, Qt::AlignCenter);
+                          KritaUtils::prettyFormatReal(humanZoom)));
     }
 
     updateCurrentZoomResource();

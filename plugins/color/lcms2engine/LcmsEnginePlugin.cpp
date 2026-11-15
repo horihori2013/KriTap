@@ -24,6 +24,7 @@
 #include <kis_debug.h>
 
 #include "IccColorSpaceEngine.h"
+#include <KoColorProfileQuery.h>
 #include "colorprofiles/LcmsColorProfileContainer.h"
 
 #include "colorspaces/cmyk_u8/CmykU8ColorSpace.h"
@@ -49,8 +50,6 @@
 #include "colorspaces/ycbcr_u8/YCbCrU8ColorSpace.h"
 #include "colorspaces/ycbcr_u16/YCbCrU16ColorSpace.h"
 #include "colorspaces/ycbcr_f32/YCbCrF32ColorSpace.h"
-
-#include "LcmsRGBP2020PQColorSpace.h"
 
 #include <KoConfig.h>
 
@@ -167,14 +166,34 @@ LcmsEnginePlugin::LcmsEnginePlugin(QObject *parent, const QVariantList &)
     KoColorProfile *rgbProfile = LcmsColorProfileContainer::createFromLcmsProfile(cmsCreate_sRGBProfile());
     registry->addProfile(rgbProfile);
 
-    registry->add(new LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbU8ColorSpaceFactory>());
-    registry->add(new LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbU16ColorSpaceFactory>());
-#ifdef HAVE_LCMS24
-#ifdef HAVE_OPENEXR
-    registry->add(new LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbF16ColorSpaceFactory>());
-#endif
-#endif
-    registry->add(new LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbF32ColorSpaceFactory>());
+    KoColorProfileQuery query(PRIMARIES_ITU_R_BT_2020_2_AND_2100_0, TRC_ITU_R_BT_2100_0_PQ);
+    query.hdrReferenceWhite = std::make_optional(203.0);
+
+    KoColorProfile *rec2100pq203nits = new IccColorProfile(query);
+    registry->addProfile(rec2100pq203nits);
+
+    query.hdrReferenceWhite = std::make_optional(80.0);
+    KoColorProfile *rec2100pq80nits = new IccColorProfile(query);
+    registry->addProfile(rec2100pq80nits);
+
+    /**
+     * By default we remap the legacy HDR profile into the new Rec2020PQ
+     * profile with CICP values. This profile will also have CRWL tag set
+     * to the official 203 nits. The legacy HDR profile loaded from older
+     * .kra files will have a different mapping to map to 80 nits used in
+     * Krita previously.
+     */
+    const QString legacyRec2020PQProfileName = "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF";
+    registry->addProfileAlias(legacyRec2020PQProfileName, rec2100pq203nits->name());
+
+    registry->add(new RgbU8ColorSpaceFactory());
+    registry->add(new RgbU16ColorSpaceFactory());
+    #ifdef HAVE_LCMS24
+    #ifdef HAVE_OPENEXR
+        registry->add(new RgbF16ColorSpaceFactory());
+    #endif
+    #endif
+    registry->add(new RgbF32ColorSpaceFactory());
 
     KoHistogramProducerFactoryRegistry::instance()->add(
         new KoBasicHistogramProducerFactory<KoBasicU8HistogramProducer>

@@ -16,14 +16,21 @@ set (SvgTextTool_SRCS
     SvgTextInsertRichCommand.cpp
     SvgTextRemoveCommand.cpp
     SvgTextMergePropertiesRangeCommand.cpp
-    SvgRichTextCtrl.cpp
     SvgTextEditor.cpp
     SvgTextCursor.cpp
     SvgTextTool.cpp
     SvgTextToolFactory.cpp
     SvgTextShapeManagerBlocker.cpp
-    SvgConvertTextTypeCommand.cpp
     SvgTextShortCuts.cpp
+    SvgTextToolOptionsData.cpp
+    SvgTextToolOptionsModel.cpp
+    SvgTextToolOptionsManager.cpp
+    SvgTextChangeTransformsOnRange.cpp
+    SvgTextTypeSettingStrategy.cpp
+    SvgTextRemoveTransformsFromRange.cpp
+    SvgChangeTextPathInfoStrategy.cpp
+    SvgTextOnPathDecorationHelper.cpp
+    SvgChangeTextPaddingMarginStrategy.cpp
 
     glyphpalette/GlyphPaletteDialog.cpp
     glyphpalette/GlyphPaletteProxyModel.cpp
@@ -32,7 +39,6 @@ set (SvgTextTool_SRCS
 
 ki18n_wrap_ui(SvgTextTool_SRCS 
     WdgSvgTextEditor.ui
-    WdgSvgTextOptionWidget.ui
     WdgSvgTextSettings.ui
 )
 

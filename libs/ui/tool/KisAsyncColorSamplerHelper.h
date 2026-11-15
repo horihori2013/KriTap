@@ -12,9 +12,10 @@
 #include <QScopedPointer>
 #include <QObject>
 
-#include "kis_types.h"
+#include <kis_tool_utils.h>
 
 class QPainter;
+class QPainterPath;
 class KoViewConverter;
 class KisStrokesFacade;
 class KisCanvas2;
@@ -29,7 +30,7 @@ public:
 
     bool isActive() const;
 
-    void activate(bool sampleCurrentLayer, bool pickFgColor);
+    void activate(KisToolUtils::ColorSamplerSource sampleSource, bool pickFgColor);
     void deactivate();
 
     void startAction(const QPointF &docPoint, int radius, int blend);
@@ -39,7 +40,7 @@ public:
     QRectF colorPreviewDocRect(const QPointF &docPoint);
     void paint(QPainter &gc, const KoViewConverter &converter);
 
-    void updateCursor(bool sampleCurrentLayer, bool pickFgColor);
+    void updateCursor(KisToolUtils::ColorSamplerSource sampleSource, bool pickFgColor);
 
     void setUpdateGlobalColor(bool value);
     bool updateGlobalColor() const;
@@ -73,8 +74,20 @@ private Q_SLOTS:
     void activateDelayedPreview();
     void slotAddSamplingJob(const QPointF &docPoint);
     void slotColorSamplingFinished(const KoColor &rawColor);
+    void slotUpdateBgColor();
+    void slotCanvasZoomPreviewUpdated(const QImage &canvasImage, QRect canvasRect);
 
 private:
+    void activatePreview();
+    void paintRectangle(QPainter &gc, const QRectF &viewRectF, const QColor &currentColor, const QColor &baseColor);
+    void paintCircle(QPainter &gc, const QRectF &viewRectF, const QColor &currentColor, const QColor &baseColor);
+
+    void prepareZoomPreview(const QRectF &docRect);
+
+    void paintCircleCrosshair(QPainter &gc, const QRectF &viewRectF, const QColor &currentColor);
+    void paintCircleCanvasPreview(QPainter &gc, const QRectF &viewRectF, const QPainterPath &clip);
+    void paintCircleReferenceImagePreview(QPainter &gc, const QRectF &viewRectF, const QPainterPath &clip);
+
     struct Private;
     QScopedPointer<Private> m_d;
 };

@@ -10,7 +10,6 @@
 #include "KisDlgImportVideoAnimation.h"
 
 #include <QStandardPaths>
-#include <QRegExp>
 #include <QtMath>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -18,6 +17,7 @@
 
 #include <KFormat>
 
+#include "KoColorProfileQuery.h"
 #include "KoFileDialog.h"
 
 #include <KisDocument.h>
@@ -263,7 +263,7 @@ RenderedFrames KisDlgImportVideoAnimation::renderFrames(const QDir& directory)
 
         QScopedPointer<KisFFMpegWrapper> ffmpeg(new KisFFMpegWrapper(this));
         frameTimeList = {0}; // We always have a frame 0 here...
-        connect(ffmpeg.data(), &KisFFMpegWrapper::sigReadSTDOUT, [&](QByteArray arr) {
+        connect(ffmpeg.data(), &KisFFMpegWrapper::sigReadSTDOUT, this, [&](QByteArray arr) {
             QString out = QString(arr);
 
             QStringList integerOuts = out.split("\n", Qt::SkipEmptyParts);
@@ -301,7 +301,7 @@ QStringList KisDlgImportVideoAnimation::documentInfo() {
     QString profileColorSpace = RGBAColorModelID.id();
     QString profileName = KoColorSpaceRegistry::instance()->p709SRGBProfile()->name();
     if (m_videoInfo.colorTransfer != TRC_UNSPECIFIED && m_videoInfo.colorPrimaries != PRIMARIES_UNSPECIFIED) {
-        const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(QVector<double>(), m_videoInfo.colorPrimaries, m_videoInfo.colorTransfer);
+        const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(KoColorProfileQuery(m_videoInfo.colorPrimaries, m_videoInfo.colorTransfer));
         profileName = profile->name();
         profileColorSpace = profile->colorModelID();
     }

@@ -5,6 +5,7 @@
  *  SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include "KoColorDisplayRendererInterface.h"
 #define GL_GLEXT_PROTOTYPES
 
 #include "opengl/KisOpenGLCanvasRenderer.h"
@@ -14,7 +15,6 @@
 #include "canvas/kis_canvas2.h"
 #include "canvas/kis_coordinates_converter.h"
 #include "canvas/kis_display_filter.h"
-#include "canvas/kis_display_color_converter.h"
 #include "canvas/kis_canvas_widget_base.h"
 #include "KisOpenGLModeProber.h"
 #include "kis_canvas_resource_provider.h"
@@ -101,6 +101,7 @@ public:
     // Stores data for drawing tool outlines
     QOpenGLVertexArrayObject outlineVAO;
     QOpenGLBuffer lineVertexBuffer;
+    QVector<QVector3D> lineVerticesStagingBuffer = {};
 
     QVector3D vertices[6];
     QVector2D texCoords[6];
@@ -142,21 +143,22 @@ public:
 
 KisOpenGLCanvasRenderer::KisOpenGLCanvasRenderer(CanvasBridge *canvasBridge,
                                                  KisImageWSP image,
-                                                 KisDisplayColorConverter *colorConverter)
+                                                 const KisDisplayConfig &displayConfig,
+                                                 QSharedPointer<KisDisplayFilter> displayFilter)
     : d(new Private())
 {
     d->canvasBridge = canvasBridge;
 
-    const KisDisplayConfig config = colorConverter->openGLCanvasSurfaceDisplayConfig();
+    const KisDisplayConfig &config = displayConfig;
 
     d->openGLImageTextures =
-            KisOpenGLImageTextures::getImageTextures(image,
-                                                     config.profile,
-                                                     config.intent,
-                                                     config.conversionFlags);
+            KisOpenGLImageTextures::createImageTextures(image,
+                                                        config.profile,
+                                                        config.intent,
+                                                        config.conversionFlags);
 
 
-    setDisplayFilterImpl(colorConverter->displayFilter(), true);
+    setDisplayFilterImpl(displayFilter, true);
 }
 
 KisOpenGLCanvasRenderer::~KisOpenGLCanvasRenderer()
@@ -199,7 +201,7 @@ void KisOpenGLCanvasRenderer::setDisplayFilterImpl(QSharedPointer<KisDisplayFilt
     bool needsInternalColorManagement =
             !displayFilter || displayFilter->useInternalColorManagement();
 
-    bool needsFullRefresh = d->openGLImageTextures->setInternalColorManagementActive(needsInternalColorManagement);
+    bool needsFullRefresh = d->openGLImageTextures->setInternalColorManagementActive(needsInternalColorManagement, initializing);
 
     d->displayFilter = displayFilter;
 
@@ -350,8 +352,9 @@ void KisOpenGLCanvasRenderer::resizeGL(int width, int height)
         int viewportWidth = static_cast<int>(width * devicePixelRatioF());
         int viewportHeight = static_cast<int>(height * devicePixelRatioF());
 
-        // we expect the size to be adjusted in the converter at the higher
-        // level of hierarchy
+        // We expect the size to be adjusted in the converter at the higher
+        // level of hierarchy. It happens in KisCanvasControllerWidget, which
+        // then explicitly resizes the canvas widget.
         KIS_SAFE_ASSERT_RECOVER_NOOP(QSize(viewportWidth, viewportHeight) == coordinatesConverter()->viewportDevicePixelSize());
     }
 
@@ -360,9 +363,7 @@ void KisOpenGLCanvasRenderer::resizeGL(int width, int height)
 
     if (KisOpenGL::useFBOForToolOutlineRendering()) {
         QOpenGLFramebufferObjectFormat format;
-        if (KisOpenGLModeProber::instance()->useHDRMode()) {
-            format.setInternalTextureFormat(GL_RGBA16F);
-        }
+        format.setInternalTextureFormat(d->canvasBridge->internalTextureFormat());
         d->canvasFBO.reset(new QOpenGLFramebufferObject(d->viewportDevicePixelSize, format));
     }
 }
@@ -419,7 +420,7 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
                 QVector4D(d->cursorColor.redF(), d->cursorColor.greenF(), d->cursorColor.blueF(), 1.0f));
 
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_ONE, GL_SRC_COLOR, GL_ONE, GL_ONE);
+    glBlendFuncSeparate(GL_ONE, GL_SRC_COLOR, GL_ZERO, GL_ONE);
     glBlendEquationSeparate(GL_FUNC_SUBTRACT, GL_FUNC_ADD);
 
 
@@ -435,7 +436,6 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
         d->lineVertexBuffer.bind();
     }
 
-    QVector<QVector3D> verticesBuffer;
 
     if (thickness > 1) {
         // Because glLineWidth is not supported on all versions of OpenGL (or rather,
@@ -453,7 +453,8 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
             }
 
             int triangleCount = 0;
-            verticesBuffer.clear();
+            d->lineVerticesStagingBuffer.clear();
+            d->lineVerticesStagingBuffer.reserve((polygon.count() - 1) * 6);
             const bool closed = polygon.isClosed();
 
             for( int i = 1; i < polygon.count(); i++) {
@@ -485,9 +486,11 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
 
                     const qreal dot = KisAlgebra2D::dotProduct(miter, normal);
 
-                    if (KisAlgebra2D::norm((miter * halfWidth) / dot) < miterLimit) {
-                        c1 = p1 + ((miter * -halfWidth) / dot);
-                        c2 = p1 + ((miter * halfWidth) / dot);
+                    const qreal dotMulti = dot != 0? 1.0/dot: 0.0;
+
+                    if (KisAlgebra2D::norm((miter * halfWidth) * dotMulti) < miterLimit) {
+                        c1 = p1 + ((miter * -halfWidth) * dotMulti);
+                        c2 = p1 + ((miter * halfWidth) * dotMulti);
                     }
                 }
 
@@ -499,29 +502,30 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
                         KisAlgebra2D::normalize(
                             normal + KisAlgebra2D::normalize(QPointF(-pNext.y(), pNext.x())));
                     const qreal dot = KisAlgebra2D::dotProduct(miter, normal);
+                    const qreal dotMulti = dot != 0? 1.0/dot: 0.0;
 
-                    if (KisAlgebra2D::norm((miter * halfWidth) / dot) < miterLimit) {
-                        c3 = p2 + ((miter * -halfWidth) / dot);
-                        c4 = p2 + (miter * halfWidth) / dot;
+                    if (KisAlgebra2D::norm((miter * halfWidth) * dotMulti) < miterLimit) {
+                        c3 = p2 + ((miter * -halfWidth) * dotMulti);
+                        c4 = p2 + (miter * halfWidth) * dotMulti;
                     }
                 }
 
-                verticesBuffer.append(QVector3D(c1));
-                verticesBuffer.append(QVector3D(c3));
-                verticesBuffer.append(QVector3D(c2));
-                verticesBuffer.append(QVector3D(c4));
-                verticesBuffer.append(QVector3D(c2));
-                verticesBuffer.append(QVector3D(c3));
+                d->lineVerticesStagingBuffer.append(QVector3D(c1));
+                d->lineVerticesStagingBuffer.append(QVector3D(c3));
+                d->lineVerticesStagingBuffer.append(QVector3D(c2));
+                d->lineVerticesStagingBuffer.append(QVector3D(c4));
+                d->lineVerticesStagingBuffer.append(QVector3D(c2));
+                d->lineVerticesStagingBuffer.append(QVector3D(c3));
                 triangleCount += 2;
             }
 
             if (KisOpenGL::supportsVAO()) {
                 d->lineVertexBuffer.bind();
-                d->lineVertexBuffer.allocate(verticesBuffer.constData(), 3 * verticesBuffer.size() * sizeof(float));
+                d->lineVertexBuffer.allocate(d->lineVerticesStagingBuffer.constData(), 3 * d->lineVerticesStagingBuffer.size() * sizeof(float));
             }
             else {
                 d->solidColorShader->enableAttributeArray(PROGRAM_VERTEX_ATTRIBUTE);
-                d->solidColorShader->setAttributeArray(PROGRAM_VERTEX_ATTRIBUTE, verticesBuffer.constData());
+                d->solidColorShader->setAttributeArray(PROGRAM_VERTEX_ATTRIBUTE, d->lineVerticesStagingBuffer.constData());
             }
 
             glDrawArrays(GL_TRIANGLES, 0, triangleCount * 3);
@@ -537,22 +541,22 @@ void KisOpenGLCanvasRenderer::paintToolOutline(const KisOptimizedBrushOutline &p
 
             const int verticesCount = polygon.count();
 
-            if (verticesBuffer.size() < verticesCount) {
-                verticesBuffer.resize(verticesCount);
+            if (d->lineVerticesStagingBuffer.size() < verticesCount) {
+                d->lineVerticesStagingBuffer.resize(verticesCount);
             }
 
             for (int vertIndex = 0; vertIndex < verticesCount; vertIndex++) {
                 QPointF point = polygon.at(vertIndex);
-                verticesBuffer[vertIndex].setX(point.x());
-                verticesBuffer[vertIndex].setY(point.y());
+                d->lineVerticesStagingBuffer[vertIndex].setX(point.x());
+                d->lineVerticesStagingBuffer[vertIndex].setY(point.y());
             }
             if (KisOpenGL::supportsVAO()) {
                 d->lineVertexBuffer.bind();
-                d->lineVertexBuffer.allocate(verticesBuffer.constData(), 3 * verticesCount * sizeof(float));
+                d->lineVertexBuffer.allocate(d->lineVerticesStagingBuffer.constData(), 3 * verticesCount * sizeof(float));
             }
             else {
                 d->solidColorShader->enableAttributeArray(PROGRAM_VERTEX_ATTRIBUTE);
-                d->solidColorShader->setAttributeArray(PROGRAM_VERTEX_ATTRIBUTE, verticesBuffer.constData());
+                d->solidColorShader->setAttributeArray(PROGRAM_VERTEX_ATTRIBUTE, d->lineVerticesStagingBuffer.constData());
             }
 
 
@@ -587,22 +591,9 @@ void KisOpenGLCanvasRenderer::drawBackground(const QRect &updateRect)
     Q_UNUSED(updateRect);
 
     // Draw the border (that is, clear the whole widget to the border color)
-    QColor widgetBackgroundColor = borderColor();
 
-    const KoColorSpace *finalColorSpace =
-            KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(),
-                                                         d->openGLImageTextures->updateInfoBuilder().destinationColorSpace()->colorDepthId().id(),
-                                                         d->openGLImageTextures->monitorProfile());
-
-    KoColor convertedBackgroundColor = KoColor(widgetBackgroundColor, KoColorSpaceRegistry::instance()->rgb8());
-    convertedBackgroundColor.convertTo(finalColorSpace);
-
-    QVector<float> channels = QVector<float>(4);
-    convertedBackgroundColor.colorSpace()->normalisedChannelsValue(convertedBackgroundColor.data(), channels);
-
-
-    // Data returned by KoRgbU8ColorSpace comes in the order: blue, green, red.
-    glClearColor(channels[2], channels[1], channels[0], 1.0);
+    QColor bgColor = colorToDisplaySpace(borderColor());
+    glClearColor(bgColor.redF(), bgColor.greenF(), bgColor.blueF(), 1.0);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -729,7 +720,7 @@ void KisOpenGLCanvasRenderer::drawGrid(const QRect &updateRect)
     d->solidColorShader->setUniformValue(d->solidColorShader->location(Uniform::ModelViewProjection), modelMatrix);
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     d->solidColorShader->setUniformValue(
                 d->solidColorShader->location(Uniform::FragmentColor),
@@ -789,7 +780,7 @@ void KisOpenGLCanvasRenderer::drawImage(const QRect &updateRect)
     }
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 
     KisCoordinatesConverter *converter = coordinatesConverter();
 
@@ -1007,6 +998,7 @@ void KisOpenGLCanvasRenderer::updateConfig()
     d->filterMode = (KisOpenGL::FilterMode) cfg.openGLFilteringMode();
 
     updateCursorColor();
+    updatePixelGridMode();
 }
 
 void KisOpenGLCanvasRenderer::updateCursorColor()
@@ -1015,7 +1007,7 @@ void KisOpenGLCanvasRenderer::updateCursorColor()
     bool useSeparateEraserCursor = cfg.separateEraserCursor() &&
             canvas()->resourceManager()->resource(KoCanvasResource::CurrentEffectiveCompositeOp).toString() == COMPOSITE_ERASE;
 
-    d->cursorColor = (!useSeparateEraserCursor) ? cfg.getCursorMainColor() : cfg.getEraserCursorMainColor();
+    d->cursorColor = colorToDisplaySpace((!useSeparateEraserCursor) ? cfg.getCursorMainColor() : cfg.getEraserCursorMainColor());
 }
 
 void KisOpenGLCanvasRenderer::updatePixelGridMode()
@@ -1024,7 +1016,7 @@ void KisOpenGLCanvasRenderer::updatePixelGridMode()
 
     d->pixelGridDrawingThreshold = cfg.getPixelGridDrawingThreshold();
     d->pixelGridEnabled = cfg.pixelGridEnabled();
-    d->gridColor = cfg.getPixelGridColor();
+    d->gridColor = colorToDisplaySpace(cfg.getPixelGridColor());
 }
 
 QRectF KisOpenGLCanvasRenderer::widgetToSurface(const QRectF &rc)
@@ -1091,13 +1083,18 @@ void KisOpenGLCanvasRenderer::renderCanvasGL(const QRect &updateRect)
     }
 }
 
-void KisOpenGLCanvasRenderer::setDisplayColorConverter(KisDisplayColorConverter *colorConverter)
-{
-    const KisDisplayConfig config = colorConverter->openGLCanvasSurfaceDisplayConfig();
+QColor KisOpenGLCanvasRenderer::colorToDisplaySpace(const QColor &c) {
+    KoColor convertedColor = KoColor(c, KoColorSpaceRegistry::instance()->rgb8());
+    if (!d->openGLImageTextures || !d->openGLImageTextures->updateInfoBuilder().destinationColorSpace()) return convertedColor.toQColor();
+    return canvas()->displayRendererInterface()->convertColorToDisplayColorSpace(convertedColor);
+}
 
+void KisOpenGLCanvasRenderer::setDisplayConfig(const KisDisplayConfig &config)
+{
     d->openGLImageTextures->setMonitorProfile(config.profile,
                                               config.intent,
                                               config.conversionFlags);
+    updateConfig();
 }
 
 void KisOpenGLCanvasRenderer::channelSelectionChanged(const QBitArray &channelFlags)

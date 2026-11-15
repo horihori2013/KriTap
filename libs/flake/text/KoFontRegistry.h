@@ -43,7 +43,7 @@ public:
      * it will try to select fallback fonts as well.
      *
      * @returns a vector of loaded FT_Faces, the "lengths" vector
-     * will be filled with the lengths of consequetive characters
+     * will be filled with the lengths of consecutive characters
      * a face can be set on.
      */
     std::vector<FT_FaceSP> facesForCSSValues(QVector<int> &lengths,
@@ -109,6 +109,11 @@ public:
     static KoSvgText::FontMetrics generateFontMetrics(FT_FaceSP face, bool isHorizontal = true, QString script = QString(), const KoSvgText::TextRendering rendering = KoSvgText::RenderingAuto);
 
     static int32_t loadFlagsForFace(FT_Face face, bool isHorizontal = true, int32_t loadFlags = 0, const KoSvgText::TextRendering rendering = KoSvgText::RenderingAuto);
+
+    // For PSD we only get the postscript name, and we'll need a bit
+    // more information to get a proper css representation.
+    KoCSSFontInfo getCssDataForPostScriptName (const QString postScriptName,
+                                      QString *foundPostScriptName);
 private Q_SLOTS:
     /**
      * Update the config and reset the FontChangeListener.
@@ -121,21 +126,21 @@ private:
     friend class SvgTextCursorTest;
 
     /**
-     * @brief addFontFilePathToRegistery
-     * This adds a font file to the registery. Right now only used by unittests.
+     * @brief addFontFilePathToRegistry
+     * This adds a font file to the registry. Right now only used by unittests.
      *
      * @param path the path of the font file.
-     * @return Whether adding the font file was succesful.
+     * @return Whether adding the font file was successful.
      */
-    bool addFontFilePathToRegistery(const QString &path);
+    bool addFontFilePathToRegistry(const QString &path);
 
     /**
-     * @brief addFontFileDirectoryToRegistery
-     * This adds a directory of font files to the registery. Right now only used by unittests.
+     * @brief addFontFileDirectoryToRegistry
+     * This adds a directory of font files to the registry. Right now only used by unittests.
      * @param path the path of the directory.
-     * @return whether it was succesful.
+     * @return whether it was successful.
      */
-    bool addFontFileDirectoryToRegistery(const QString &path);
+    bool addFontFileDirectoryToRegistry(const QString &path);
 
     QScopedPointer<Private> d;
 

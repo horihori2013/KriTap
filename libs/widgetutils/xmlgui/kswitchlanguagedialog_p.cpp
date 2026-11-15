@@ -25,6 +25,19 @@
 #include <klocalizedstring.h>
 #include <kmessagebox.h>
 
+// On Android, KF5I18n's loadMessageCatalog function is unbelievably,
+// unusably slow when setting a fallback language, causing Krita's startup
+// time to balloon several minutes long. Creating dialogs or other widgets
+// also ends up taking forever. Since it's non-functional anyway, we'll
+// disable the ability to set a fallback language. Other operating systems
+// don't seem to have this problem. If/when removing this, also remove the
+// matching check in main.cc!
+#ifdef Q_OS_ANDROID
+static constexpr bool ALLOW_FALLBACK_LANGUAGES = false;
+#else
+static constexpr bool ALLOW_FALLBACK_LANGUAGES = true;
+#endif
+
 // Believe it or not we can't use KConfig from here
 // (we need KConfig during QCoreApplication ctor which is too early for it)
 // So we cooked a QSettings based solution
@@ -153,6 +166,10 @@ KisKSwitchLanguageDialog::KisKSwitchLanguageDialog(QWidget *parent)
     const QStringList defaultLanguages = d->applicationLanguageList();
 
     int count = defaultLanguages.count();
+    if (!ALLOW_FALLBACK_LANGUAGES && count > 1) {
+        count = 1;
+    }
+
     for (int i = 0; i < count; ++i) {
         QString language = defaultLanguages[i];
         bool primaryLanguage = (i == 0);
@@ -164,14 +181,16 @@ KisKSwitchLanguageDialog::KisKSwitchLanguageDialog(QWidget *parent)
         d->addLanguageButton(l.name(), true);
     }
 
-    QHBoxLayout *addButtonHorizontalLayout = new QHBoxLayout();
-    topLayout->addLayout(addButtonHorizontalLayout);
+    if (ALLOW_FALLBACK_LANGUAGES) {
+        QHBoxLayout *addButtonHorizontalLayout = new QHBoxLayout();
+        topLayout->addLayout(addButtonHorizontalLayout);
 
-    QPushButton *addLangButton = new QPushButton(i18n("Add Fallback Language"), this);
-    addLangButton->setToolTip(i18n("Adds one more language which will be used if other translations do not contain a proper translation."));
-    connect(addLangButton, SIGNAL(clicked()), this, SLOT(slotAddLanguageButton()));
-    addButtonHorizontalLayout->addWidget(addLangButton);
-    addButtonHorizontalLayout->addStretch();
+        QPushButton *addLangButton = new QPushButton(i18n("Add Fallback Language"), this);
+        addLangButton->setToolTip(i18n("Adds one more language which will be used if other translations do not contain a proper translation."));
+        connect(addLangButton, SIGNAL(clicked()), this, SLOT(slotAddLanguageButton()));
+        addButtonHorizontalLayout->addWidget(addLangButton);
+        addButtonHorizontalLayout->addStretch();
+    }
 
     topLayout->addStretch(10);
 
@@ -313,20 +332,28 @@ void KisKSwitchLanguageDialogPrivate::fillApplicationLanguages(KLanguageButton *
             const QString languageName = nativeName.isEmpty() ? QLocale::languageToString(l.language()) : nativeName;
             if (!insertedLanguages.contains(languageCode) && KLocalizedString::isApplicationTranslatedInto(languageCode)) {
                 QString displayName;
-                // Check if languageCode contains a country name.
+                // Check if languageCode contains a territory name.
                 // For en and en_GB their native names already contain "American"
-                // and "British", so no need to append the country name.
+                // and "British", so no need to append the territory name.
                 // Same applies for zh_CN and zh_TW, however we will need to
                 // disambiguate between zh_TW and zh_HK if it is eventually
                 // added.
+#if QT_VERSION < QT_VERSION_CHECK(6, 2, 0)
                 if (l.language() != QLocale::English && l.language() != QLocale::Chinese && languageCode.contains('_')) {
-                    QString countryName = l.nativeCountryName();
+                    QString territoryName = l.nativeCountryName();
                     // Fallback just in case.
-                    if (countryName.isEmpty()) {
-                        countryName = QLocale::countryToString(l.country());
+                    if (territoryName.isEmpty()) {
+                        territoryName = QLocale::countryToString(l.country());
+#else
+                if (l.language() != QLocale::English && l.language() != QLocale::Chinese && languageCode.contains('_')) {
+                    QString territoryName = l.nativeTerritoryName();
+                    // Fallback just in case.
+                    if (territoryName.isEmpty()) {
+                        territoryName = QLocale::territoryToString(l.territory());
+#endif
                     }
-                    // Append the country name for disambiguation.
-                    displayName = languageName % " (" % countryName % ")";
+                    // Append the territory name for disambiguation.
+                    displayName = languageName % " (" % territoryName % ")";
                 } else {
                     displayName = languageName;
                 }

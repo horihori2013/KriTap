@@ -1,12 +1,15 @@
 /*
  *  SPDX-FileCopyrightText: 2009 Cyrille Berger <cberger@cberger.net>
  *  SPDX-FileCopyrightText: 2017 Scott Petrovic <scottpetrovic@gmail.com>
+ *  SPDX-FileCopyrightText: 2026 Ayanami Kaine <personal@ayanamikaine.com>
  *
  *  SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #ifndef _KIS_PAINTING_ASSISTANTS_MANAGER_H_
 #define _KIS_PAINTING_ASSISTANTS_MANAGER_H_
+
+#include <optional>
 
 #include <QPointF>
 #include <QColor>
@@ -16,9 +19,11 @@
 #include "kis_icon_utils.h"
 #include "canvas/kis_canvas_decoration.h"
 #include "kis_painting_assistant.h"
+#include "kis_temporary_paint_constraint.h"
 #include <kritaui_export.h>
 
 class KisView;
+class KoColorDisplayRendererInterface;
 
 class KisPaintingAssistantsDecoration;
 typedef KisSharedPtr<KisPaintingAssistantsDecoration> KisPaintingAssistantsDecorationSP;
@@ -49,13 +54,13 @@ struct AssistantEditorData {
     //size of the side drag decoration
     const int dragDecorationWidth = 15;
     //QPixMaps representing icons for buttons
-    const QPixmap m_iconMove = KisIconUtils::loadIcon("transform-move").pixmap(buttonSize+10, buttonSize+10);
-    const QPixmap m_iconSnapOn = KisIconUtils::loadIcon("visible").pixmap(buttonSize, buttonSize);
-    const QPixmap m_iconSnapOff = KisIconUtils::loadIcon("novisible").pixmap(buttonSize, buttonSize);
-    const QPixmap m_iconLockOn = KisIconUtils::loadIcon("layer-locked").pixmap(buttonSize, buttonSize);
-    const QPixmap m_iconLockOff = KisIconUtils::loadIcon("layer-unlocked").pixmap(buttonSize, buttonSize);
-    const QPixmap m_iconDuplicate = KisIconUtils::loadIcon("duplicateitem").pixmap(buttonSize, buttonSize);
-    const QPixmap m_iconDelete = KisIconUtils::loadIcon("deletelayer").pixmap(buttonSize, buttonSize);
+    const QIcon m_iconMove = KisIconUtils::loadIcon("transform-move");
+    const QIcon m_iconSnapOn = KisIconUtils::loadIcon("visible");
+    const QIcon m_iconSnapOff = KisIconUtils::loadIcon("novisible");
+    const QIcon m_iconLockOn = KisIconUtils::loadIcon("layer-locked");
+    const QIcon m_iconLockOff = KisIconUtils::loadIcon("layer-unlocked");
+    const QIcon m_iconDuplicate = KisIconUtils::loadIcon("duplicateitem");
+    const QIcon m_iconDelete = KisIconUtils::loadIcon("deletelayer");
     //how many buttons fit horizontally before extending to the next row
     const int horizontalButtonLimit = 3;
 };
@@ -85,6 +90,8 @@ public:
     void adjustLine(QPointF &point, QPointF& strokeBegin);
     void setAdjustedBrushPosition(const QPointF position);
     void endStroke();
+    void setTemporaryConstraint(std::optional<KisTemporaryPaintConstraint> constraint);
+    std::optional<KisTemporaryPaintConstraint> temporaryConstraint() const;
     QList<KisPaintingAssistantHandleSP> handles();
     QList<KisPaintingAssistantSP> assistants() const;
     //store the editor data to be used to control the render/interaction of the editor widget.
@@ -143,6 +150,7 @@ public:
 Q_SIGNALS:
     void assistantChanged();
     void selectedAssistantChanged();
+    void temporaryConstraintAvailabilityChanged();
 
 public Q_SLOTS:
 
@@ -159,8 +167,8 @@ public Q_SLOTS:
 
 protected:
     void drawDecoration(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter *converter,KisCanvas2* canvas) override;
-    void drawHandles(KisPaintingAssistantSP assistant, QPainter& gc, const KisCoordinatesConverter *converter);
-    void drawEditorWidget(KisPaintingAssistantSP assistant, QPainter& gc, const KisCoordinatesConverter *converter);
+    void drawHandles(KisPaintingAssistantSP assistant, QPainter& gc, const KisCoordinatesConverter *converter, const KoColorDisplayRendererInterface *renderInterface);
+    void drawEditorWidget(KisPaintingAssistantSP assistant, QPainter& gc, const KisCoordinatesConverter *converter, const KoColorDisplayRendererInterface *renderInterface);
 
 private:
     struct Private;

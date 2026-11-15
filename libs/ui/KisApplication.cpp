@@ -81,9 +81,9 @@
 #include "kis_spin_box_unit_manager.h"
 #include "kis_document_aware_spin_box_unit_manager.h"
 #include "KisViewManager.h"
+#include <KisScopedPerformanceLogger.h>
 #include <KisUsageLogger.h>
 
-#include <KritaVersionWrapper.h>
 #include <dialogs/KisSessionManagerDialog.h>
 
 #include <KisResourceCacheDb.h>
@@ -103,6 +103,7 @@
 #include <kis_workspace_resource.h>
 #include <KisSessionResource.h>
 #include <resources/KoSvgSymbolCollectionResource.h>
+#include <resources/KoFontFamily.h>
 #include <resources/KoCssStylePreset.h>
 
 #include "widgets/KisScreenColorSampler.h"
@@ -126,6 +127,7 @@
 #include <input/KisExtendedModifiersMapperPluginInterface.h>
 #include <KisPlatformPluginInterfaceFactory.h>
 
+#include <config-qt-patches-present.h>
 #include <config-use-surface-color-management-api.h>
 
 #if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
@@ -135,6 +137,10 @@
 #include <KisSRGBSurfaceColorSpaceManager.h>
 
 #endif /* KRITA_USE_SURFACE_COLOR_MANAGEMENT_API */
+
+#if defined(Q_OS_ANDROID) && KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+#include <KisAndroidScaling.h>
+#endif
 
 namespace {
 const QTime appStartTime(QTime::currentTime());
@@ -190,6 +196,9 @@ public:
     QScopedPointer<KisExtendedModifiersMapperPluginInterface> extendedModifiersPluginInterface;
 #ifdef Q_OS_ANDROID
     KisAndroidDonations *androidDonations {nullptr};
+#if KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    KisAndroidScaling *androidScaling {nullptr};
+#endif
 #endif
 };
 
@@ -214,73 +223,45 @@ public:
     int m_fileCount;
 };
 
-
 KisApplication::KisApplication(const QString &key, int &argc, char **argv)
     : QtSingleApplication(key, argc, argv)
     , d(new Private)
 {
+#ifdef Q_OS_ANDROID
+    // The hardware renderer backend on Android doesn't support proper stacking,
+    // causing windows with QtQuick widgets to always stack behind everything
+    // else, including our own dialog decorations.
+    qputenv("QT_QUICK_BACKEND", "software");
+#endif
 #ifdef Q_OS_MACOS
     setMouseCoalescingEnabled(false);
 #endif
 
     QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath());
 
-    setApplicationDisplayName("Krita");
-    setApplicationName("krita");
-    // Note: Qt docs suggest we set this, but if we do, we get resource paths of the form of krita/krita, which is weird.
-    //    setOrganizationName("krita");
-    setOrganizationDomain("krita.org");
-
-    QString version = KritaVersionWrapper::versionString(true);
-    setApplicationVersion(version);
+#ifndef Q_OS_MACOS
     setWindowIcon(KisIconUtils::loadIcon("krita-branding"));
-
-    if (qgetenv("KRITA_NO_STYLE_OVERRIDE").isEmpty()) {
-
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-        QStringList styles = QStringList() << "haiku" << "macintosh" << "breeze" << "fusion";
-#else
-        QStringList styles = QStringList() << "haiku" << "macos" << "breeze" << "fusion";
-#endif
-        if (!styles.contains(style()->objectName().toLower())) {
-            Q_FOREACH (const QString & style, styles) {
-                if (!setStyle(style)) {
-                    qDebug() << "No" << style << "available.";
-                }
-                else {
-                    qDebug() << "Set style" << style;
-                    break;
-                }
-            }
-        }
-
-        // if style is set from config, try to load that
-        KisConfig cfg(true);
-        QString widgetStyleFromConfig = cfg.widgetStyle();
-        if(widgetStyleFromConfig != "") {
-            qApp->setStyle(widgetStyleFromConfig);
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-        } else if (style()->objectName().toLower() == "macintosh") {
-            // if no configured style on macOS, default to Fusion
-            qApp->setStyle("fusion");
-        }
-#else
-        } else if (style()->objectName().toLower() == "macos") {
-            // if no configured style on macOS, default to Fusion
-            qApp->setStyle("fusion");
-        }
 #endif
 
+           // if style is set from config, try to load that
+    KisConfig cfg(true);
+    QString widgetStyleFromConfig = cfg.widgetStyle();
+    QString defaultStyle = style()->objectName().toLower();
+    if (!widgetStyleFromConfig.isEmpty()) {
+        qApp->setStyle(widgetStyleFromConfig);
     }
+#if defined Q_OS_WIN || defined Q_OS_MACOS || defined Q_OS_ANDROID
     else {
-        qDebug() << "Style override disabled, using" << style()->objectName();
+        // default to Fusion instead of styles that use native theming
+        qApp->setStyle("fusion");
     }
+#endif
 
     /**
      * Load platform plugin for modifiers fetching
      */
     {
-        d->extendedModifiersPluginInterface.reset(KisPlatformPluginInterfaceFactory::createExtendedModifiersMapper());
+        d->extendedModifiersPluginInterface.reset(KisPlatformPluginInterfaceFactory::instance()->createExtendedModifiersMapper());
     }
 
     // store the style name
@@ -366,6 +347,8 @@ void KisApplication::initializeGlobals(const KisApplicationArguments &args)
 
 void KisApplication::addResourceTypes()
 {
+    KisScopedPerformanceLogger perfLog(QStringLiteral("KisApplication::addResourceTypes"));
+
     // All Krita's resource types
     KoResourcePaths::addAssetType("markers", "data", "/styles/");
     KoResourcePaths::addAssetType("kis_pics", "data", "/pics/");
@@ -377,7 +360,6 @@ void KisApplication::addResourceTypes()
     KoResourcePaths::addAssetType("kis_actions", "data", "/pykrita");
     KoResourcePaths::addAssetType("icc_profiles", "data", "/color/icc");
     KoResourcePaths::addAssetType("icc_profiles", "data", "/profiles/");
-    KoResourcePaths::addAssetType(ResourceType::FilterEffects, "data", "/effects/");
     KoResourcePaths::addAssetType("tags", "data", "/tags/");
     KoResourcePaths::addAssetType("templates", "data", "/templates");
     KoResourcePaths::addAssetType("pythonscripts", "data", "/pykrita");
@@ -414,6 +396,8 @@ bool KisApplication::event(QEvent *event)
 
 bool KisApplication::registerResources()
 {
+    KisScopedPerformanceLogger perfLog(QStringLiteral("KisApplication::registerResources"));
+
     KisResourceLoaderRegistry *reg = KisResourceLoaderRegistry::instance();
 
     reg->add(new KisResourceLoader<KisPaintOpPreset>(ResourceSubType::KritaPaintOpPresets, ResourceType::PaintOpPresets, i18n("Brush presets"),
@@ -454,6 +438,7 @@ bool KisApplication::registerResources()
                                                      i18nc("Resource type name", "Layer styles"),
                                                      QStringList() << "application/x-photoshop-style"));
 
+    reg->add(new KisResourceLoader<KoFontFamily>(ResourceType::FontFamilies, ResourceType::FontFamilies, i18n("Font Families"), QStringList() << "application/x-font-ttf" << "application/x-font-otf"));
     reg->add(new KisResourceLoader<KoCssStylePreset>(ResourceType::CssStyles, ResourceType::CssStyles, i18n("Style Presets"), QStringList() << "image/svg+xml"));
 
     reg->registerFixup(10, new KisBrushTypeMetaDataFixup());
@@ -480,7 +465,7 @@ bool KisApplication::registerResources()
 
 void KisApplication::loadPlugins()
 {
-    //    qDebug() << "loadPlugins();";
+    KisScopedPerformanceLogger perfLog(QStringLiteral("KisApplication::loadPlugins"));
 
     KoShapeRegistry* r = KoShapeRegistry::instance();
     r->add(new KisShapeSelectionFactory());
@@ -496,7 +481,19 @@ void KisApplication::loadPlugins()
 
 bool KisApplication::start(const KisApplicationArguments &args)
 {
+    KisScopedPerformanceLogger perfLog(QStringLiteral("KisApplication::start"));
+#ifdef Q_OS_ANDROID
+    KisAndroidDonations::showDonationDialog(true);
+#endif
+
     KisConfig cfg(false);
+
+    auto iconsInMenuMode = cfg.iconsInMenu();
+    if (iconsInMenuMode == KisConfig::IIM_Yes) {
+        QCoreApplication::setAttribute(Qt::AA_DontShowIconsInMenus, false);
+    } else if (iconsInMenuMode == KisConfig::IIM_No) {
+        QCoreApplication::setAttribute(Qt::AA_DontShowIconsInMenus, true);
+    }
 
 #if defined(Q_OS_WIN)
 #ifdef ENV32BIT
@@ -525,6 +522,10 @@ bool KisApplication::start(const KisApplicationArguments &args)
     processEvents();
     initializeGlobals(args);
 
+#if defined(Q_OS_ANDROID) && KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    d->androidScaling = new KisAndroidScaling(cfg, this);
+#endif
+
     const bool doNewImage = args.doNewImage();
     const bool doTemplate = args.doTemplate();
     const bool exportAs = args.exportAs();
@@ -536,12 +537,14 @@ bool KisApplication::start(const KisApplicationArguments &args)
     // only show the mainWindow when no command-line mode option is passed
     bool showmainWindow = (!exportAs && !exportSequence); // would be !batchRun;
 
+#ifndef Q_OS_ANDROID
     const bool showSplashScreen = !d->batchRun && qEnvironmentVariableIsEmpty("NOSPLASH");
     if (showSplashScreen && d->splashScreen) {
         d->splashScreen->show();
         d->splashScreen->repaint();
         processEvents();
     }
+#endif
 
     KConfigGroup group(KSharedConfig::openConfig(), "theme");
 #ifndef Q_OS_HAIKU
@@ -628,7 +631,6 @@ bool KisApplication::start(const KisApplicationArguments &args)
             d->mainWindow = kisPart->createMainWindow();
         }
     }
-    short int numberOfOpenDocuments = 0; // number of documents open
 
     // Check for autosave files that can be restored, if we're not running a batch run (test)
     if (!d->batchRun) {
@@ -636,16 +638,67 @@ bool KisApplication::start(const KisApplicationArguments &args)
     }
 
     setSplashScreenLoadingText(QString()); // done loading, so clear out label
+#ifdef Q_OS_ANDROID
+    KisAndroidDonations::setLoaded(true);
+#endif
     processEvents();
 
     //configure the unit manager
     KisSpinBoxUnitManagerFactory::setDefaultUnitManagerBuilder(new KisDocumentAwareSpinBoxUnitManagerBuilder());
-    connect(this, &KisApplication::aboutToQuit, &KisSpinBoxUnitManagerFactory::clearUnitManagerBuilder); //ensure the builder is destroyed when the application leave.
+    connect(this, &KisApplication::aboutToQuit, qApp, &KisSpinBoxUnitManagerFactory::clearUnitManagerBuilder); //ensure the builder is destroyed when the application leave.
     //the new syntax slot syntax allow to connect to a non q_object static method.
 
     // Long-press emulation.
-    connect(KisConfigNotifier::instance(), &KisConfigNotifier::sigLongPressChanged, this, &KisApplication::slotSetLongPress);
+    KisConfigNotifier *cfgNotifier = KisConfigNotifier::instance();
+    connect(cfgNotifier, &KisConfigNotifier::sigLongPressChanged, this, &KisApplication::slotSetLongPress);
     slotSetLongPress(cfg.longPressEnabled());
+
+    // Xiaomi workaround: their stylus inexplicably inputs page up and down keys
+    // when pressing stylus buttons. This flag causes the Android platform
+    // integration to turn those into right and middle clicks instead.
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN
+    auto setPageUpDownMouseButtonEmulationWorkaround = [](bool enabled) {
+        QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN, enabled);
+    };
+    connect(cfgNotifier,
+            &KisConfigNotifier::sigUsePageUpDownMouseButtonEmulationWorkaroundChanged,
+            this,
+            setPageUpDownMouseButtonEmulationWorkaround);
+    setPageUpDownMouseButtonEmulationWorkaround(cfg.usePageUpDownMouseButtonEmulationWorkaround());
+#endif
+
+    // OnePlus workaround: their stylus inexplicably inputs the F21 key when
+    // pressing the stylus button. This flag causes the Android platform
+    // integration to turn it into middle clicks instead. Currently
+    // unconditional because a setting requires translation-relevant text
+    // changes, but later versions of Krita let you toggle it like the Xiaomi
+    // workarounds above.
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS
+    QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS, true);
+    auto setHighFunctionKeyMouseButtonEmulationWorkaround = [](bool enabled) {
+        // QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS, enabled);
+    };
+    connect(cfgNotifier,
+            &KisConfigNotifier::sigUseHighFunctionKeyMouseButtonEmulationWorkaroundChanged,
+            this,
+            setHighFunctionKeyMouseButtonEmulationWorkaround);
+    setHighFunctionKeyMouseButtonEmulationWorkaround(cfg.useHighFunctionKeyMouseButtonEmulationWorkaround());
+#endif
+
+    // Xiaomi workaround: historic tablet motion events are garbage, they just
+    // connect the actual points that the tablet sampled with a straight line
+    // and no pressure emulation, leading to jagged curves that don't get
+    // smoothed out. This flag disables reading those historic events.
+#if KRITA_QT_HAS_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS
+    auto setIgnoreHistoricTabletEventsWorkaround = [](bool enabled) {
+        QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS, enabled);
+    };
+    connect(cfgNotifier,
+            &KisConfigNotifier::sigUseIgnoreHistoricTabletEventsWorkaroundChanged,
+            this,
+            setIgnoreHistoricTabletEventsWorkaround);
+    setIgnoreHistoricTabletEventsWorkaround(cfg.useIgnoreHistoricTabletEventsWorkaround());
+#endif
 
     // Create a new image, if needed
     if (doNewImage) {
@@ -668,9 +721,7 @@ bool KisApplication::start(const KisApplicationArguments &args)
                 if (d->batchRun) {
                     continue;
                 }
-                if (createNewDocFromTemplate(fileName, d->mainWindow)) {
-                    ++numberOfOpenDocuments;
-                }
+                createNewDocFromTemplate(fileName, d->mainWindow);
                 // now try to load
             }
             else {
@@ -751,10 +802,7 @@ bool KisApplication::start(const KisApplicationArguments &args)
                     else {
                         KisMainWindow::OpenFlags flags = d->batchRun ? KisMainWindow::BatchMode : KisMainWindow::None;
 
-                        if (d->mainWindow->openDocument(fileName, flags)) {
-                            // Normal case, success
-                            numberOfOpenDocuments++;
-                        }
+                        d->mainWindow->openDocument(fileName, flags);
                     }
                 }
             }
@@ -789,13 +837,6 @@ bool KisApplication::start(const KisApplicationArguments &args)
                                 i18n("Cannot add the file layer: no document is open.\n"
                                      "You can either create a new file using the --new-image option, or you can open an existing file."));
         }
-    }
-
-    // fixes BUG:369308  - Krita crashing on splash screen when loading.
-    // trying to open a file before Krita has loaded can cause it to hang and crash
-    if (d->splashScreen) {
-        d->splashScreen->displayLinks(true);
-        d->splashScreen->displayRecentFiles(true);
     }
 
     Q_FOREACH(const QByteArray &message, d->earlyRemoteArguments) {
@@ -837,10 +878,16 @@ void KisApplication::setSplashScreenLoadingText(const QString &textToLoad)
         d->splashScreen->setLoadingText(textToLoad);
         d->splashScreen->repaint();
     }
+#ifdef Q_OS_ANDROID
+    KisAndroidDonations::setLoadingText(textToLoad);
+#endif
 }
 
 void KisApplication::hideSplashScreen()
 {
+#ifdef Q_OS_ANDROID
+    KisAndroidDonations::setLoaded(true);
+#endif
     if (d->splashScreen) {
         // hide the splashscreen to see the dialog
         d->splashScreen->hide();
@@ -1125,7 +1172,7 @@ void KisApplication::checkAutosaveFiles()
     if (autosaveFiles.size() > 0) {
         if (d->splashScreen) {
             // hide the splashscreen to see the dialog
-            d->splashScreen->hide();
+            hideSplashScreen();
         }
         d->autosaveDialog = new KisAutoSaveRecoveryDialog(autosaveFiles, activeWindow());
         QDialog::DialogCode result = (QDialog::DialogCode) d->autosaveDialog->exec();
@@ -1294,5 +1341,16 @@ KisAndroidDonations *KisApplication::androidDonations()
         d->androidDonations->syncState();
     }
     return d->androidDonations;
+}
+
+KisAndroidScaling *KisApplication::androidScaling()
+{
+#if KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    // Should get initialized during startup and not accessed before.
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(d->androidScaling, nullptr);
+    return d->androidScaling;
+#else
+    return nullptr;
+#endif
 }
 #endif

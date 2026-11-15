@@ -11,7 +11,7 @@
     <x>0</x>
     <y>0</y>
     <width>1693</width>
-    <height>499</height>
+    <height>829</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -42,7 +42,7 @@
    <item>
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
-      <number>0</number>
+      <number>5</number>
      </property>
      <property name="movable">
       <bool>false</bool>
@@ -495,7 +495,68 @@
          </layout>
         </widget>
        </item>
-       <item row="2" column="0" colspan="2">
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_23">
+         <property name="text">
+          <string>Icons in menu:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <widget class="QFrame" name="frame2">
+         <layout class="QHBoxLayout" name="horizontalLayout_5">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QComboBox" name="cmbIconsInMenu">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_6">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Fixed</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>0</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_24">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="text">
+             <string>(Needs restart)</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="3" column="0" colspan="2">
         <widget class="QGroupBox" name="chkUseCustomFont">
          <property name="title">
           <string>Use custom interface font</string>
@@ -545,7 +606,7 @@
          </layout>
         </widget>
        </item>
-       <item row="3" column="0" colspan="2">
+       <item row="4" column="0" colspan="2">
         <widget class="QGroupBox" name="m_chkHiDPI">
          <property name="title">
           <string>Enable HiDPI support</string>
@@ -605,7 +666,7 @@
          </layout>
         </widget>
        </item>
-       <item row="4" column="0" colspan="2">
+       <item row="5" column="0" colspan="2">
         <spacer name="verticalSpacer_4">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
@@ -624,267 +685,406 @@
       <attribute name="title">
        <string>Cursor</string>
       </attribute>
-      <layout class="QFormLayout" name="formLayout_9">
-       <item row="0" column="0">
-        <widget class="QLabel" name="textLabel1">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string>Brush Cursor Icon:</string>
-         </property>
-         <property name="buddy">
-          <cstring>frame</cstring>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QComboBox" name="m_cmbCursorShape"/>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="textLabel1_2">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string>Brush Outline Shape:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QWidget" name="widget_2" native="true">
-         <layout class="QVBoxLayout" name="verticalLayout_8">
-          <property name="leftMargin">
-           <number>0</number>
-          </property>
-          <property name="topMargin">
-           <number>0</number>
-          </property>
-          <property name="rightMargin">
-           <number>0</number>
-          </property>
-          <property name="bottomMargin">
-           <number>0</number>
-          </property>
-          <item>
-           <widget class="QComboBox" name="m_cmbOutlineShape"/>
-          </item>
-          <item>
-           <widget class="QGroupBox" name="groupBox">
-            <property name="title">
-             <string>While painting...</string>
-            </property>
-            <layout class="QVBoxLayout" name="verticalLayout_2">
-             <property name="spacing">
-              <number>3</number>
-             </property>
-             <property name="leftMargin">
-              <number>9</number>
-             </property>
-             <property name="topMargin">
-              <number>3</number>
-             </property>
-             <property name="bottomMargin">
-              <number>3</number>
-             </property>
-             <item>
-              <widget class="QCheckBox" name="m_showOutlinePainting">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>200</width>
-                 <height>0</height>
-                </size>
-               </property>
-               <property name="text">
-                <string>Show outline</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QCheckBox" name="m_changeBrushOutline">
-               <property name="text">
-                <string>Use effective outline size</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item row="3" column="0" colspan="2">
-        <widget class="QGroupBox" name="m_chkSeparateEraserCursor">
-         <property name="title">
-          <string>Use separate settings for eraser</string>
-         </property>
-         <property name="checkable">
+      <layout class="QVBoxLayout" name="verticalLayout_9">
+       <item>
+        <widget class="QScrollArea" name="scrollArea_2">
+         <property name="widgetResizable">
           <bool>true</bool>
          </property>
-         <property name="checked">
-          <bool>false</bool>
-         </property>
-         <layout class="QFormLayout" name="formLayout_14">
-          <item row="0" column="1">
-           <widget class="QComboBox" name="m_cmbEraserCursorShape"/>
-          </item>
-          <item row="0" column="0">
-           <widget class="QLabel" name="label_19">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
-            <property name="text">
-             <string>Eraser Cursor Icon:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="label_20">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
-            <property name="text">
-             <string>Eraser Outline Shape:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QWidget" name="widget_7" native="true">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
-            <layout class="QVBoxLayout" name="verticalLayout_10">
-             <property name="leftMargin">
-              <number>0</number>
+         <widget class="QWidget" name="scrollAreaWidgetContents_2">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>1669</width>
+            <height>781</height>
+           </rect>
+          </property>
+          <layout class="QFormLayout" name="formLayout_19">
+           <item row="0" column="0">
+            <widget class="QLabel" name="textLabel1">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
              </property>
-             <property name="topMargin">
-              <number>0</number>
+             <property name="text">
+              <string>Brush Cursor Icon:</string>
              </property>
-             <property name="rightMargin">
-              <number>0</number>
+             <property name="buddy">
+              <cstring>frame</cstring>
              </property>
-             <property name="bottomMargin">
-              <number>0</number>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QComboBox" name="m_cmbCursorShape"/>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="textLabel1_2">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
              </property>
-             <item>
-              <widget class="QComboBox" name="m_cmbEraserOutlineShape"/>
-             </item>
-             <item>
-              <widget class="QGroupBox" name="groupBox_6">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="title">
-                <string>While painting with an eraser...</string>
-               </property>
-               <layout class="QVBoxLayout" name="verticalLayout_5">
-                <property name="spacing">
-                 <number>3</number>
+             <property name="text">
+              <string>Brush Outline Shape:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QWidget" name="widget_2" native="true">
+             <layout class="QVBoxLayout" name="verticalLayout_8">
+              <property name="leftMargin">
+               <number>0</number>
+              </property>
+              <property name="topMargin">
+               <number>0</number>
+              </property>
+              <property name="rightMargin">
+               <number>0</number>
+              </property>
+              <property name="bottomMargin">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QComboBox" name="m_cmbOutlineShape"/>
+              </item>
+              <item>
+               <widget class="QGroupBox" name="groupBox">
+                <property name="title">
+                 <string>While painting...</string>
                 </property>
-                <property name="topMargin">
-                 <number>3</number>
+                <layout class="QVBoxLayout" name="verticalLayout_2">
+                 <property name="spacing">
+                  <number>3</number>
+                 </property>
+                 <property name="leftMargin">
+                  <number>9</number>
+                 </property>
+                 <property name="topMargin">
+                  <number>3</number>
+                 </property>
+                 <property name="bottomMargin">
+                  <number>3</number>
+                 </property>
+                 <item>
+                  <widget class="QCheckBox" name="m_showOutlinePainting">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>200</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>Show outline</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QCheckBox" name="m_changeBrushOutline">
+                   <property name="toolTip">
+                    <string>Dynamically adjust outline to match the effective size of the brush. (For example, as brush size changes due to pen pressure.)</string>
+                   </property>
+                   <property name="text">
+                    <string>Use effective outline size</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="label_11">
+             <property name="text">
+              <string>Brush Outline Color:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="KisColorButton" name="cursorColorButton">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="0" colspan="2">
+            <widget class="QGroupBox" name="m_chkSeparateEraserCursor">
+             <property name="title">
+              <string>Use separate settings for eraser</string>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+             <property name="checked">
+              <bool>false</bool>
+             </property>
+             <layout class="QFormLayout" name="formLayout_14">
+              <item row="0" column="1">
+               <widget class="QComboBox" name="m_cmbEraserCursorShape"/>
+              </item>
+              <item row="0" column="0">
+               <widget class="QLabel" name="label_19">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
                 </property>
-                <property name="bottomMargin">
-                 <number>3</number>
+                <property name="text">
+                 <string>Eraser Cursor Icon:</string>
                 </property>
-                <item>
-                 <widget class="QCheckBox" name="m_showEraserOutlinePainting">
-                  <property name="text">
-                   <string>Show outline</string>
-                  </property>
-                 </widget>
-                </item>
-                <item>
-                 <widget class="QCheckBox" name="m_changeEraserBrushOutline">
-                  <property name="text">
-                   <string>Use effective outline size</string>
-                  </property>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
-            </layout>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="label_21">
-            <property name="text">
-             <string>Eraser Outline Color:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="KisColorButton" name="eraserCursorColorButton">
-            <property name="maximumSize">
-             <size>
-              <width>48</width>
-              <height>25</height>
-             </size>
-            </property>
-            <property name="text">
-             <string/>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="2">
-        <spacer name="verticalSpacer_3">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="label_11">
-         <property name="text">
-          <string>Brush Outline Color:</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="KisColorButton" name="cursorColorButton">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string/>
-         </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="label_20">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>Eraser Outline Shape:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QWidget" name="widget_7" native="true">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <layout class="QVBoxLayout" name="verticalLayout_10">
+                 <property name="leftMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="topMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="rightMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="bottomMargin">
+                  <number>0</number>
+                 </property>
+                 <item>
+                  <widget class="QComboBox" name="m_cmbEraserOutlineShape"/>
+                 </item>
+                 <item>
+                  <widget class="QGroupBox" name="groupBox_6">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="title">
+                    <string>While painting with an eraser...</string>
+                   </property>
+                   <layout class="QVBoxLayout" name="verticalLayout_5">
+                    <property name="spacing">
+                     <number>3</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>3</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>3</number>
+                    </property>
+                    <item>
+                     <widget class="QCheckBox" name="m_showEraserOutlinePainting">
+                      <property name="text">
+                       <string>Show outline</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="m_changeEraserBrushOutline">
+                      <property name="toolTip">
+                       <string>Dynamically adjust outline to match the effective size of the brush. (For example, as brush size changes due to pen pressure.)</string>
+                      </property>
+                      <property name="text">
+                       <string>Use effective outline size</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="label_21">
+                <property name="text">
+                 <string>Eraser Outline Color:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="KisColorButton" name="eraserCursorColorButton">
+                <property name="maximumSize">
+                 <size>
+                  <width>48</width>
+                  <height>25</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string/>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="m_lblColorSamplerPreviewStyle">
+             <property name="text">
+              <string>Color Sampler Shape:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QComboBox" name="m_cmbColorSamplerPreviewStyle"/>
+           </item>
+           <item row="5" column="0" colspan="2">
+            <widget class="QFrame" name="m_frmColorSamplerCircleSettings">
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Raised</enum>
+             </property>
+             <layout class="QFormLayout" name="m_frmColorSamplerCircleSettingsLayout">
+              <item row="0" column="0" colspan="2">
+               <widget class="KisColorSamplerPreviewPreview" name="m_lblColorSamplerPreviewSizePreview">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>20</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="m_lblColorSamplerPreviewSize">
+                <property name="text">
+                 <string>Diameter:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="KisSliderSpinBox" name="m_nmbColorSamplerPreviewSize"/>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="m_lblColorSamplerPreviewThickness">
+                <property name="text">
+                 <string>Thickness:</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="KisDoubleSliderSpinBox" name="m_ssbColorSamplerPreviewThickness"/>
+              </item>
+              <item row="3" column="1">
+               <widget class="QCheckBox" name="m_chkColorSamplerPreviewOutlineEnabled">
+                <property name="text">
+                 <string>Enable Outline</string>
+                </property>
+               </widget>
+              </item>
+              <item row="4" column="1">
+               <widget class="QCheckBox" name="m_chkColorSamplerPreviewExtraCircles">
+                <property name="text">
+                 <string>Extra Comparison Space</string>
+                </property>
+               </widget>
+              </item>
+              <item row="5" column="0" colspan="2">
+               <widget class="QGroupBox" name="m_grpColorSamplerZoomPreview">
+                <property name="title">
+                 <string>Enable Zoom Preview (Pixel-Perfect Color Sampler)</string>
+                </property>
+                <property name="checkable">
+                 <bool>true</bool>
+                </property>
+                <layout class="QFormLayout" name="formLayout_3">
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="m_lblColorSamplerZoomPreviewScale">
+                   <property name="text">
+                    <string>Zoom Preview Scale:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="KisSliderSpinBox" name="m_ssbColorSamplerZoomPreviewScale">
+                   <property name="suffix">
+                    <string>x</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>20</number>
+                   </property>
+                   <property name="singleStep">
+                    <number>1</number>
+                   </property>
+                   <property name="value">
+                    <number>1</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QLabel" name="m_lblColorSamplerPreviewCirclePosition">
+                   <property name="text">
+                    <string>Color Sampler Position:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="1">
+                  <widget class="QComboBox" name="m_cmbColorSamplerPreviewCirclePosition"/>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="6" column="0">
+            <widget class="QLabel" name="m_lblColorSamplerPreviewSizePreviewEmpty">
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
         </widget>
        </item>
       </layout>
@@ -962,21 +1162,24 @@
          </item>
         </widget>
        </item>
-       <item row="3" column="1">
+       <item row="7" column="1">
         <widget class="QCheckBox" name="m_chkSwitchSelectionCtrlAlt">
          <property name="text">
           <string>Switch Control/Alt Selection Modifiers</string>
          </property>
         </widget>
        </item>
-       <item row="4" column="0">
+       <item row="8" column="0">
         <widget class="QLabel" name="lblTouchPainting">
          <property name="text">
           <string>Touch Painting:</string>
          </property>
         </widget>
        </item>
-       <item row="5" column="1">
+       <item row="8" column="1">
+        <widget class="QComboBox" name="cmbTouchPainting"/>
+       </item>
+       <item row="9" column="1">
         <widget class="QCheckBox" name="chkTouchPressureSensitivity">
          <property name="toolTip">
           <string>Enable reading of pressure state for touch events. This data may be broken on some platforms, e.g. on some Android devices, where pressure may be reported as 0.0 all the time.</string>
@@ -986,21 +1189,21 @@
          </property>
         </widget>
        </item>
-       <item row="6" column="1">
+       <item row="10" column="1">
         <widget class="QCheckBox" name="chkEnableTransformToolAfterPaste">
          <property name="text">
           <string>Activate transform tool after pasting</string>
          </property>
         </widget>
        </item>
-       <item row="7" column="0">
+       <item row="11" column="0">
         <widget class="QLabel" name="lblZoomSteps">
          <property name="text">
           <string>Zoom steps between powers of 2</string>
          </property>
         </widget>
        </item>
-       <item row="7" column="1">
+       <item row="11" column="1">
         <widget class="QSpinBox" name="spnZoomSteps">
          <property name="minimum">
           <number>1</number>
@@ -1010,48 +1213,34 @@
          </property>
         </widget>
        </item>
-       <item row="8" column="1">
+       <item row="12" column="1">
         <widget class="QCheckBox" name="chkZoomHorizontally">
          <property name="text">
           <string>Use horizontal axis for Canvas Zoom Action</string>
          </property>
         </widget>
        </item>
-       <item row="9" column="0" colspan="2">
-        <spacer name="verticalSpacer_2">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
+       <item row="13" column="0" colspan="2">
+        <widget class="QGroupBox" name="groupBox_5">
+         <property name="alignment">
+          <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
          </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="10" column="0">
-        <widget class="QLabel" name="lblSelectionActionBar">
-         <property name="text">
-          <string>Selection Actions Bar</string>
-         </property>
+         <layout class="QFormLayout" name="formLayout_3">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="chkEnableSelectionActionBar">
+            <property name="toolTip">
+             <string>When enabled, any selections will produce a small floating panel of useful selection-related actions.</string>
+            </property>
+            <property name="text">
+             <string>Enable Selection Actions Bar</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </widget>
-       </item>
-       <item row="10" column="1">
-        <widget class="QCheckBox" name="chkEnableSelectionActionBar">
-         <property name="toolTip">
-          <string>When enabled, any selections will produce a small floating panel of useful selection-related actions.</string>
-         </property>
-         <property name="text">
-          <string>Enable Selection Actions Bar</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="1">
-        <widget class="QComboBox" name="cmbTouchPainting"/>
        </item>
       </layout>
      </widget>
@@ -1097,7 +1286,7 @@
            </widget>
           </item>
           <item>
-           <spacer name="verticalSpacer_6">
+           <spacer name="verticalSpacer_2">
             <property name="orientation">
              <enum>Qt::Vertical</enum>
             </property>
@@ -1111,19 +1300,6 @@
           </item>
          </layout>
         </widget>
-       </item>
-       <item>
-        <spacer name="verticalSpacer_6">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
        </item>
       </layout>
      </widget>
@@ -1219,8 +1395,8 @@
            <rect>
             <x>0</x>
             <y>0</y>
-            <width>1675</width>
-            <height>609</height>
+            <width>1689</width>
+            <height>801</height>
            </rect>
           </property>
           <property name="sizePolicy">
@@ -1676,7 +1852,7 @@ To restore the old behavior you can force Krita to use Display DPI for fonts by 
   <customwidget>
    <class>KisSliderSpinBox</class>
    <extends>QSpinBox</extends>
-   <header>kis_slider_spin_box.h</header>
+   <header location="global">kis_slider_spin_box.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>
@@ -1685,9 +1861,21 @@ To restore the old behavior you can force Krita to use Display DPI for fonts by 
    <header>kis_int_parse_spin_box.h</header>
   </customwidget>
   <customwidget>
+   <class>KisFileNameRequester</class>
+   <extends>QWidget</extends>
+   <header>kis_file_name_requester.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
    <class>KisColorButton</class>
    <extends>QPushButton</extends>
-   <header>kis_color_button.h</header>
+   <header location="global">kis_color_button.h</header>
+  </customwidget>
+  <customwidget>
+   <class>KisFontComboBoxes</class>
+   <extends>QWidget</extends>
+   <header location="global">kis_font_family_combo_box.h</header>
+   <container>1</container>
   </customwidget>
   <customwidget>
    <class>KisWarningBlock</class>
@@ -1696,16 +1884,15 @@ To restore the old behavior you can force Krita to use Display DPI for fonts by 
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>KisFileNameRequester</class>
-   <extends>QWidget</extends>
-   <header>kis_file_name_requester.h</header>
+   <class>KisDoubleSliderSpinBox</class>
+   <extends>QSpinBox</extends>
+   <header>kis_slider_spin_box.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>KisFontComboBoxes</class>
-   <extends>QWidget</extends>
-   <header location="global">kis_font_family_combo_box.h</header>
-   <container>1</container>
+   <class>KisColorSamplerPreviewPreview</class>
+   <extends>QLabel</extends>
+   <header>KisColorSamplerPreviewPreview.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

@@ -30,6 +30,15 @@ private Q_SLOTS:
     void testLoadResourceMetadataFromStorage();
     void testLoadResourceMetadataFromStorage_data();
 
+    void testRemoveTagsFromStorage_data();
+    void testRemoveTagsFromStorage();
+
+    void testTagsForStorageUnique();
+    void testTagsForStorageShared();
+
+    void testDeleteStorageWithCrossLinkedTags();
+    void testDeleteStorageWithSharedTags();
+
     void cleanupTestCase();
 
     void testSyncVersions();

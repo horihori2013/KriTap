@@ -54,7 +54,7 @@ void KisToolBrush::addSmoothingAction(int enumId, const QString &id)
 
 KisToolBrush::KisToolBrush(KoCanvasBase * canvas)
     : KisToolFreehand(canvas,
-                      KisCursor::load("tool_freehand_cursor.xpm", 2, 2),
+                      KisCursor::loadWithSize("tool_freehand_cursor.svg", 32, 32, 2, 2),
                       kundo2_i18n("Freehand Brush Stroke"))
 {
     setObjectName("tool_brush");
@@ -432,10 +432,7 @@ QWidget * KisToolBrush::createOptionWidget()
     updateSmoothnessDistanceLabel();
     // make sure that initialization of the value happens **after** we
     // have configured the slider's range in updateSmoothnessDistanceLabel()
-    connect(m_sliderSmoothnessDistanceMin, SIGNAL(valueChanged(qreal)), SLOT(slotSetSmoothnessDistanceMin(qreal)));
     m_sliderSmoothnessDistanceMin->setValue(smoothingOptions()->smoothnessDistanceMin());
-
-    connect(m_sliderSmoothnessDistanceMax, SIGNAL(valueChanged(qreal)), SLOT(slotSetSmoothnessDistanceMax(qreal)));
     m_sliderSmoothnessDistanceMax->setValue(smoothingOptions()->smoothnessDistanceMax());
 
     // Create KoAspectButton
@@ -443,7 +440,6 @@ QWidget * KisToolBrush::createOptionWidget()
     m_distanceAspectButton->setKeepAspectRatio(smoothingOptions()->smoothnessDistanceKeepAspectRatio());
     m_distanceAspectButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_distanceAspectButton->setMinimumSize(QSize(24, 24));
-    connect(m_distanceAspectButton, SIGNAL(keepAspectRatioChanged(bool)), SLOT(slotSetSmoothnessDistanceKeepAspectRatio(bool)));
 
     // Add distanceLabels
     QWidget* distanceLabelWidget = new QWidget(optionsWidget);
@@ -467,6 +463,14 @@ QWidget * KisToolBrush::createOptionWidget()
 
     KisAspectRatioLocker *distanceAspectLocker = new KisAspectRatioLocker(this);
     distanceAspectLocker->connectSpinBoxes(m_sliderSmoothnessDistanceMin, m_sliderSmoothnessDistanceMax, m_distanceAspectButton);
+
+    connect(distanceAspectLocker, &KisAspectRatioLocker::aspectButtonToggled,
+        this, &KisToolBrush::slotSetSmoothnessDistanceKeepAspectRatio);
+
+    connect(distanceAspectLocker, &KisAspectRatioLocker::sliderValueChanged, this, [this]() {
+        slotSetSmoothnessDistanceMin(m_sliderSmoothnessDistanceMin->value());
+        slotSetSmoothnessDistanceMax(m_sliderSmoothnessDistanceMax->value());
+    });
 
     // Finish stabilizer curve
     m_chkFinishStabilizedCurve = new QCheckBox(optionsWidget);
@@ -601,11 +605,11 @@ QWidget * KisToolBrush::createOptionWidget()
     return optionsWidget;
 }
 
-QList<QAction *> KisToolBrushFactory::createActionsImpl()
+QList<QAction *> KisToolBrushFactory::createActionsImpl(KoToolManager *toolManager)
 {
     KisActionRegistry *actionRegistry = KisActionRegistry::instance();
 
-    QList<QAction *> actions = KisToolPaintFactoryBase::createActionsImpl();
+    QList<QAction *> actions = KisToolPaintFactoryBase::createActionsImpl(toolManager);
 
     actions << actionRegistry->makeQAction("set_no_brush_smoothing", this);
     actions << actionRegistry->makeQAction("set_simple_brush_smoothing", this);

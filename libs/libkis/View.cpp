@@ -18,6 +18,7 @@
 #include <kis_paintop_box.h>
 #include <KisMainWindow.h>
 #include <KoCanvasBase.h>
+#include <KoToolProxy.h>
 #include <kis_canvas2.h>
 #include <KisResourceTypes.h>
 #include <KisDocument.h>
@@ -33,6 +34,45 @@
 struct View::Private {
     Private() {}
     QPointer<KisView> view;
+    QPointer<KoToolProxy> toolProxy;
+    QPointer<KisCanvasResourceProvider> resourceProvider;
+
+    void reconnect(View *self)
+    {
+        // View::setDocument() can replace the wrapped KisView.
+        if (toolProxy) {
+            QObject::disconnect(toolProxy, SIGNAL(toolChanged(QString)), self, SIGNAL(currentToolChanged(QString)));
+            toolProxy.clear();
+        }
+
+        if (resourceProvider) {
+            QObject::disconnect(resourceProvider, SIGNAL(sigPaintOpPresetChanged(KisPaintOpPresetSP)), self, SIGNAL(currentBrushPresetChanged()));
+            QObject::disconnect(resourceProvider, SIGNAL(sigFGColorChanged(KoColor)), self, SIGNAL(foregroundColorChanged()));
+            QObject::disconnect(resourceProvider, SIGNAL(sigBGColorChanged(KoColor)), self, SIGNAL(backgroundColorChanged()));
+            resourceProvider.clear();
+        }
+
+        if (!view) {
+            return;
+        }
+
+        resourceProvider = view->resourceProvider();
+        if (resourceProvider) {
+            QObject::connect(resourceProvider, SIGNAL(sigPaintOpPresetChanged(KisPaintOpPresetSP)), self, SIGNAL(currentBrushPresetChanged()));
+            QObject::connect(resourceProvider, SIGNAL(sigFGColorChanged(KoColor)), self, SIGNAL(foregroundColorChanged()));
+            QObject::connect(resourceProvider, SIGNAL(sigBGColorChanged(KoColor)), self, SIGNAL(backgroundColorChanged()));
+        }
+
+        KoCanvasBase *canvasBase = view->canvasBase();
+        if (!canvasBase) {
+            return;
+        }
+
+        toolProxy = canvasBase->toolProxy();
+        if (toolProxy) {
+            QObject::connect(toolProxy, SIGNAL(toolChanged(QString)), self, SIGNAL(currentToolChanged(QString)));
+        }
+    }
 };
 
 View::View(KisView* view, QObject *parent)
@@ -40,6 +80,7 @@ View::View(KisView* view, QObject *parent)
     , d(new Private)
 {
     d->view = view;
+    d->reconnect(this);
 }
 
 View::~View()
@@ -77,6 +118,7 @@ void View::setDocument(Document *document)
 {
     if (!d->view || !document || !document->document()) return;
     d->view = d->view->replaceBy(document->document());
+    d->reconnect(this);
 }
 
 bool View::visible() const
@@ -152,7 +194,9 @@ void View::setBackGroundColor(ManagedColor *color)
 Resource *View::currentBrushPreset() const
 {
     if (!d->view) return 0;
-    return new Resource(d->view->resourceProvider()->currentPreset(), ResourceType::PaintOpPresets);
+    KoResourceSP preset = d->view->resourceProvider()->currentPreset();
+    if (!preset) return 0;
+    return new Resource(preset, ResourceType::PaintOpPresets);
 }
 
 void View::setCurrentBrushPreset(Resource *resource)
@@ -246,6 +290,18 @@ void View::setBrushSize(qreal brushSize)
     d->view->resourceProvider()->setSize(brushSize);
 }
 
+qreal View::brushFade() const
+{
+    if (!d->view) return 0.0;
+    return d->view->resourceProvider()->fade();
+}
+
+void View::setBrushFade(qreal brushFade)
+{
+    if (!d->view) return;
+    d->view->resourceProvider()->setFade(brushFade);
+}
+
 qreal View::brushRotation() const
 {
     if (!d->view) return 0.0;
@@ -256,6 +312,30 @@ void View::setBrushRotation(qreal brushRotation)
 {
     if (!d->view) return;
     d->view->resourceProvider()->setBrushRotation(brushRotation);
+}
+
+QPointF View::brushPosition() const
+{
+    if (!d->view) return QPointF();
+
+    KisCanvasResourceProvider *provider = d->view->resourceProvider();
+    if (!provider || !provider->resourceManager()) return QPointF();
+
+    const QPointF pixelPos = provider->resourceManager()
+        ->resource(KoCanvasResource::CurrentBrushPosition)
+        .value<QPointF>();
+    if (pixelPos.isNull()) return QPointF();
+
+    KisCanvas2 *canvas = d->view->canvasBase();
+    if (!canvas) return QPointF();
+
+    const KisCoordinatesConverter *converter = canvas->coordinatesConverter();
+    if (!converter) return QPointF();
+
+    // The stored position is in image pixel coordinates. Convert all the way
+    // to canvas-widget coordinates (image -> document -> flake -> widget),
+    // which is what scripts map to the screen with canvasWidget()->mapToGlobal.
+    return converter->imageToWidget(pixelPos);
 }
 
 qreal View::paintingFlow() const

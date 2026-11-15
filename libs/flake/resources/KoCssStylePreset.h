@@ -63,6 +63,11 @@ public:
     /// Returns the sample svg metadata. Use updateThumbnail to update it.
     QString sampleSvg() const;
 
+    /// Returns the size of the shape which the paragraph is set as.
+    QSizeF paragraphSampleSize() const;
+    /// Set the size of the shape the paragraph is set in.
+    void setParagraphSampleSize(const QSizeF size);
+
     /**
      * The resolution that this style is tied to.
      * if this is above 0, then the properties absolute values are scaled by
@@ -79,8 +84,8 @@ public:
      */
     KoShape* generateSampleShape() const;
 
-    /// Determines the prefered sample alignment based on the text properties. It's set up so that
-    /// the alignment anchor of the text is shown.
+    /// Determines the preferred sample alignment based on the text properties.
+    /// It's set up so that the alignment anchor of the text is shown.
     Qt::Alignment alignSample() const;
 
     /**

@@ -29,6 +29,8 @@
 #include <QSettings>
 #include <QScreen>
 
+#include <KoConfig.h>
+
 #include <klocalizedstring.h>
 
 #include <KisRepaintDebugger.h>
@@ -42,6 +44,7 @@
 #include "opengl/kis_opengl.h"
 
 #include <config-hdr.h>
+#include <config-use-surface-color-management-api.h>
 
 #ifndef GL_RENDERER
 #  define GL_RENDERER 0x1F01
@@ -58,6 +61,15 @@ typedef void (APIENTRYP PFNGLINVALIDATEBUFFERDATAPROC) (GLuint buffer);
 #else
 typedef void (QOPENGLF_APIENTRYP PFNGLINVALIDATEBUFFERDATAPROC) (GLuint buffer);
 #endif
+
+#include <KisStaticInitializer.h>
+
+KIS_DECLARE_STATIC_INITIALIZER {
+    qRegisterMetaType<KisOpenGL::XcbGLProviderProtocol>("KisOpenGL::XcbGLProviderProtocol");
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    QMetaType::registerEqualsComparator<KisOpenGL::XcbGLProviderProtocol>();
+#endif
+}
 
 namespace
 {
@@ -169,6 +181,10 @@ void KisOpenGL::initialize()
 
     if (openGLCheckResult) {
         debugOut << "\n  Qt Platform Name: " << QGuiApplication::platformName();
+        if (openGLCheckResult->xcbGlProviderProtocol()) {
+            debugOut << "\n  Qt XCB GL integration plugin: "
+                     << (*openGLCheckResult->xcbGlProviderProtocol() == KisOpenGL::XCB_EGL ? "xcb_egl" : "xcb_glx");
+        }
         debugOut << "\n  Vendor: " << openGLCheckResult->vendorString();
         debugOut << "\n  Renderer: " << openGLCheckResult->rendererString();
         debugOut << "\n  Driver version: " << openGLCheckResult->driverVersionString();
@@ -280,7 +296,7 @@ void KisOpenGL::initializeContext(QOpenGLContext *ctx)
         QOpenGLDebugLogger* openglLogger = new QOpenGLDebugLogger(ctx);
         if (openglLogger->initialize()) {
             qDebug() << "QOpenGLDebugLogger is initialized. Check whether you get a message below.";
-            QObject::connect(openglLogger, &QOpenGLDebugLogger::messageLogged, &openglOnMessageLogged);
+            QObject::connect(openglLogger, &QOpenGLDebugLogger::messageLogged, qApp, &openglOnMessageLogged);
             openglLogger->startLogging(g_isDebugSynchronous ? QOpenGLDebugLogger::SynchronousLogging : QOpenGLDebugLogger::AsynchronousLogging);
             openglLogger->logMessage(QOpenGLDebugMessage::createApplicationMessage(QStringLiteral("QOpenGLDebugLogger is logging.")));
         } else {
@@ -300,15 +316,18 @@ void KisOpenGL::initializeContext(QOpenGLContext *ctx)
     }
 
     QFile log(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/krita-opengl.txt");
-    log.open(QFile::WriteOnly);
-    QString vendor((const char*)f->glGetString(GL_VENDOR));
-    log.write(vendor.toLatin1());
-    log.write(", ");
-    log.write(openGLCheckResult->rendererString().toLatin1());
-    log.write(", ");
-    QString version((const char*)f->glGetString(GL_VERSION));
-    log.write(version.toLatin1());
-    log.close();
+    if (log.open(QFile::WriteOnly)) {
+        QString vendor((const char*)f->glGetString(GL_VENDOR));
+        log.write(vendor.toLatin1());
+        log.write(", ");
+        log.write(openGLCheckResult->rendererString().toLatin1());
+        log.write(", ");
+        QString version((const char*)f->glGetString(GL_VERSION));
+        log.write(version.toLatin1());
+        log.close();
+    } else {
+        qWarning() << "Could not open" << log.fileName() << "for writing:" << log.errorString();
+    }
 }
 
 const QString &KisOpenGL::getDebugText()
@@ -397,6 +416,12 @@ bool KisOpenGL::useFBOForToolOutlineRendering()
     return openGLCheckResult && openGLCheckResult->supportsFBO();
 }
 
+std::optional<KisOpenGL::XcbGLProviderProtocol> KisOpenGL::xcbGlProviderProtocol()
+{
+    initialize();
+    return openGLCheckResult ? openGLCheckResult->xcbGlProviderProtocol() : std::nullopt;
+}
+
 bool KisOpenGL::needsFenceWorkaround()
 {
     initialize();
@@ -405,7 +430,7 @@ bool KisOpenGL::needsFenceWorkaround()
 
 void KisOpenGL::testingInitializeDefaultSurfaceFormat()
 {
-    setDefaultSurfaceConfig(selectSurfaceConfig(KisOpenGL::RendererAuto, KisConfig::BT709_G22, false));
+    setDefaultSurfaceConfig(selectSurfaceConfig(KisOpenGL::RendererAuto, KisConfig::BT709_G22, KisConfig::CanvasSurfaceBitDepthMode::DepthAuto, false));
 }
 
 void KisOpenGL::setDebugSynchronous(bool value)
@@ -576,8 +601,9 @@ QOpenGLContext::OpenGLModuleType determineOpenGLImplementation(const RendererInf
 }
 
 KisOpenGL::RendererConfig generateSurfaceConfig(KisOpenGL::OpenGLRenderer renderer,
-                                                KisConfig::RootSurfaceFormat rootSurfaceFormat,
-                                                bool debugContext)
+                                                std::pair<KisSurfaceColorSpaceWrapper, int> rootSurfaceFormat,
+                                                bool debugContext,
+                                                bool inhibitCompatibilityProfile)
 {
     RendererInfo info = getRendererInfo(renderer);
 
@@ -595,6 +621,7 @@ KisOpenGL::RendererConfig generateSurfaceConfig(KisOpenGL::OpenGLRenderer render
 #if defined Q_OS_MACOS
         format.setVersion(4, 1);
         format.setProfile(QSurfaceFormat::CoreProfile);
+        Q_UNUSED(inhibitCompatibilityProfile);
 #else
         // If asked for 3.0 "Core", Qt will instead request
         // an OpenGL ES context.
@@ -603,7 +630,10 @@ KisOpenGL::RendererConfig generateSurfaceConfig(KisOpenGL::OpenGLRenderer render
         format.setVersion(3, 3);
         // Make sure to request a Compatibility profile to have NVIDIA
         // return the maximum supported GL version.
-        format.setProfile(QSurfaceFormat::CompatibilityProfile);
+
+        if (!inhibitCompatibilityProfile) {
+            format.setProfile(QSurfaceFormat::CompatibilityProfile);
+        }
 #ifdef Q_OS_WIN
         // Some parts of Qt seems to require deprecated functions. On Windows
         // with the Intel Graphics driver, things like canvas decorations and
@@ -753,6 +783,9 @@ public:
         ORDER_BY(lhs.rendererId() == m_preferredRendererByQt,
                  rhs.rendererId() == m_preferredRendererByQt);
 
+        ORDER_BY(lhs.format.redBufferSize() == m_userPreferredBitDepth,
+                 rhs.format.redBufferSize() == m_userPreferredBitDepth);
+
         return false;
     }
 
@@ -782,6 +815,10 @@ public:
         m_openGLESBlacklisted = openGLESBlacklisted;
     }
 
+    void setUserPreferredBitDepth(int value) {
+        m_userPreferredBitDepth = value;
+    }
+
     bool isOpenGLBlacklisted() const {
         return m_openGLBlacklisted;
     }
@@ -796,6 +833,10 @@ public:
 
     KisOpenGL::OpenGLRenderer preferredRendererByUser() const {
         return m_preferredRendererByUser;
+    }
+
+    int userPreferredBitDepth() const {
+        return m_userPreferredBitDepth;
     }
 
 private:
@@ -847,6 +888,7 @@ private:
     KisOpenGL::OpenGLRenderer m_preferredRendererByHDR = KisOpenGL::RendererAuto;
     bool m_openGLBlacklisted = false;
     bool m_openGLESBlacklisted = false;
+    int m_userPreferredBitDepth = 8;
 };
 
 struct DetectionDebug : public QDebug
@@ -867,6 +909,7 @@ struct DetectionDebug : public QDebug
 
 KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRenderer preferredRenderer,
                                                          KisConfig::RootSurfaceFormat preferredRootSurfaceFormat,
+                                                         KisConfig::CanvasSurfaceBitDepthMode preferredCanvasSurfaceBitMode,
                                                          bool enableDebug)
 {
     QVector<KLocalizedString> warningMessages;
@@ -883,22 +926,86 @@ KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRender
     renderersToTest.insert(RendererSoftware, Info());
 #endif
 
+    auto makeDefaultSurfaceFormatPair = [] () -> std::pair<KisSurfaceColorSpaceWrapper, int> {
+        return {KisSurfaceColorSpaceWrapper::DefaultColorSpace, 8};
+    };
 
-#ifdef HAVE_HDR
-    QVector<KisConfig::RootSurfaceFormat> formatSymbols({KisConfig::BT709_G22, KisConfig::BT709_G10, KisConfig::BT2020_PQ});
+#if defined HAVE_HDR
+    std::vector<std::pair<KisSurfaceColorSpaceWrapper, int>> formatSymbolPairs(
+        {
+            // TODO: check if we can use real sRGB space here
+            {KisSurfaceColorSpaceWrapper::DefaultColorSpace, 8},
+            {KisSurfaceColorSpaceWrapper::scRGBColorSpace, 16},
+            {KisSurfaceColorSpaceWrapper::bt2020PQColorSpace, 10}
+        });
+#elif KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
+    std::vector<std::pair<KisSurfaceColorSpaceWrapper, int>> formatSymbolPairs(
+        {
+            {KisSurfaceColorSpaceWrapper::DefaultColorSpace, 8},
+            {KisSurfaceColorSpaceWrapper::DefaultColorSpace, 10},
+        });
 #else
-    QVector<KisConfig::RootSurfaceFormat> formatSymbols({KisConfig::BT709_G22});
+    std::vector<std::pair<KisSurfaceColorSpaceWrapper, int>> formatSymbolPairs(
+        {
+            {KisSurfaceColorSpaceWrapper::DefaultColorSpace, 8},
+        });
 #endif
 
+    bool shouldInhibitCompatibilityProfile = false;
     KisOpenGL::RendererConfig defaultConfig = generateSurfaceConfig(KisOpenGL::RendererAuto,
-                                                                    KisConfig::BT709_G22, false);
+                                                                    makeDefaultSurfaceFormatPair(),
+                                                                    false,
+                                                                    shouldInhibitCompatibilityProfile);
     Info info = KisOpenGLModeProber::instance()->probeFormat(defaultConfig);
+
+#ifndef Q_OS_MACOS
+    // When RendererAuto is active, Qt may perform insane things internally,
+    // e.g. switch from OpenGL to OpenGLES automatically. And the presence of
+    // the compatibility profile flag will cause the context creation process
+    // to fail.
+    //
+    // So, here we request an explicit API again to avoid Qt making decisions
+    // for us.
+
+    if (!info) {
+        dbgOpenGL << "Failed to probe default Qt's openGL format.. Trying DesktopGL with compatibility enabled...";
+        shouldInhibitCompatibilityProfile = false;
+        defaultConfig = generateSurfaceConfig(KisOpenGL::RendererDesktopGL,
+                                              makeDefaultSurfaceFormatPair(),
+                                              false,
+                                              shouldInhibitCompatibilityProfile);
+        info = KisOpenGLModeProber::instance()->probeFormat(defaultConfig);
+    }
+
+    if (!info) {
+        dbgOpenGL << "Failed again.. Trying DesktopGL with compatibility disabled...";
+        shouldInhibitCompatibilityProfile = true;
+        defaultConfig = generateSurfaceConfig(KisOpenGL::RendererDesktopGL,
+                                              makeDefaultSurfaceFormatPair(),
+                                              false,
+                                              shouldInhibitCompatibilityProfile);
+        info = KisOpenGLModeProber::instance()->probeFormat(defaultConfig);
+    }
+
+    if (!info) {
+        dbgOpenGL << "Failed again.. Trying OpenGLES...";
+        shouldInhibitCompatibilityProfile = false;
+        defaultConfig = generateSurfaceConfig(KisOpenGL::RendererOpenGLES,
+                                              makeDefaultSurfaceFormatPair(),
+                                              false,
+                                              true);
+        info = KisOpenGLModeProber::instance()->probeFormat(defaultConfig);
+    }
+
+#endif /* Q_OS_MACOS */
 
 #ifdef Q_OS_WIN
     if (!info) {
         // try software rasterizer (WARP)
         defaultConfig = generateSurfaceConfig(KisOpenGL::RendererSoftware,
-                                              KisConfig::BT709_G22, false);
+                                              makeDefaultSurfaceFormatPair(),
+                                              false,
+                                              shouldInhibitCompatibilityProfile);
         info = KisOpenGLModeProber::instance()->probeFormat(defaultConfig);
 
         if (!info) {
@@ -907,7 +1014,10 @@ KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRender
     }
 #endif
 
-    if (!info) return KisOpenGL::RendererConfig();
+    if (!info) {
+        dbgOpenGL << "Failed to probe default openGL format! No openGL support will be available in Krita";
+        return KisOpenGL::RendererConfig();
+    }
 
     const OpenGLRenderer defaultRenderer = getRendererFromProbeResult(*info);
 
@@ -941,6 +1051,12 @@ KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRender
     compareOp.setPreferredRendererByUser(preferredRenderer);
     compareOp.setOpenGLESBlacklisted(false); // We cannot blacklist ES drivers atm
 
+#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
+    // 10-bit is the default, 8-bit is set explicitly by the user
+    compareOp.setUserPreferredBitDepth(preferredCanvasSurfaceBitMode == KisConfig::CanvasSurfaceBitDepthMode::Depth8Bit ? 8 : 10);
+#else
+    Q_UNUSED(preferredCanvasSurfaceBitMode)
+#endif
 
     renderersToTest[defaultRenderer] = info;
 
@@ -948,7 +1064,7 @@ KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRender
         Info info = it.value();
 
         if (!info) {
-            const RendererConfig config = generateSurfaceConfig(it.key(), KisConfig::BT709_G22, false);
+            const RendererConfig config = generateSurfaceConfig(it.key(), makeDefaultSurfaceFormatPair(), false, shouldInhibitCompatibilityProfile);
             dbgOpenGL << "Probing" << it.key() << "from default:" << config.format << config.angleRenderer
                       << config.rendererId();
             info = KisOpenGLModeProber::instance()->probeFormat(config);
@@ -999,8 +1115,8 @@ KisOpenGL::RendererConfig KisOpenGL::selectSurfaceConfig(KisOpenGL::OpenGLRender
         // if default mode of the renderer doesn't work, then custom won't either
         if (!it.value()) continue;
 
-        Q_FOREACH (const KisConfig::RootSurfaceFormat formatSymbol, formatSymbols) {
-            preferredConfigs << generateSurfaceConfig(it.key(), formatSymbol, enableDebug);
+        Q_FOREACH (const auto &formatPair, formatSymbolPairs) {
+            preferredConfigs << generateSurfaceConfig(it.key(), formatPair, enableDebug, shouldInhibitCompatibilityProfile);
         }
     }
 

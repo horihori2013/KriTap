@@ -16,7 +16,7 @@ public:
     ~IccColorSpaceEngine() override;
     const KoColorProfile *addProfile(const QString &filename) override;
     const KoColorProfile *addProfile(const QByteArray &data) override;
-    const KoColorProfile * getProfile(const QVector<double> &colorants, ColorPrimaries colorPrimaries, TransferCharacteristics transferFunction) override;
+    const KoColorProfile * getProfile(const KoColorProfileQuery &query) override;
     void removeProfile(const QString &filename) override;
     KoColorConversionTransformation *createColorTransformation(const KoColorSpace *srcColorSpace,
             const KoColorSpace *dstColorSpace,
@@ -28,7 +28,7 @@ public:
             KoColorConversionTransformation::Intent renderingIntent,
             KoColorConversionTransformation::Intent proofingIntent,
             bool firstTransformBPC,
-            quint8 *gamutWarning, double adaptationState,
+            quint8 *gamutWarning,
             KoColorConversionTransformation::ConversionFlags displayConversionFlags) const override;
     quint32 computeColorSpaceType(const KoColorSpace *cs) const;
 

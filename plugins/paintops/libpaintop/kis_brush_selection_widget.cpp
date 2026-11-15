@@ -24,8 +24,6 @@
 #include "kis_imagepipe_brush.h"
 #include "kis_predefined_brush_chooser.h"
 #include "kis_auto_brush_widget.h"
-#include "kis_custom_brush_widget.h"
-#include "kis_clipboard_brush_widget.h"
 #include "kis_text_brush_chooser.h"
 #include "KisWidgetConnectionUtils.h"
 #include <KisZug.h>
@@ -149,7 +147,7 @@ KisBrushSelectionWidget::KisBrushSelectionWidget(int maxBrushSize,
 
     m_d->brushType.bind([this](int value) {m_stackedWidget->setCurrentIndex(value); });
     m_d->brushType.bind([this](int value) {m_buttonGroup->button(value)->setChecked(true); });
-    connect(m_buttonGroup, &QButtonGroup::idClicked, [this] (int id) {m_d->brushType.set(id);});
+    connect(m_buttonGroup, &QButtonGroup::idClicked, this, [this] (int id) {m_d->brushType.set(id);});
 
 
     Q_FOREACH (QWidget *widget, m_chooserMap.values()) {
@@ -197,10 +195,6 @@ KisBrushSP KisBrushSelectionWidget::brush() const
 
     return theBrush;
 
-}
-void KisBrushSelectionWidget::setImage(KisImageWSP image)
-{
-    m_predefinedBrushWidget->setImage(image);
 }
 
 void KisBrushSelectionWidget::hideOptions(const QStringList &options)

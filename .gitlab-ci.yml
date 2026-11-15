@@ -11,10 +11,27 @@ variables:
   DEPS_BRANCH_NAME_MACOS: 'master'
   DEPS_BRANCH_NAME_ANDROID: 'master'
 
+  DEPS_QT6_BRANCH_NAME_WINDOWS: 'transition.now/qt6'
+  DEPS_QT6_BRANCH_NAME_LINUX: 'transition.now/qt6'
+  DEPS_QT6_BRANCH_NAME_MACOS: 'transition.now/qt6'
+
   DEPS_REPO_BRANCH_NAME_WINDOWS: 'master'
   DEPS_REPO_BRANCH_NAME_LINUX: 'master'
   DEPS_REPO_BRANCH_NAME_MACOS: 'master'
   DEPS_REPO_BRANCH_NAME_ANDROID: 'master'
+
+  DEPS_QT6_REPO_BRANCH_NAME_WINDOWS: 'transition.now/qt6'
+  DEPS_QT6_REPO_BRANCH_NAME_LINUX: 'transition.now/qt6'
+  DEPS_QT6_REPO_BRANCH_NAME_MACOS: 'transition.now/qt6'
+
+  VM_IMAGE_NAME_WINDOWS: 's3.kde.org/ci-vm-images/krita-windows-clang21-twinpy'
+  VM_IMAGE_NAME_LINUX: 's3.kde.org/ci-vm-images/krita-appimage-2204'
+  VM_IMAGE_NAME_ANDROID: 's3.kde.org/ci-vm-images/krita-android-sdk36-2204'
+
+  # The name of python executable that will be used for initializing
+  # the initial virtual envioronment. After venv is initialized, the chosen
+  # python can be addressed via plain 'python' or 'python3'
+  BOOTSTRAP_PYTHON_EXE_WINDOWS: 'C:\tools\Python-3.13\python.exe'
 
 .nightly-job-mixin:
   rules:
@@ -58,6 +75,7 @@ variables:
       - "**/appium_artifact_*"
       - "*.log"
       - "_build/CMakeFiles/CMakeConfigureLog.yaml"
+      - "_build/CMakeCache.txt"
       # Windows packages
       - "krita-*.zip"
       - "krita-*-setup.exe"
@@ -91,6 +109,16 @@ variables:
       coverage_report:
         coverage_format: cobertura
         path: CoberturaLcovResults.xml
+
+.upload-packages-to-cdn-base-mixin:
+  extends:
+    - .ci-artifacts-without-packages-mixin
+  interruptible: false
+  variables:
+    KDECI_ONLY_BUILD: True
+    KRITACI_SKIP_DEBUG_PACKAGE: False
+    KRITACI_SKIP_UPLOAD_NIGHTLY_PACKAGE: False
+    KRITACI_BUILD_INSTALLERS: True
 
 workflow:
   rules:
@@ -126,6 +154,9 @@ include:
   - local: /build-tools/ci-scripts/windows.yml
   - local: /build-tools/ci-scripts/android.yml
   - local: /build-tools/ci-scripts/macos.yml
-  - project: sysadmin/ci-utilities
-    file:
-      - /gitlab-templates/cppcheck.yml
+  # TODO: For some reason cppcheck doesn't work in our MR pipelines (no GUI visible),
+  #       we should recover this job only when the MR pipelines are fixed. There is
+  #       no use to generate HTML report for every commit when noone looks at it.
+  # - project: sysadmin/ci-utilities
+  #   file:
+  #     - /gitlab-templates/cppcheck.yml

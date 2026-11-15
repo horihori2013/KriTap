@@ -10,6 +10,7 @@
 
 #include <QCursor>
 #include <QMenu>
+#include <QTouchEvent>
 
 #include <klocalizedstring.h>
 
@@ -38,8 +39,7 @@ private:
 //=================================================================
 
 KisPopupWidgetAction::KisPopupWidgetAction()
-    : KisAbstractInputAction("Show Popup Widget"),
-      m_requestedWithStylus(false)
+    : KisAbstractInputAction("Show Popup Widget")
 {
     setName(i18n("Show Popup Widget"));
     setDescription(i18n("Show the current tool's popup widget."));
@@ -52,24 +52,29 @@ KisPopupWidgetAction::~KisPopupWidgetAction()
 void KisPopupWidgetAction::end(QEvent *event)
 {
     if (QMenu *popupMenu = inputManager()->toolProxy()->popupActionsMenu()) { // Handle popup menus...
-        m_requestedWithStylus = event && event->type() == QEvent::TabletPress;
+        QEvent::Type requestingEventType = event ? event->type() : QEvent::None;
+        std::optional<QPointF> basePopupPos = KoPointerEvent::fetchGlobalPositionFromPointerEvent(event);
 
         /**
          * Opening a menu changes the focus of the windows, so we should not open it
          * inside the filtering loop. Just raise it using the timer.
          */
-        QTimer::singleShot(0, this, [this, popupMenu](){
+        QTimer::singleShot(0, this, [popupMenu, requestingEventType, basePopupPos](){
             if (popupMenu) {
-                QPoint stylusOffset;
+                QPoint popupPos;
                 QScopedPointer<SinglePressEventEater> eventEater;
 
-                if (m_requestedWithStylus) {
+                if (basePopupPos && requestingEventType == QEvent::TabletPress) {
                     eventEater.reset(new SinglePressEventEater());
                     popupMenu->installEventFilter(eventEater.data());
-                    stylusOffset += QPoint(10,10);
+                    popupPos = basePopupPos->toPoint() + QPoint(10,10);
+                } else if (basePopupPos) {
+                    popupPos = basePopupPos->toPoint();
+                } else {
+                    popupPos = QCursor::pos();
                 }
 
-                popupMenu->exec(QCursor::pos() + stylusOffset);
+                popupMenu->exec(popupPos);
                 popupMenu->clear();
             }
         });
@@ -80,6 +85,9 @@ void KisPopupWidgetAction::end(QEvent *event)
                 pos = inputManager()->canvas()->canvasWidget()->mapFromGlobal(QCursor::pos());
             }
             inputManager()->registerPopupWidget(popupWidget);
+
+            /// the popup widget in not modal, so we shouldn't
+            /// wrap it into a QTimer
             popupWidget->popup(pos);
         } else {
             popupWidget->dismiss();

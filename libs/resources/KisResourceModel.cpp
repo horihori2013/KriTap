@@ -484,6 +484,25 @@ bool KisAllResourcesModel::addResource(KoResourceSP resource, const QString &sto
     return r;
 }
 
+bool KisAllResourcesModel::addResourceDeduplicateFileName(KoResourceSP resource, const QString &storageId)
+{
+    if (!resource || !resource->valid()) {
+        qWarning() << "Cannot add resource. Resource is null or not valid";
+        return false;
+    }
+
+    bool r = true;
+    beginInsertRows(QModelIndex(), rowCount(), rowCount());
+    if (!KisResourceLocator::instance()->addResourceDeduplicateFileName(d->resourceType, resource, storageId)) {
+        qWarning() << "Failed to add resource with name deduplication" << resource->name();
+        r = false;
+    }
+    resetQuery();
+    endInsertRows();
+
+    return r;
+}
+
 bool KisAllResourcesModel::updateResource(KoResourceSP resource)
 {
     if (!resource || !resource->valid()) {
@@ -975,6 +994,19 @@ bool KisResourceModel::addResource(KoResourceSP resource, const QString &storage
     return result;
 }
 
+bool KisResourceModel::addResourceDeduplicateFileName(KoResourceSP resource, const QString &storageId)
+{
+    KisAllResourcesModel *source = qobject_cast<KisAllResourcesModel*>(sourceModel());
+
+    const bool result = source->addResourceDeduplicateFileName(resource, storageId);
+
+    if (result) {
+        invalidate();
+    }
+
+    return result;
+}
+
 bool KisResourceModel::updateResource(KoResourceSP resource)
 {
     KisAbstractResourceModel *source = dynamic_cast<KisAbstractResourceModel*>(sourceModel());
@@ -1009,6 +1041,14 @@ bool KisResourceModel::setResourceMetaData(KoResourceSP resource, QMap<QString, 
         return source->setResourceMetaData(resource, metadata);
     }
     return false;
+}
+
+QHash<int, QByteArray> KisResourceModel::roleNames() const
+{
+    if (sourceModel()) {
+        return sourceModel()->roleNames();
+    }
+    return QAbstractItemModel::roleNames();
 }
 
 bool KisResourceModel::filterAcceptsColumn(int /*source_column*/, const QModelIndex &/*source_parent*/) const
@@ -1073,7 +1113,7 @@ bool KisResourceModel::lessThan(const QModelIndex &source_left, const QModelInde
     QString nameLeft = sourceModel()->data(source_left, Qt::UserRole + KisAbstractResourceModel::Name).toString();
     QString nameRight = sourceModel()->data(source_right, Qt::UserRole + KisAbstractResourceModel::Name).toString();
 
-    return nameLeft.toLower() < nameRight.toLower();
+    return nameLeft.compare(nameRight, Qt::CaseInsensitive) < 0;
 }
 
 QVector<KoResourceSP> KisResourceModel::filterByColumn(const QString filter, KisAbstractResourceModel::Columns column) const

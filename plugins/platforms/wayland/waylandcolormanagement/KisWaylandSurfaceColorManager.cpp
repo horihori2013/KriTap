@@ -40,7 +40,13 @@ std::shared_ptr<KisWaylandAPIColorManager> KisWaylandSurfaceColorManager::getOrC
 
     if (s_waylandManager.exists()) {
         result = s_waylandManager->lock();
-    } else {
+    }
+
+    /**
+     * A weak pointer in `s_waylandManager` may have become released,
+     * so it may be null, even though the static itself is non-null.
+     */
+    if (!result) {
         result.reset(new KisWaylandAPIColorManager());
         *s_waylandManager = result;
     }
@@ -137,7 +143,7 @@ bool KisWaylandSurfaceColorManager::isReady() const
 bool KisWaylandSurfaceColorManager::supportsSurfaceDescription(const KisSurfaceColorimetry::SurfaceDescription &desc)
 {
     using feature = QtWayland::wp_color_manager_v1::feature;
-    using namespace KisColorimetryUtils;
+    using namespace KoColorimetryUtils;
 
     if (!m_waylandManager->isFeatureSupported(feature::feature_parametric)) {
         qWarning() << "KisWaylandSurfaceColorManager: feature_parametric is not supported";
@@ -218,7 +224,6 @@ bool KisWaylandSurfaceColorManager::supportsRenderIntent(const KisSurfaceColorim
     return m_waylandManager->isIntentSupported(waylandIntent);
 }
 
-#warning USE_KWIN_BUG_WORKAROUND should become optional switch depending on the version of KWin used
 #define USE_KWIN_BUG_WORKAROUND
 
 #ifdef USE_KWIN_BUG_WORKAROUND
@@ -248,7 +253,7 @@ QFuture<bool> KisWaylandSurfaceColorManager::setSurfaceDescription(const KisSurf
     }
 
     KisWaylandAPIImageDescriptionCreatorParams creator(m_waylandManager.get());
-    std::shared_ptr<KisWaylandAPIImageDescription> descriptionObject =
+    std::shared_ptr<KisWaylandAPIImageDescriptionNoInfo> descriptionObject =
         creator.createImageDescription(waylandDescription);
 
     QPromise<bool> imageDescriptionPromise;
@@ -272,13 +277,15 @@ QFuture<bool> KisWaylandSurfaceColorManager::setSurfaceDescription(const KisSurf
             }
 
 #ifdef USE_KWIN_BUG_WORKAROUND
-            // WARNING: KWin <= 6.4.4 doesn't handle intent changes properly
-            if (m_currentDescription && m_currentDescription == desc &&
-                m_renderingIntent && m_renderingIntent != intent) {
+            if (qEnvironmentVariableIsSet("KRITA_ENABLE_KWIN_INTENT_WORKAROUND")) {
+                // WARNING: KWin <= 6.4.4 doesn't handle intent changes properly
+                if (m_currentDescription && m_currentDescription == desc &&
+                    m_renderingIntent && m_renderingIntent != intent) {
 
-                m_surface->unset_image_description();
-                auto waylandWindow = m_window->nativeInterface<QNativeInterface::Private::QWaylandWindow>();
-                ::wl_surface_commit(waylandWindow->surface());
+                    m_surface->unset_image_description();
+                    auto waylandWindow = m_window->nativeInterface<QNativeInterface::Private::QWaylandWindow>();
+                    ::wl_surface_commit(waylandWindow->surface());
+                }
             }
 #endif
 

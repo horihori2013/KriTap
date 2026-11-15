@@ -18,6 +18,12 @@ class QPainterPath;
 
 namespace KisToolUtils {
 
+enum ColorSamplerSource {
+    SampleSourceImage = 0,
+    SampleSourceGroup,
+    SampleSourceNode,
+};
+
 struct KRITAUI_EXPORT ColorSamplerConfig {
     ColorSamplerConfig();
 
@@ -25,7 +31,7 @@ struct KRITAUI_EXPORT ColorSamplerConfig {
     bool updateColor;
     bool addColorToCurrentPalette;
     bool normaliseValues;
-    bool sampleMerged;
+    ColorSamplerSource sampleSource;
     int radius;
     int blend;
 
@@ -59,6 +65,14 @@ KisNodeSP KRITAUI_EXPORT findNode(KisNodeSP node, const QPoint &point, bool whol
 
 KisNodeList KRITAUI_EXPORT findNodes(KisNodeSP node, const QPoint &point, bool wholeGroup,
                                      bool includeGroups = true, bool editableOnly = true);
+
+/**
+ * @brief nodeEditableMessage
+ * @param node -- active node.
+ * @param blockedNoIndirectPainting -- whether editing is blocked due no-indirect painting being possible.
+ * @return the message for why the node is not editable. Will return empty if it is editable after all.
+ */
+QString KRITAUI_EXPORT nodeEditableMessage(KisNodeSP node, bool blockedNoIndirectPainting = false);
 
 /**
  * @brief shapeHoverInfoCrossLayer
@@ -98,6 +112,63 @@ bool KRITAUI_EXPORT clearImage(KisImageSP image, KisNodeList nodes, KisSelection
  * not properly handle multiple monitors with different scale factors.
  */
 void KRITAUI_EXPORT setCursorPos(const QPoint &point);
+
+void KRITAUI_EXPORT showBrushSizeFloatingMessage(KoCanvasBase *canvas, qreal size);
+
+class KRITAUI_EXPORT StandardBrushSizes {
+public:
+    StandardBrushSizes(int minSize, int maxSize);
+
+    int increaseBrushSize(qreal size);
+    int decreaseBrushSize(qreal size);
+
+private:
+    std::vector<int> m_sizes;
+};
+
+/**
+ * Trims the device for uploading to the clipboard
+ *
+ * - if \p selection is present, then selection is baked
+ *   into the device, the whole device is cropped by the
+ *   selection and the default pixel is reset to "transparent
+ * - if \p selection is null, then device is just cropped
+ *   by the image bounds
+ */
+void KRITAUI_EXPORT trimDeviceForClipboard(KisImageSP image,
+                                           KisPaintDeviceSP device,
+                                           KisSelectionSP selection,
+                                           bool makeSharpClip = false);
+
+/**
+ * Creates an image that has the same resolution and size as
+ * \p srcImage, which can be used as a container image for
+ * uploading nodes into clipboard.
+ */
+KisImageSP KRITAUI_EXPORT buildImageForClipboard(KisImageSP srcImage, KisNodeList nodes);
+
+
+/**
+ * Moves the center of non-default area to the requested position
+ */
+void KRITAUI_EXPORT recenterClip(KisPaintDeviceSP clip, const QPoint &newCenter);
+
+/**
+ * Make sure non-default area of the clip device is visible within image bounds
+ *
+ * The function uses nonDefaultPixelArea() instead of exactBounds(), because the
+ * clip may have non-transparent default pixel.
+ */
+void KRITAUI_EXPORT ensureClipVisible(const QRect &imageBounds, KisPaintDeviceSP clip);
+
+/**
+ * If \p clip has non-transparent default pixel, it will be written
+ * into pixels explicitly in the area \p rc. After that, the default
+ * pixel will be reset to "transparent".
+ */
+void KRITAUI_EXPORT bakeDefaultPixel(KisPaintDeviceSP clip, const QRect &rc);
+
+
 }
 
 #endif // KIS_TOOL_UTILS_H

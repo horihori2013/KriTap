@@ -149,6 +149,9 @@ bool KisNodeManager::Private::activateNodeImpl(KisNodeSP node)
     Q_ASSERT(selection);
     selection->deselectAll();
 
+    // Disable all enter-group modes that were active
+    view->canvasBase()->setCurrentShapeManagerOwnerShape(nullptr);
+
     if (!node) {
         selection->setActiveLayer(0);
         imageView->setCurrentNode(0);
@@ -239,6 +242,11 @@ void KisNodeManager::setView(QPointer<KisView>imageView)
                 slotNonUiActivatedNode(m_d->imageView->image()->root()->lastChild());
             }
         }
+
+        // TODO: ideally, we should move "selected nodes" property into KisView
+        // to make sure the selection persists after window switching; right now
+        // we just reset it to the active node on every switch
+        m_d->selectedNodes = m_d->imageView->currentNode() ? KisNodeList{m_d->imageView->currentNode()} : KisNodeList{};
 
         m_d->activateNodeConnection.connectInputSignal(m_d->imageView->image(), &KisImage::sigRequestNodeReselection);
         m_d->imageView->resourceProvider()->slotNodeActivated(m_d->imageView->currentNode());
@@ -396,8 +404,6 @@ void KisNodeManager::setup(KisKActionCollection * actionCollection, KisActionMan
     CONVERT_NODE_ACTION_2("convert_to_filter_mask", "KisFilterMask", QStringList() << "KisFilterMask" << "KisColorizeMask");
 
     CONVERT_NODE_ACTION_2("convert_to_transparency_mask", "KisTransparencyMask", QStringList() << "KisTransparencyMask" << "KisColorizeMask");
-
-    CONVERT_NODE_ACTION("convert_to_animated", "animated");
 
     CONVERT_NODE_ACTION_2("convert_to_file_layer", "KisFileLayer", QStringList() << "KisFileLayer" << "KisCloneLayer");
 
@@ -757,15 +763,15 @@ void KisNodeManager::createReferenceImage(bool fromLayer) {
                                                   : canvas->currentImage()->projection();
     const QImage image = paintDevice->convertToQImage(0, KoColorConversionTransformation::internalRenderingIntent(),
         KoColorConversionTransformation::internalConversionFlags());
-    QScopedPointer<KisReferenceImage> reference(KisReferenceImage::fromQImage(*canvas->coordinatesConverter(), image));
+    std::unique_ptr<KisReferenceImage> reference(KisReferenceImage::fromQImage(*canvas->coordinatesConverter(), image));
     KIS_SAFE_ASSERT_RECOVER_RETURN(canvas);
     if (reference) {
         if (document->referenceImagesLayer()) {
             reference->setZIndex(document->referenceImagesLayer()->shapes().size());
         }
-        canvas->addCommand(KisReferenceImagesLayer::addReferenceImages(document, {reference.take()}));
+        canvas->addCommand(KisReferenceImagesLayer::addReferenceImages(document, {reference.release()}));
 
-        KoToolManager::instance()->switchToolRequested("ToolReferenceImages");
+        m_d->view->toolManager()->switchToolRequested("ToolReferenceImages");
 
     } else {
         if (canvas->canvasWidget()) {
@@ -797,13 +803,21 @@ void KisNodeManager::slotSomethingActivatedNodeImpl(KisNodeSP node)
 
     KIS_ASSERT_RECOVER_RETURN(node != activeNode());
     if (m_d->activateNodeImpl(node)) {
+        if (node) {
+            /**
+             * Notify the dummies facade about the lastly
+             * activated node. This information may be used
+             * when a new view is created for the image.
+             */
+            dummiesFacade->setLastActivatedNode(node);
+        }
         Q_EMIT sigUiNeedChangeActiveNode(node);
         Q_EMIT sigNodeActivated(node);
         nodesUpdated();
         if (node) {
             bool toggled =  m_d->view->actionCollection()->action("view_show_canvas_only")->isChecked();
             if (toggled) {
-                m_d->view->showFloatingMessage( activeLayer()->name(), QIcon(), 1600, KisFloatingMessage::Medium, Qt::TextSingleLine);
+                m_d->view->showFloatingMessage( node->name(), QIcon(), 1600, KisFloatingMessage::Medium, Qt::TextSingleLine);
             }
         }
     }
@@ -820,13 +834,6 @@ void KisNodeManager::slotNonUiActivatedNode(KisNodeSP node)
     if (node == activeNode()) return;
 
     slotSomethingActivatedNodeImpl(node);
-
-    if (node) {
-        bool toggled =  m_d->view->actionCollection()->action("view_show_canvas_only")->isChecked();
-        if (toggled) {
-            m_d->view->showFloatingMessage( activeLayer()->name(), QIcon(), 1600, KisFloatingMessage::Medium, Qt::TextSingleLine);
-        }
-    }
 }
 
 void KisNodeManager::slotUiActivatedNode(KisNodeSP node)
@@ -856,13 +863,13 @@ void KisNodeManager::slotUiActivatedNode(KisNodeSP node)
                 (selectionMask && selectionMask->selection()->hasShapeSelection());
 
         if (nodeHasVectorAbilities) {
-            if (pixelTools.contains(KoToolManager::instance()->activeToolId())) {
-                KoToolManager::instance()->switchToolRequested("InteractionTool");
+            if (pixelTools.contains(m_d->view->toolManager()->activeToolId())) {
+                m_d->view->toolManager()->switchToolRequested("InteractionTool");
             }
         }
         else {
-            if (vectorTools.contains(KoToolManager::instance()->activeToolId())) {
-                KoToolManager::instance()->switchToolRequested("KritaShape/KisToolBrush");
+            if (vectorTools.contains(m_d->view->toolManager()->activeToolId())) {
+                m_d->view->toolManager()->switchToolRequested("KritaShape/KisToolBrush");
             }
         }
     }
@@ -1568,7 +1575,7 @@ void KisNodeManager::cutLayersToClipboard()
         it++;
     }
 
-    KisClipboard::instance()->setLayers(nodes, m_d->view->image(), false);
+    KisClipboard::instance()->setLayers(nodes, m_d->view->image(), m_d->view->image()->bounds(), false);
 
     if (canModifyLayers(nodes)) {
         KUndo2MagicString actionName = kundo2_i18n("Cut Nodes");
@@ -1580,10 +1587,10 @@ void KisNodeManager::cutLayersToClipboard()
 void KisNodeManager::copyLayersToClipboard()
 {
     KisNodeList nodes = this->selectedNodes();
-    KisClipboard::instance()->setLayers(nodes, m_d->view->image(), true);
+    KisClipboard::instance()->setLayers(nodes, m_d->view->image(), m_d->view->image()->bounds(), true);
 }
 
-void KisNodeManager::pasteLayersFromClipboard(bool changeOffset, QPointF offset, KisProcessingApplicator *applicator)
+void KisNodeManager::pasteLayersFromClipboard(std::optional<QPoint> preferredClipCenter, KisProcessingApplicator *applicator)
 {
     const QMimeData *data = KisClipboard::instance()->layersMimeData();
     if (!data) return;
@@ -1602,14 +1609,14 @@ void KisNodeManager::pasteLayersFromClipboard(bool changeOffset, QPointF offset,
     KisNodeDummy *aboveThisDummy = parentDummy ? parentDummy->lastChild() : 0;
 
     KisMimeData::insertMimeLayers(data,
+                                  KisMimeData::MimeFromClipboard,
                                   image,
                                   shapeController,
                                   parentDummy,
                                   aboveThisDummy,
                                   copyNode,
                                   nodeInsertionAdapter(),
-                                  changeOffset,
-                                  offset,
+                                  preferredClipCenter,
                                   applicator);
 }
 

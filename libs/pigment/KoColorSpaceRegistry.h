@@ -23,6 +23,8 @@ class KoColorProfile;
 class KoColorConversionSystem;
 class KoColorConversionCache;
 class KoColorConversionTransformation;
+class QColorSpace;
+struct KoColorProfileQuery;
 
 /**
  * The registry for colorspaces and profiles.
@@ -103,8 +105,17 @@ public:
     /**
      * Create an alias to a profile with a different name. Then @ref profileByName
      * will return the profile @p to when passed @p name as a parameter.
+     *
+     * Aliases are considered 'weak'. If a real profile with the name \p name
+     * is present (or added), it shadows the existing alias. If such an explicit
+     * profile gets removed, then the alias takes its place again.
      */
     void addProfileAlias(const QString& name, const QString& to);
+
+    /**
+     * Remove profile alias \p name if exists
+     */
+    void removeProfileAlias(const QString& name);
 
     /**
      * @return the profile alias, or name if not aliased
@@ -115,6 +126,14 @@ public:
      * create a profile of the specified type.
      */
     const KoColorProfile *createColorProfile(const QString & colorModelId, const QString & colorDepthId, const QByteArray& rawData);
+
+    /**
+     * Create a color profile from a memory array, if possible, otherwise return 0.
+     * If there is an existing profile with the same name, it will be used instead,
+     * and the binary data from \p rawData will be ignored
+     */
+    using CustomProfileNameAlias = QHash<QString, QString>;
+    const KoColorProfile *createColorProfile(const QString & colorModelId, const QString & colorDepthId, const QByteArray& rawData, CustomProfileNameAlias customProfileNameAlias);
 
     /**
      * Return a profile by its given name, or 0 if none registered.
@@ -337,15 +356,31 @@ public:
     /**
      * @brief profileFor tries to find the profile that matches these characteristics, if no
      * such profile is found, it attempts to generate one.
-     * @param colorants a double of xy (for xyY) values, this expects the first two as the white point,
-     * then the red, green and blue. If there's only a whitepoint and primaries type is undefined,
-     * a grayscale profile will be returned.
-     * @param colorPrimaries the color primaries type as defined in KoColorProfile.
-     * @param transferFunction the transfer function, as defined in KoColorProfile.
+     * @param query -- profile characteristics to get the profile for.
+     * @param generate -- whether to try to generate a profile if no match was found.
      * @return a profile that matches these characteristics.
      */
-    const KoColorProfile *profileFor(const QVector<double> &colorants, ColorPrimaries colorPrimaries, TransferCharacteristics transferFunction) const;
+    const KoColorProfile *profileFor(const KoColorProfileQuery &query, const bool generate = true) const;
 
+    /**
+     * @brief profileForQColorSpace
+     * Find a KoColorProfile that matches a given QColorSpace.
+     * This will use the QColorSpace::IccProfile function as a
+     * last resort, preferring to use preexisting profiles in the
+     * registry.
+     * @param space -- space to return the profile for.
+     * @return A Profile for the given QColorSpace, may be null if nothing was found.
+     */
+    const KoColorProfile *profileForQColorSpace(const QColorSpace &space);
+
+    /**
+     * @brief QColorSpaceForProfile
+     * Generate a QColorSpace for the given KoColorProfile. Will return
+     * sRGB when the profile is null.
+     * @param profile -- source profile
+     * @return a QColorSpace loaded from the profile. May not be RGB!
+     */
+    QColorSpace QColorSpaceForProfile(const KoColorProfile *profile) const;
     /**
      * @return the list of available color models
      */
@@ -389,6 +424,7 @@ private:
     friend class TestKoColorSpaceSanity;
     friend class TestColorConversionSystem;
     friend struct FriendOfColorSpaceRegistry;
+    friend class TestProfileGeneration;
 
     /**
      * @return a list with an instance of all color space with their default profile.
@@ -403,6 +439,8 @@ private:
      *          use it anywhere other than unittests!
      */
     const KoColorConversionSystem* colorConversionSystem() const;
+
+    const KoColorProfile *profileForInternal(const KoColorProfileQuery &query, const bool generate) const;
 
 private:
     KoColorSpaceRegistry(const KoColorSpaceRegistry&);

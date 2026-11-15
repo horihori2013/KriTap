@@ -7,9 +7,10 @@
 
 #include "KisRecentFileIconCache.h"
 
-#include <QtConcurrent>
+#include <QtConcurrentRun>
 #include <QApplication>
 #include <QGlobalStatic>
+#include <QFutureWatcher>
 
 #include "KisFileIconCreator.h"
 #include "KisRecentDocumentsModelWrapper.h"
@@ -72,6 +73,9 @@ KisRecentFileIconCache::KisRecentFileIconCache()
     if (QThread::idealThreadCount() > 2) {
         m_iconFetchThreadPool.setMaxThreadCount(2);
     }
+    if (qApp) {
+        m_devicePixelRatioF = qMax(qApp->devicePixelRatio(), 1.0);
+    }
     connect(qApp, SIGNAL(aboutToQuit()), SLOT(cleanupOnQuit()));
 }
 
@@ -99,11 +103,11 @@ QIcon KisRecentFileIconCache::getOrQueueFileIcon(const QUrl &url)
             // We don't fetch thumbnails for non-local files.
             return QIcon();
         }
-        constexpr QSize iconSize(KisRecentDocumentsModelWrapper::ICON_SIZE_LENGTH, KisRecentDocumentsModelWrapper::ICON_SIZE_LENGTH);
+        constexpr QSize iconSize(KisRecentDocumentsModelWrapper::MAX_ICON_SIZE_LENGTH, KisRecentDocumentsModelWrapper::MAX_ICON_SIZE_LENGTH);
         const GetFileIconParameters param = {
             url, // m_documentUrl
             iconSize, // m_iconSize
-            1.0, // m_devicePixelRatioF
+            m_devicePixelRatioF, // m_devicePixelRatioF
         };
         QFuture<IconFetchResult> future = QtConcurrent::run(&m_iconFetchThreadPool, getFileIcon, param);
         auto *watcher = new QFutureWatcher<IconFetchResult>(this);

@@ -42,7 +42,10 @@ enum CommandId {
     ChangePaintOrderCommand,
     SvgTextMergePropertiesRangeCommand,
     KoShapeMergeTextPropertiesCommandId,
-    ImageAnimSettingCommandId
+    ImageAnimSettingCommandId,
+    SvgTextChangeTransformsOnRangeCommandId,
+    SvgTextPathInfoChangeCommandId,
+    ChangeImageHdrMetadataId,
 };
 
 }

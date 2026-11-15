@@ -19,11 +19,7 @@
 #include "KoShapeStrokeModel.h"
 #include "KoShapeGroup.h"
 #include "KoToolProxy.h"
-#include "KoShapeShadow.h"
 #include "KoShapeLayer.h"
-#include "KoFilterEffect.h"
-#include "KoFilterEffectStack.h"
-#include "KoFilterEffectRenderContext.h"
 #include "KoShapeBackground.h"
 #include <KoRTree.h>
 #include "KoClipPath.h"
@@ -65,7 +61,6 @@ inline bool shapeUsedInRenderingTree(KoShape *shape)
  */
 inline bool shapeHasGroupEffects(KoShape *shape) {
     return shape->clipPath() ||
-        (shape->filterEffectStack() && !shape->filterEffectStack()->isEmpty()) ||
         shape->clipMask();
 }
 
@@ -200,11 +195,6 @@ void renderShapes(typename KisForest<KoShape*>::child_iterator beginIt,
             painter.setOpacity(1.0-transparency);
         }
 
-        if (shape->shadow()) {
-            KisQPainterStateSaver saver(&painter);
-            shape->shadow()->paint(shape, painter);
-        }
-
         QScopedPointer<KoClipMaskPainter> clipMaskPainter;
         QPainter *shapePainter = &painter;
 
@@ -278,7 +268,6 @@ void KoShapeManager::Private::updateTree()
         }
 
         aggregate4update.clear();
-        shapeIndexesBeforeUpdate.clear();
     }
 
     if (selectionModified) {
@@ -376,7 +365,6 @@ void KoShapeManager::setShapes(const QList<KoShape *> &shapes, Repaint repaint)
         d->compressedUpdate = QRect();
         d->compressedUpdatedShapes.clear();
         d->aggregate4update.clear();
-        d->shapeIndexesBeforeUpdate.clear();
         d->tree.clear();
         d->shapes.clear();
     }
@@ -655,8 +643,6 @@ KoShape *KoShapeManager::shapeAt(const QPointF &position, KoFlake::ShapeSelectio
 
 QList<KoShape *> KoShapeManager::shapesAt(const QRectF &rect, bool omitHiddenShapes, bool containedMode)
 {
-    QMutexLocker l(&d->shapesMutex);
-
     d->updateTree();
     QList<KoShape*> shapes;
 
@@ -729,7 +715,6 @@ void KoShapeManager::notifyShapeChanged(KoShape *shape)
         }
 
         d->aggregate4update.insert(shape);
-        d->shapeIndexesBeforeUpdate.insert(shape, shape->zIndex());
     }
 
     KoShapeContainer *container = dynamic_cast<KoShapeContainer*>(shape);

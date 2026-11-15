@@ -28,6 +28,7 @@
 #include <kis_assert.h>
 #include <kis_debug.h>
 #include <KisUsageLogger.h>
+#include <KisFileUtils.h>
 
 #include "KoResourcePaths.h"
 #include "KisResourceStorage.h"
@@ -52,6 +53,21 @@ public:
     QHash<QPair<QString, QString>, KoResourceSP> resourceCache;
     QMap<QPair<QString, QString>, KisTagSP> tagCache;
     QStringList errorMessages;
+
+    KisResourceStorageSP safeGetStorage(const QString &storageLocation) {
+        /**
+         * When using a []-operator on a map object, a new (null) element
+         * may accidentially be created, if no such element is present.
+         * Hence we should be more careful with doing that.
+         */
+
+        if (!storages.contains(storageLocation)) {
+            qWarning() << "WARNING: KisResourceLocator: failed to find a storage with location" << storageLocation;
+            return nullptr;
+        }
+
+        return storages[storageLocation];
+    }
 };
 
 KisResourceLocator::KisResourceLocator(QObject *parent)
@@ -101,11 +117,10 @@ KisResourceLocator::LocatorError KisResourceLocator::initialize(const QString &i
     // Check whether we're updating from an older version
     if (initializationStatus != InitializationStatus::FirstRun) {
         QFile fi(d->resourceLocation + '/' + "KRITA_RESOURCE_VERSION");
-        if (!fi.exists()) {
+        if (!fi.open(QFile::ReadOnly)) {
             initializationStatus = InitializationStatus::FirstUpdate;
         }
         else {
-            fi.open(QFile::ReadOnly);
             QVersionNumber resource_version = QVersionNumber::fromString(QString::fromUtf8(fi.readAll()));
             QVersionNumber krita_version = QVersionNumber::fromString(KritaVersionWrapper::versionString());
             if (krita_version > resource_version) {
@@ -153,7 +168,7 @@ bool KisResourceLocator::resourceCached(QString storageLocation, const QString &
 void KisResourceLocator::loadRequiredResources(KoResourceSP resource)
 {
     auto loadResourcesGroup =
-            [this] (QList<KoResourceLoadResult> resources,
+            [this, parentResource = resource] (QList<KoResourceLoadResult> resources,
             const QString &resourceGroup) {
 
         Q_FOREACH (KoResourceLoadResult res, resources) {
@@ -167,8 +182,7 @@ void KisResourceLocator::loadRequiredResources(KoResourceSP resource)
                 QByteArray data = res.embeddedResource().data();
                 QBuffer buffer(&data);
                 buffer.open(QBuffer::ReadOnly);
-
-                importResource(sig.type, sig.filename, &buffer, false, "memory");
+                importResourceDeduplicateFileName(sig.type, sig.filename, &buffer, "memory");
                 break;
             }
             case KoResourceLoadResult::FailedLink:
@@ -325,9 +339,8 @@ KoResourceSP KisResourceLocator::resource(QString storageLocation, const QString
         resource = d->resourceCache[key];
     }
     else {
-        KisResourceStorageSP storage = d->storages[storageLocation];
+        KisResourceStorageSP storage = d->safeGetStorage(storageLocation);
         if (!storage) {
-            qWarning() << "Could not find storage" << storageLocation;
             return 0;
         }
 
@@ -412,6 +425,34 @@ KoResourceSP KisResourceLocator::resourceForId(int resourceId)
     return r;
 }
 
+QString KisResourceLocator::md5ForId(int resourceId)
+{
+    if (resourceId < 0) {
+        return "";
+    }
+    QSqlQuery q;
+    if (!q.prepare("SELECT resources.id\n"
+                   ",      resources.md5sum\n"
+                   "FROM   resources\n"
+                   "WHERE  resources.id = :resourceId\n")) {
+        qWarning() << "Could not prepare id/version query" << q.lastError();
+    }
+
+    q.bindValue(":resourceId", resourceId);
+
+    if (!q.exec()) {
+        qWarning() << "Could not execute md5sum query" << q.lastError() << q.boundValues();
+    }
+
+    if (!q.first()) {
+        qWarning() << "Could not find the resource in the database";
+    }
+
+    QString out = q.value(1).toString();
+
+    return out;
+}
+
 bool KisResourceLocator::setResourceActive(int resourceId, bool active)
 {
     // First remove the resource from the cache
@@ -443,7 +484,8 @@ KoResourceSP KisResourceLocator::importResourceFromFile(const QString &resourceT
 
 KoResourceSP KisResourceLocator::importResource(const QString &resourceType, const QString &fileName, QIODevice *device, const bool allowOverwrite, const QString &storageLocation)
 {
-    KisResourceStorageSP storage = d->storages[makeStorageLocationAbsolute(storageLocation)];
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, nullptr);
 
     QByteArray resourceData = device->readAll();
     KoResourceSP resource;
@@ -470,7 +512,7 @@ KoResourceSP KisResourceLocator::importResource(const QString &resourceType, con
     const QString md5 = KoMD5Generator::generateHash(resourceData);
     const QString resourceUrl = resourceType + "/" + resource->filename();
 
-    const KoResourceSP existingResource = storage->resource(resourceUrl);
+    KoResourceSP existingResource = storage->resource(resourceUrl);
 
     if (existingResource) {
         const QString existingResourceMd5Sum = storage->resourceMd5(resourceUrl);
@@ -599,13 +641,53 @@ KoResourceSP KisResourceLocator::importResource(const QString &resourceType, con
     return nullptr;
 }
 
+namespace {
+QString findDeduplicatedFileName(const QString &resourceType, const QString &proposedFileName, KisResourceStorageSP storage)
+{
+
+    auto fileAllowedCallback = [resourceType, storage] (const QString &fileName) {
+        QString resourceUrl = resourceType + "/" + fileName;
+        return !storage->resource(resourceUrl);
+    };
+
+    return KritaUtils::deduplicateFileName(proposedFileName, "_embedded_", fileAllowedCallback);
+}
+}
+
+KoResourceSP KisResourceLocator::importResourceDeduplicateFileName(const QString &resourceType, const QString &proposedFileName, QIODevice *device, const QString &storageLocation)
+{
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, nullptr);
+
+    const QString fileName = findDeduplicatedFileName(resourceType, proposedFileName, storage);
+    return importResource(resourceType, fileName, device, false, storageLocation);
+}
+
+bool KisResourceLocator::addResourceDeduplicateFileName(const QString &resourceType, const KoResourceSP resource, const QString &storageLocation)
+{
+    // fix filename is missing
+    if (resource->filename().isEmpty()) {
+        resource->setFilename(resource->name().split(" ").join("_") + resource->defaultFileExtension());
+    }
+
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(!resource->filename().isEmpty(), false);
+
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
+
+    const QString fileName = findDeduplicatedFileName(resourceType, resource->filename(), storage);
+    resource->setFilename(fileName);
+    return addResource(resourceType, resource, storageLocation);
+}
+
 bool KisResourceLocator::importWillOverwriteResource(const QString &resourceType, const QString &fileName, const QString &storageLocation) const
 {
-    KisResourceStorageSP storage = d->storages[makeStorageLocationAbsolute(storageLocation)];
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
 
     const QString resourceUrl = resourceType + "/" + QFileInfo(fileName).fileName();
 
-    const KoResourceSP existingResource = storage->resource(resourceUrl);
+    KoResourceSP existingResource = storage->resource(resourceUrl);
 
     return !existingResource.isNull();
 }
@@ -615,7 +697,8 @@ bool KisResourceLocator::exportResource(KoResourceSP resource, QIODevice *device
     if (!resource || !resource->valid() || resource->resourceId() < 0) return false;
 
     const QString resourceUrl = resource->resourceType().first + "/" + resource->filename();
-    KisResourceStorageSP storage = d->storages[makeStorageLocationAbsolute(resource->storageLocation())];
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(resource->storageLocation()));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
     return storage->exportResource(resourceUrl, device);
 }
 
@@ -623,8 +706,8 @@ bool KisResourceLocator::addResource(const QString &resourceType, const KoResour
 {
     if (!resource || !resource->valid()) return false;
 
-    KisResourceStorageSP storage = d->storages[makeStorageLocationAbsolute(storageLocation)];
-    Q_ASSERT(storage);
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
 
     //If we have gotten this far and the resource still doesn't have a filename to save to, we should generate one.
     if (resource->filename().isEmpty()) {
@@ -664,13 +747,12 @@ bool KisResourceLocator::updateResource(const QString &resourceType, const KoRes
 {
     QString storageLocation = makeStorageLocationAbsolute(resource->storageLocation());
 
-    Q_ASSERT(d->storages.contains(storageLocation));
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
 
     if (resource->resourceId() < 0) {
         return addResource(resourceType, resource);
     }
-
-    KisResourceStorageSP storage = d->storages[storageLocation];
 
     if (!storage->supportsVersioning()) return false;
 
@@ -715,9 +797,8 @@ bool KisResourceLocator::reloadResource(const QString &resourceType, const KoRes
     if (resource->resourceId() < 0) return false;
 
     QString storageLocation = makeStorageLocationAbsolute(resource->storageLocation());
-    Q_ASSERT(d->storages.contains(storageLocation));
-
-    KisResourceStorageSP storage = d->storages[storageLocation];
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, false);
 
     if (!storage->loadVersionedResource(resource)) {
         qWarning() << "Failed to reload the resource" << resource->name() << "from storage" << storageLocation;
@@ -748,37 +829,40 @@ bool KisResourceLocator::setMetaDataForResource(int id, QMap<QString, QVariant> 
 QMap<QString, QVariant> KisResourceLocator::metaDataForStorage(const QString &storageLocation) const
 {
     QMap<QString, QVariant> metadata;
-    if (!d->storages.contains(makeStorageLocationAbsolute(storageLocation))) {
-        qWarning() << storageLocation << "not in" << d->storages.keys();
-        return metadata;
-    }
 
-    KisResourceStorageSP st = d->storages[makeStorageLocationAbsolute(storageLocation)];
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, metadata);
 
-    if (d->storages[makeStorageLocationAbsolute(storageLocation)].isNull()) {
-        return metadata;
-    }
-
-    Q_FOREACH(const QString key, st->metaDataKeys()) {
-        metadata[key] = st->metaData(key);
+    Q_FOREACH(const QString key, storage->metaDataKeys()) {
+        metadata[key] = storage->metaData(key);
     }
     return metadata;
 }
 
 void KisResourceLocator::setMetaDataForStorage(const QString &storageLocation, QMap<QString, QVariant> map) const
 {
-    Q_ASSERT(d->storages.contains(storageLocation));
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(storageLocation));
+    KIS_SAFE_ASSERT_RECOVER_RETURN(storage);
+
     Q_FOREACH(const QString &key, map.keys()) {
-        d->storages[storageLocation]->setMetaData(key, map[key]);
+        storage->setMetaData(key, map[key]);
     }
 }
 
-void KisResourceLocator::purge(const QString &storageLocation)
+void KisResourceLocator::purge(const QString &storageLocation, const QVector<int> &removedTagIds)
 {
     Q_FOREACH(const auto key, d->resourceCache.keys()) {
         if (key.first == storageLocation) {
             d->resourceCache.remove(key);
             KisResourceThumbnailCache::instance()->remove(key);
+        }
+    }
+
+    for (auto it = d->tagCache.begin(); it != d->tagCache.end();) {
+        if (removedTagIds.contains(it.value()->id())) {
+            it = d->tagCache.erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -848,11 +932,22 @@ bool KisResourceLocator::removeStorage(const QString &storageLocation)
         }
     }
 
+    QVector<std::pair<QString, QVector<int>>> removedTags;
+    QVector<int> allRemovedTagIds;
+    Q_FOREACH(const QString &type, KisResourceLoaderRegistry::instance()->resourceTypes()) {
+        auto [uniqueTags, sharedTags] = KisResourceCacheDb::tagsForStorage(type, storageLocation);
+        removedTags << std::make_pair(type, uniqueTags);
+        allRemovedTagIds << uniqueTags;
+    }
+
     Q_FOREACH (const auto &typedResources, removedResources) {
         Q_EMIT beginExternalResourceRemove(typedResources.first, typedResources.second);
     }
 
-    purge(storageLocation);
+    // TODO: add model notification about removed tags
+    Q_UNUSED(removedTags);
+
+    purge(storageLocation, allRemovedTagIds);
 
     KisResourceStorageSP storage = d->storages.take(storageLocation);
 
@@ -955,12 +1050,8 @@ void KisResourceLocator::purgeTag(const QString tagUrl, const QString resourceTy
 
 QString KisResourceLocator::filePathForResource(KoResourceSP resource)
 {
-    const QString storageLocation = makeStorageLocationAbsolute(resource->storageLocation());
-    KisResourceStorageSP storage = d->storages[storageLocation];
-    if (!storage) {
-        qWarning() << "Could not find storage" << storageLocation;
-        return QString();
-    }
+    KisResourceStorageSP storage = d->safeGetStorage(makeStorageLocationAbsolute(resource->storageLocation()));
+    KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(storage, QString());
 
     const QString resourceUrl = resource->resourceType().first + "/" + resource->filename();
 
@@ -1019,9 +1110,12 @@ KisResourceLocator::LocatorError KisResourceLocator::firstTimeInstallation(Initi
     }
 
     QFile f(d->resourceLocation + '/' + "KRITA_RESOURCE_VERSION");
-    f.open(QFile::WriteOnly);
-    f.write(KritaVersionWrapper::versionString().toUtf8());
-    f.close();
+    if (f.open(QFile::WriteOnly)) {
+        f.write(KritaVersionWrapper::versionString().toUtf8());
+        f.close();
+    } else {
+        qWarning() << "Could not open" << f.fileName() << "for writing:" << f.errorString();
+    }
 
     return LocatorError::Ok;
 }
@@ -1073,11 +1167,7 @@ QList<KisResourceStorageSP> KisResourceLocator::storages() const
 
 KisResourceStorageSP KisResourceLocator::storageByLocation(const QString &location) const
 {
-    if (!d->storages.contains(location)) {
-        qWarning() << "No" << location << "storage defined:" << d->storages.keys();
-        return 0;
-    }
-    KisResourceStorageSP storage = d->storages[location];
+    KisResourceStorageSP storage = d->safeGetStorage(location);
     if (!storage || !storage->valid()) {
         qWarning() << "Could not retrieve the" << location << "storage object or the object is not valid";
         return 0;

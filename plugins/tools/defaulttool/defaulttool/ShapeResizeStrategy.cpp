@@ -215,7 +215,7 @@ KUndo2Command *ShapeResizeStrategy::createCommand()
         m_executedCommand->setSkipOneRedo(true);
     }
 
-    return m_executedCommand.take();
+    return m_executedCommand.release();
 }
 
 void ShapeResizeStrategy::finishInteraction(Qt::KeyboardModifiers modifiers)
@@ -223,8 +223,9 @@ void ShapeResizeStrategy::finishInteraction(Qt::KeyboardModifiers modifiers)
     Q_UNUSED(modifiers);
 }
 
-void ShapeResizeStrategy::paint(QPainter &painter, const KoViewConverter &converter)
+void ShapeResizeStrategy::paint(QPainter &painter, const KoViewConverter &converter, const KoColorDisplayRendererInterface *displayRendererInterface)
 {
     Q_UNUSED(painter);
     Q_UNUSED(converter);
+    Q_UNUSED(displayRendererInterface);
 }

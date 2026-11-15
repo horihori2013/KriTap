@@ -13,6 +13,7 @@
 #include "kritapigment_export.h"
 
 class KoColorProfile;
+struct KoColorProfileQuery;
 class KoColorConversionTransformationFactory;
 
 /**
@@ -98,20 +99,10 @@ public:
      */
     virtual QString defaultProfile() const = 0;
 
-    struct ProfileRegistrationInterface
-    {
-        virtual ~ProfileRegistrationInterface() {}
-        virtual const KoColorProfile* profileByName(const QString &profileName) const = 0;
-        virtual void registerNewProfile(KoColorProfile *profile) = 0;
-    };
-
     /**
      * Create a color profile from a memory array, if possible, otherwise return 0.
-     * This will replace the existing profile with the name in the KoColorSpaceRegistry
-     *
-     * This will call the descendant's createColorProfile()
      */
-    const KoColorProfile* colorProfile(const QByteArray& rawData, ProfileRegistrationInterface *registrationInterface) const;
+    virtual KoColorProfile* createColorProfile(const QByteArray& rawData) const = 0;
 
     /**
      * Create or reuse the existing colorspace for the given profile.
@@ -120,12 +111,25 @@ public:
      */
     const KoColorSpace *grabColorSpace(const KoColorProfile *profile);
 
+    /**
+     * @brief colorConversionLinksFromProfile
+     * Sometimes, we need to generate special color conversion links based on
+     * the properties of the profile. The Perceptual Quantizer profiles are an
+     * example of this. This function is called inside the color conversion system.
+     * @param profile -- the profile for which to create the links for.
+     */
+    virtual QList<KoColorConversionTransformationFactory*> colorConversionLinksFromProfile(const KoColorProfile *profile) const {
+        Q_UNUSED(profile)
+        return QList<KoColorConversionTransformationFactory*>();
+    }
+
+    virtual QList<KoColorProfileQuery> requiredConnectionProfiles(const KoColorProfile *profile) const;
+
 protected:
     /**
      * creates a color space using the given profile.
      */
     virtual KoColorSpace *createColorSpace(const KoColorProfile *) const = 0;
-    virtual KoColorProfile* createColorProfile(const QByteArray& rawData) const = 0;
 private:
     struct Private;
     Private* const d;

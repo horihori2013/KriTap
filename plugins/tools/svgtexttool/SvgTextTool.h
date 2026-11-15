@@ -8,17 +8,19 @@
 #ifndef SVG_TEXT_TOOL
 #define SVG_TEXT_TOOL
 
-#include "ui_WdgSvgTextOptionWidget.h"
 
 #include <KConfigGroup>
 #include <KoToolBase.h>
-#include <QFontComboBox>
 #include <QPointer>
-#include <QDoubleSpinBox>
+
+#include <KoSvgTextShapeOutlineHelper.h>
 
 #include <kis_signal_auto_connection.h>
+#include <KisSignalMapper.h>
 
 #include "SvgTextCursor.h"
+#include "SvgTextToolOptionsManager.h"
+#include "SvgTextOnPathDecorationHelper.h"
 #include "glyphpalette/GlyphPaletteDialog.h"
 
 #include <memory>
@@ -26,15 +28,16 @@
 class KoSelection;
 class SvgTextEditor;
 class KoSvgTextShape;
-class SvgTextCursor;
 class KoInteractionStrategy;
 class KUndo2Command;
+class QActionGroup;
 
 class SvgTextTool : public KoToolBase
 {
     Q_OBJECT
 
     friend class SvgCreateTextStrategy;
+    friend class SvgChangeTextPathInfoStrategy;
 
 public:
     explicit SvgTextTool(KoCanvasBase *canvas);
@@ -98,15 +101,20 @@ protected:
 private:
     qreal grabSensitivityInPt() const;
 
-    QFont defaultFont() const;
-    Qt::Alignment horizontalAlign() const;
-    int writingMode() const;
-    bool isRtl() const;
+    KoSvgText::WritingMode writingMode() const;
+
+    void addMappedAction(KisSignalMapper* mapper, const QString &actionName, const int value, QActionGroup *group = nullptr);
+
+    /**
+     * @brief nodeEditable
+     * @see nodeEditable in KisTool.
+     * @return whether the current Node is editable. If not, it'll display an oncanvas message.
+     */
+    bool nodeEditable();
 
 private Q_SLOTS:
 
     void showEditor();
-    void slotTextEditorClosed();
     void textUpdated(KoSvgTextShape *shape, const QString &svg, const QString &defs);
 
     /**
@@ -119,6 +127,8 @@ private Q_SLOTS:
      * update the glyph palette dialog from the current selection.
      */
     void updateGlyphPalette();
+
+    void updateTextPathHelper();
     /**
      * @brief insertRichText
      * Insert a rich text shape, used by the glyph palette..
@@ -130,17 +140,15 @@ private Q_SLOTS:
     /**
      * @brief generateDefs
      * This generates a defs section with the appropriate
-     * css and css strings assigned. This allows the artist
-     * to select settings that new texts will be created with.
-     * @return a string containing the defs.
+     * css and css strings assigned.
      */
-    QString generateDefs(const QString &extraProperties = QString());
+    QString generateDefs(const KoSvgTextProperties &properties = KoSvgTextProperties());
 
     /**
-     * @brief storeDefaults
-     * store default font and point size when they change.
+     * @brief propertiesForNewText
+     * get the text properties that should be used for new text.
      */
-    void storeDefaults();
+    KoSvgTextProperties propertiesForNewText() const;
 
     /**
      * @brief selectionChanged
@@ -155,9 +163,42 @@ private Q_SLOTS:
      */
     void slotUpdateCursorDecoration(QRectF updateRect);
 
-    void slotTextTypeUpdated();
+    /**
+     * @brief slotConvertType
+     * @param index
+     */
     void slotConvertType(int index);
 
+    /**
+     * @brief slotUpdateVisualCursor
+     * update the visual cursor mode on the text cursor.
+     */
+    void slotUpdateVisualCursor();
+
+    /**
+     * @brief slotUpdateTextPasteBehaviour
+     * update the default text paste behaviour.
+     */
+    void slotUpdateTextPasteBehaviour();
+
+    /**
+     * @brief slotTextTypeUpdated
+     * Update the text type in the tool options.
+     */
+    void slotTextTypeUpdated();
+
+    /**
+     * @brief slotMoveTextSelection
+     * Move the start of the selection in typesetting mode by image 1 pix.
+     * @param index -- Qt key for a direction.
+     */
+    void slotMoveTextSelection(int index);
+
+    /**
+     * @brief slotUpdateTypeSettingMode
+     * Enable typesetting mode from the tool options.
+     */
+    void slotUpdateTypeSettingMode();
 
 private:
     enum class DragMode {
@@ -166,14 +207,19 @@ private:
         Select,
         InlineSizeHandle,
         Move,
+        TextPathHandle,
+        InShapeOffset,
+        TypeSetting,
     };
     enum class HighlightItem {
         None = 0,
         InlineSizeStartHandle,
         InlineSizeEndHandle,
         MoveBorder,
+        TypeSettingHandle,
     };
 
+    QScopedPointer<SvgTextToolOptionsManager>m_optionManager;
     QPointer<SvgTextEditor> m_editor;
     QPointer<GlyphPaletteDialog> m_glyphPalette;
     QPointF m_lastMousePos;
@@ -182,19 +228,16 @@ private:
     HighlightItem m_highlightItem {HighlightItem::None};
     bool m_strategyAddingCommand {false};
 
-    QButtonGroup *m_defAlignment {nullptr};
-    QButtonGroup *m_defWritingMode {nullptr};
-    QButtonGroup *m_defDirection {nullptr};
-    QButtonGroup *m_convertType {nullptr};
-    KConfigGroup m_configGroup;
+    QScopedPointer<KisSignalMapper> m_textTypeSignalsMapper;
+    QScopedPointer<KisSignalMapper> m_typeSettingMovementMapper;
+
+
     SvgTextCursor m_textCursor;
+    SvgTextOnPathDecorationHelper m_textOnPathHelper;
+    QScopedPointer<KoSvgTextShapeOutlineHelper> m_textOutlineHelper;
     KisSignalAutoConnectionsStore m_canvasConnections;
 
-
     QPainterPath m_hoveredShapeHighlightRect;
-
-    Ui_WdgSvgTextOptionWidget optionUi;
-    bool m_optionUiInitialized {false};
 
     QCursor m_base_cursor;
     QCursor m_text_inline_horizontal;

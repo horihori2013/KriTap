@@ -21,12 +21,10 @@
 #include "kis_display_color_converter.h"
 #include "kis_tool_utils.h"
 
-
-namespace
-{
-// GUI ComboBox index constants
-const int SAMPLE_MERGED = 0;
-}
+#include <kis_config.h>
+#include <kis_config_notifier.h>
+#include <dialogs/kis_dlg_preferences.h>
+#include <QSignalBlocker>
 
 KisToolColorSampler::KisToolColorSampler(KoCanvasBase *canvas)
     : KisTool(canvas, KisCursor::samplerCursor()),
@@ -97,6 +95,24 @@ void KisToolColorSampler::slotColorPickerSelectionFinished(const KoColor &color)
     }
 }
 
+void KisToolColorSampler::slotSetPreviewStyleComboBoxFromConfig()
+{
+    if (m_optionsWidget) {
+        QSignalBlocker blocker(m_optionsWidget->cmbPreviewStyle);
+        GeneralTab::setColorSamplerPreviewStyleIndexByValue(m_optionsWidget->cmbPreviewStyle,
+                                                            KisConfig(true).colorSamplerPreviewStyle());
+    }
+}
+
+void KisToolColorSampler::slotSetPreviewStyleConfigFromComboBox()
+{
+    if (m_optionsWidget) {
+        KisConfig::ColorSamplerPreviewStyle style =
+            GeneralTab::getColorSamplerPreviewStyleValue(m_optionsWidget->cmbPreviewStyle);
+        KisConfig(false).setColorSamplerPreviewStyle(style);
+    }
+}
+
 void KisToolColorSampler::paint(QPainter &gc, const KoViewConverter &converter)
 {
     m_helper.paint(gc, converter);
@@ -127,7 +143,7 @@ void KisToolColorSampler::beginPrimaryAction(KoPointerEvent *event)
 
     bool useOtherColor = canvas()->resourceManager()->boolResource(KoCanvasResource::UsingOtherColor);
     // if useOtherColor is true, apply to the other color than that configured in the tool options
-    m_helper.activate(!m_config->sampleMerged, m_config->toForegroundColor != useOtherColor);
+    m_helper.activate(m_config->sampleSource, m_config->toForegroundColor != useOtherColor);
     m_helper.startAction(event->point, m_config->radius, m_config->blend);
     requestUpdateOutline(event->point, event);
 
@@ -163,7 +179,7 @@ void KisToolColorSampler::activatePrimaryAction()
      */
     bool useOtherColor = canvas()->resourceManager()->boolResource(KoCanvasResource::UsingOtherColor);
     // if useOtherColor is true, apply to the other color than that configured in the tool options
-    m_helper.updateCursor(!m_config->sampleMerged, m_config->toForegroundColor != useOtherColor);
+    m_helper.updateCursor(m_config->sampleSource, m_config->toForegroundColor != useOtherColor);
 }
 
 void KisToolColorSampler::deactivatePrimaryAction()
@@ -277,6 +293,16 @@ QWidget* KisToolColorSampler::createOptionWidget()
     specialSpacer->setFixedSize(0, 0);
     m_optionsWidget->layout()->addWidget(specialSpacer);
 
+    GeneralTab::setColorSamplerPreviewStyleItems(m_optionsWidget->cmbPreviewStyle);
+    connect(KisConfigNotifier::instance(),
+            &KisConfigNotifier::sigColorSamplerPreviewStyleChanged,
+            this,
+            &KisToolColorSampler::slotSetPreviewStyleComboBoxFromConfig);
+    connect(m_optionsWidget->cmbPreviewStyle,
+            QOverload<int>::of(&QComboBox::activated),
+            this,
+            &KisToolColorSampler::slotSetPreviewStyleConfigFromComboBox);
+
     // Initialize blend KisSliderSpinBox
     m_optionsWidget->blend->setRange(0,100);
     KisSpinBoxI18nHelper::setText(m_optionsWidget->blend,
@@ -325,10 +351,12 @@ void KisToolColorSampler::updateOptionWidget()
 
     m_optionsWidget->cbNormaliseValues->setChecked(m_config->normaliseValues);
     m_optionsWidget->cbUpdateCurrentColor->setChecked(m_config->updateColor);
-    m_optionsWidget->cmbSources->setCurrentIndex(SAMPLE_MERGED + !m_config->sampleMerged);
+    m_optionsWidget->cmbSources->setCurrentIndex(static_cast<int>(m_config->sampleSource));
     m_optionsWidget->cbPalette->setChecked(m_config->addColorToCurrentPalette);
     m_optionsWidget->radius->setValue(m_config->radius);
     m_optionsWidget->blend->setValue(m_config->blend);
+
+    slotSetPreviewStyleComboBoxFromConfig();
 }
 
 void KisToolColorSampler::slotSetUpdateColor(bool state)
@@ -359,7 +387,7 @@ void KisToolColorSampler::slotChangeBlend(int value)
 
 void KisToolColorSampler::slotSetColorSource(int value)
 {
-    m_config->sampleMerged = value == SAMPLE_MERGED;
+    m_config->sampleSource = static_cast<KisToolUtils::ColorSamplerSource>(value);
 }
 
 void KisToolColorSampler::slotChangePalette(int)

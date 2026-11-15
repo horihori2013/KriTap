@@ -5,6 +5,7 @@
  */
 #include "kis_kra_saver.h"
 
+#include "kis_hdr_metadata.h"
 #include "kis_kra_tags.h"
 #include "kis_kra_save_visitor.h"
 #include "kis_kra_savexml_visitor.h"
@@ -112,27 +113,36 @@ QDomElement KisKraSaver::saveXML(QDomDocument& doc,  KisImageSP image)
     }
     imageElement.setAttribute(X_RESOLUTION, KisDomUtils::toString(image->xRes()*72.0));
     imageElement.setAttribute(Y_RESOLUTION, KisDomUtils::toString(image->yRes()*72.0));
+
     //now the proofing options:
     if (image->proofingConfiguration()) {
-        if (image->proofingConfiguration()->storeSoftproofingInsideImage) {
-            imageElement.setAttribute(PROOFINGPROFILENAME, KisDomUtils::toString(image->proofingConfiguration()->proofingProfile));
-            imageElement.setAttribute(PROOFINGMODEL, KisDomUtils::toString(image->proofingConfiguration()->proofingModel));
-            imageElement.setAttribute(PROOFINGDEPTH, KisDomUtils::toString(image->proofingConfiguration()->proofingDepth));
-            imageElement.setAttribute(PROOFINGINTENT, KisDomUtils::toString(image->proofingConfiguration()->conversionIntent));
-            imageElement.setAttribute(PROOFINGDISPLAYINTENT, KisDomUtils::toString(image->proofingConfiguration()->displayIntent));
-            bool bcp = image->proofingConfiguration()->useBlackPointCompensationFirstTransform;
-            imageElement.setAttribute(PROOFINGBLACKPOINTCOMPENSATION, bcp? "true": "false");
-            bcp = image->proofingConfiguration()->displayFlags.testFlag(KoColorConversionTransformation::BlackpointCompensation);
-            imageElement.setAttribute(PROOFINGDISPLAYBLACKPOINTCOMPENSATION, bcp? "true": "false");
-            QString mode = "custom";
-            if (image->proofingConfiguration()->displayMode == KisProofingConfiguration::Monitor) {
-                mode = "monitor";
-            } else {
-                mode = "paper";
+        imageElement.setAttribute(PROOFINGPROFILENAME,
+                                  KisDomUtils::toString(image->proofingConfiguration()->proofingProfile));
+        imageElement.setAttribute(PROOFINGMODEL, KisDomUtils::toString(image->proofingConfiguration()->proofingModel));
+        imageElement.setAttribute(PROOFINGDEPTH, KisDomUtils::toString(image->proofingConfiguration()->proofingDepth));
+        imageElement.setAttribute(PROOFINGINTENT,
+                                  KisDomUtils::toString(image->proofingConfiguration()->conversionIntent));
+        imageElement.setAttribute(PROOFINGDISPLAYINTENT,
+                                  KisDomUtils::toString(image->proofingConfiguration()->displayIntent));
+        bool bcp = image->proofingConfiguration()->useBlackPointCompensationFirstTransform;
+        imageElement.setAttribute(PROOFINGBLACKPOINTCOMPENSATION, bcp ? "true" : "false");
+        bcp = image->proofingConfiguration()->displayFlags.testFlag(
+            KoColorConversionTransformation::BlackpointCompensation);
+        imageElement.setAttribute(PROOFINGDISPLAYBLACKPOINTCOMPENSATION, bcp ? "true" : "false");
+        const QString mode = [&]() {
+            switch (image->proofingConfiguration()->displayMode) {
+            case KisProofingConfiguration::Monitor:
+                return "monitor";
+            case KisProofingConfiguration::Paper:
+                return "paper";
+            case KisProofingConfiguration::Custom:
+                return "custom";
             }
-            imageElement.setAttribute(PROOFINGDISPLAYMODE, mode);
-            imageElement.setAttribute(PROOFINGADAPTATIONSTATE, KisDomUtils::toString(image->proofingConfiguration()->adaptationState));
-        }
+            Q_UNREACHABLE_RETURN("custom");
+        }();
+        imageElement.setAttribute(PROOFINGDISPLAYMODE, mode);
+        imageElement.setAttribute(PROOFINGADAPTATIONSTATE,
+                                  KisDomUtils::toString(image->proofingConfiguration()->legacyAdaptationState()));
     }
 
     quint32 count = 1; // We don't save the root layer, but it does count
@@ -145,6 +155,7 @@ QDomElement KisKraSaver::saveXML(QDomDocument& doc,  KisImageSP image)
     m_d->nodeFileNames = visitor.nodeFileNames();
     m_d->keyframeFilenames = visitor.keyframeFileNames();
 
+    saveHDRMetadata(doc, imageElement, image);
     saveBackgroundColor(doc, imageElement, image);
     saveAssistantsGlobalColor(doc, imageElement);
     saveWarningColor(doc, imageElement, image);
@@ -546,24 +557,24 @@ bool KisKraSaver::saveBinaryData(KoStore* store, KisImageSP image, const QString
     //This'll embed the profile used for proofing into the kra file.
     bool savingSoftproofingProfileSuccess = true;
     if (image->proofingConfiguration()) {
-        if (image->proofingConfiguration()->storeSoftproofingInsideImage) {
-            const KoColorProfile *proofingProfile = KoColorSpaceRegistry::instance()->profileByName(image->proofingConfiguration()->proofingProfile);
-            if (proofingProfile && proofingProfile->valid()) {
-                QByteArray proofingProfileRaw = proofingProfile->rawData();
-                if (!proofingProfileRaw.isEmpty()) {
-                    annotation = new KisAnnotation(ICCPROOFINGPROFILE, proofingProfile->name(), proofingProfile->rawData());
-                }
+        const KoColorProfile *proofingProfile =
+            KoColorSpaceRegistry::instance()->profileByName(image->proofingConfiguration()->proofingProfile);
+        if (proofingProfile && proofingProfile->valid()) {
+            QByteArray proofingProfileRaw = proofingProfile->rawData();
+            if (!proofingProfileRaw.isEmpty()) {
+                annotation = new KisAnnotation(ICCPROOFINGPROFILE, proofingProfile->name(), proofingProfile->rawData());
             }
-            if (annotation) {
-                location = external ? QString() : uri;
-                location += m_d->imageName + ICC_PROOFING_PATH;
-                if (store->open(location)) {
-                    nwritten = store->write(annotation->annotation());
-                    r = store->close();
-                    savingSoftproofingProfileSuccess = savingSoftproofingProfileSuccess && (nwritten == annotation->annotation().size()) && r;
-                } else {
-                    savingSoftproofingProfileSuccess = false;
-                }
+        }
+        if (annotation) {
+            location = external ? QString() : uri;
+            location += m_d->imageName + ICC_PROOFING_PATH;
+            if (store->open(location)) {
+                nwritten = store->write(annotation->annotation());
+                r = store->close();
+                savingSoftproofingProfileSuccess =
+                    savingSoftproofingProfileSuccess && (nwritten == annotation->annotation().size()) && r;
+            } else {
+                savingSoftproofingProfileSuccess = false;
             }
         }
     }
@@ -687,9 +698,48 @@ void KisKraSaver::saveBackgroundColor(QDomDocument& doc, QDomElement& element, K
 void KisKraSaver::saveColorHistory(QDomDocument &doc, QDomElement &element)
 {
     QDomElement colorsElement = doc.createElement(COLORHISTORY);
-    saveKoColors(doc, colorsElement, m_d->doc->colorHistory());
+    saveKoColors(doc, colorsElement, m_d->doc->colorHistoryColors());
 
     element.appendChild(colorsElement);
+}
+
+void KisKraSaver::saveHDRMetadata(QDomDocument &doc, QDomElement &element, KisImageSP image)
+{
+    if (!image->hdrReferenceWhiteLightLevel() && !image->colorVolumeInformation() && !image->relativeContentLightLevelInformation()) {
+        return;
+    }
+    QDomElement hdr = doc.createElement(HDRMETADATA);
+    if (image->hdrReferenceWhiteLightLevel()) {
+        KisDomUtils::saveValue(&hdr, HDRREFERENCEWHITE, *image->hdrReferenceWhiteLightLevel());
+    }
+    if (image->relativeContentLightLevelInformation()) {
+        KisRelativeContentLightLevelInformation c = *image->relativeContentLightLevelInformation();
+        QDomElement clli = doc.createElement(CONTENTLIGHTLEVEL);
+        clli.setAttribute(MAXCLL, KisDomUtils::toString(c.maxContentLightLevel));
+        clli.setAttribute(MAXFALL, KisDomUtils::toString(c.maxFrameAverageLightLevel));
+        if (c.type == KisRelativeContentLightLevelInformation::XYZLuminance) {
+            clli.setAttribute(CLLI_CALCTYPE, CLLI_CALC_XYZY);
+        } else if (c.type == KisRelativeContentLightLevelInformation::Rec2020Component) {
+            clli.setAttribute(CLLI_CALCTYPE, CLLI_CALC_Rec2020);
+        } else if (c.type == KisRelativeContentLightLevelInformation::RGBComponent) {
+            clli.setAttribute(CLLI_CALCTYPE, CLLI_CALC_RGB_XYZ_FALLBACK);
+        }
+        hdr.appendChild(clli);
+    }
+    if (image->colorVolumeInformation()) {
+        KisColorVolumeInformation cv = *image->colorVolumeInformation();
+        QDomElement cvi = doc.createElement(COLORVOLUME);
+        cvi.setAttribute(COLORVOLUMEMAXLUMINANCE, KisDomUtils::toString(cv.maxLuminance));
+        cvi.setAttribute(COLORVOLUMEMINLUMINANCE, KisDomUtils::toString(cv.minLuminance));
+
+        KisDomUtils::saveValue(&cvi, COLORVOLUMERED, cv.red.asVector().toPointF());
+        KisDomUtils::saveValue(&cvi, COLORVOLUMEGREEN, cv.green.asVector().toPointF());
+        KisDomUtils::saveValue(&cvi, COLORVOLUMEBLUE, cv.blue.asVector().toPointF());
+        KisDomUtils::saveValue(&cvi, COLORVOLUMEWHITE, cv.white.asVector().toPointF());
+
+        hdr.appendChild(cvi);
+    }
+    element.appendChild(hdr);
 }
 
 void KisKraSaver::saveAssistantsGlobalColor(QDomDocument& doc, QDomElement& element)
@@ -703,12 +753,10 @@ void KisKraSaver::saveAssistantsGlobalColor(QDomDocument& doc, QDomElement& elem
 void KisKraSaver::saveWarningColor(QDomDocument& doc, QDomElement& element, KisImageSP image)
 {
     if (image->proofingConfiguration()) {
-        if (image->proofingConfiguration()->storeSoftproofingInsideImage) {
-            QDomElement e = doc.createElement(PROOFINGWARNINGCOLOR);
-            KoColor color = image->proofingConfiguration()->warningColor;
-            color.toXML(doc, e);
-            element.appendChild(e);
-        }
+        QDomElement e = doc.createElement(PROOFINGWARNINGCOLOR);
+        KoColor color = image->proofingConfiguration()->warningColor;
+        color.toXML(doc, e);
+        element.appendChild(e);
     }
 }
 

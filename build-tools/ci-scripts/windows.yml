@@ -1,11 +1,10 @@
-windows-build:
+.windows-base:
   stage: build
-  image: storage.kde.org/vm-images/krita-windows-clang18
+  image: $VM_IMAGE_NAME_WINDOWS
   tags:
     - VM
     - amd64
   extends:
-    - .ci-always-job-mixin
     - .ci-artifacts-with-packages-mixin
   variables:
     KDECI_BUILD_TYPE: Release
@@ -20,10 +19,12 @@ windows-build:
     KRITACI_SKIP_DEBUG_PACKAGE: True
     KRITACI_BUILD_INSTALLERS: False
     KRITACI_SKIP_UPLOAD_NIGHTLY_PACKAGE: True
+    KDECI_SIGN_BINARIES: False # we sign only nightlies and release packages
     KRITACI_WINDOWS_SIGN_CONFIG: upstream-ci-utilities/signing/signwindowsbinaries.ini
     KRITACI_PUBLISH_BUILD_CONFIG: upstream-ci-utilities/signing/publishbuild.ini
     EFFECTIVE_DEPS_REPO_BRANCH_NAME: $DEPS_REPO_BRANCH_NAME_WINDOWS
     EFFECTIVE_DEPS_BRANCH_NAME: $DEPS_BRANCH_NAME_WINDOWS
+    EFFECTIVE_PUBLISH_PLATFORM_NAME: windows-qt5
     PYTHONUTF8: 1
   interruptible: true
   before_script:
@@ -31,59 +32,75 @@ windows-build:
     - git clone https://invent.kde.org/packaging/krita-ci-utilities.git krita-deps-management/ci-utilities --depth=1
     - git clone https://invent.kde.org/sysadmin/ci-notary-service.git --depth=1
     - git clone https://invent.kde.org/sysadmin/ci-utilities.git upstream-ci-utilities --depth=1
-    - python -m venv venv --upgrade-deps
+    - >
+      & $BOOTSTRAP_PYTHON_EXE_WINDOWS -m venv venv --upgrade-deps
     - . venv\Scripts\Activate.ps1
     - pip install -r krita-deps-management/requirements.txt
     - pip install -r ci-notary-service/requirements.txt
+    - pip install -r krita-deps-management/ci-utilities/requirements-windows.txt
   script:
     - git config --global --add safe.directory $CI_PROJECT_DIR
     - python -u krita-deps-management/tools/replace-branch-in-seed-file.py krita-deps-management/latest/krita-deps.yml -p -o branch-corrected-deps.yml -d $EFFECTIVE_DEPS_BRANCH_NAME
     - python -u krita-deps-management/tools/generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
     - python -u krita-deps-management/ci-utilities/run-ci-build.py --project $CI_PROJECT_NAME --branch $CI_COMMIT_REF_NAME --platform Windows/Qt5/Shared --skip-publishing 2>&1 | Tee-Object -FilePath "build-krita.log"
     - python -u build-tools/ci-scripts/build-windows-package.py 2>&1 | Tee-Object -FilePath "build-installers.log"
-    - python -u build-tools/ci-scripts/upload-nightly-packages.py --platform windows --folder $CI_PROJECT_DIR 2>&1 | Tee-Object -FilePath "installers-publish.log"
+    - python -u build-tools/ci-scripts/upload-nightly-packages.py --platform $EFFECTIVE_PUBLISH_PLATFORM_NAME --folder $CI_PROJECT_DIR 2>&1 | Tee-Object -FilePath "installers-publish.log"
   coverage: '/^TOTAL.*\s+(\d+\%)$/'
 
-windows-build-qt6-nightly:
+.windows-qt6-base:
   extends:
-  - windows-build
-  - .nightly-job-mixin
-  interruptible: false
+  - .windows-base
   variables:
-    # TODO: Gmic still doesn't build for Qt6
-    KRITACI_SKIP_BUILD_3RDPARTY_PLUGINS: True
-    KRITACI_ALLOW_NO_PYQT: True
-    EFFECTIVE_DEPS_REPO_BRANCH_NAME: transition.now/qt6
-    EFFECTIVE_DEPS_BRANCH_NAME: transition.now/qt6
+    EFFECTIVE_DEPS_REPO_BRANCH_NAME: $DEPS_QT6_REPO_BRANCH_NAME_WINDOWS
+    EFFECTIVE_DEPS_BRANCH_NAME: $DEPS_QT6_BRANCH_NAME_WINDOWS
+    EFFECTIVE_PUBLISH_PLATFORM_NAME: windows
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=OFF
       -DBUILD_TESTING=ON
       -DBUILD_WITH_QT6=ON
+      -DALLOW_UNSTABLE=QT6
 
-windows-build-qt6-manual:
+windows-build-qt5:
   extends:
-  - windows-build-qt6-nightly
+  - .windows-base
   - .ci-manual-job-mixin
 
-windows-nightly:
+windows-build-qt6:
   extends:
-    - windows-build
-    - .nightly-job-mixin
-    - .ci-artifacts-without-packages-mixin
-  interruptible: false
+  - .windows-qt6-base
+  - .ci-always-job-mixin
+
+windows-build-qt5-nightly:
+  extends:
+    - .windows-base
+    - .weekly-job-mixin
+    - .upload-packages-to-cdn-base-mixin
   variables:
+    KDECI_SIGN_BINARIES: True
     KDECI_BUILD_TYPE: RelWithDebInfo
-    KDECI_ONLY_BUILD: True
-    KRITACI_SKIP_DEBUG_PACKAGE: False
-    KRITACI_BUILD_INSTALLERS: True
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=OFF
       -DBUILD_TESTING=OFF
-    KRITACI_SKIP_UPLOAD_NIGHTLY_PACKAGE: False
 
-windows-asan-weekly:
+windows-build-qt6-nightly:
   extends:
-  - windows-build
+  - .windows-qt6-base
+  - .weekly-job-mixin
+  - .upload-packages-to-cdn-base-mixin
+  variables:
+    KDECI_SIGN_BINARIES: True
+    KDECI_BUILD_TYPE: RelWithDebInfo
+    KDECI_EXTRA_CMAKE_ARGS: >
+      -DHIDE_SAFE_ASSERTS=OFF
+      -DBUILD_TESTING=OFF
+      -DBUILD_WITH_QT6=ON
+      -DALLOW_UNSTABLE=QT6
+
+
+# TODO: disable for now, we need to update to clang-21 to support ASAN on Win11
+.windows-qt5-asan-weekly:
+  extends:
+  - .windows-base
   - .weekly-job-mixin
   - .ci-artifacts-with-packages-mixin
   interruptible: false
@@ -103,12 +120,12 @@ windows-asan-weekly:
     KDECI_PACKAGE_ALIASES_YAML: '{ ext_qt : ext_qt-asan }'
     ASAN_OPTIONS: 'new_delete_type_mismatch=0:detect_leaks=0:halt_on_error=0'
 
-windows-release:
+windows-release-qt5:
   extends:
-    - windows-build
+    - .windows-base
     - .ci-release-job-mixin
-  interruptible: false
   variables:
+    KDECI_SIGN_BINARIES: True
     KDECI_BUILD_TYPE: RelWithDebInfo
     KDECI_ONLY_BUILD: True
     KRITACI_SKIP_DEBUG_PACKAGE: False
@@ -117,3 +134,20 @@ windows-release:
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=ON
       -DBUILD_TESTING=OFF
+
+windows-release-qt6:
+  extends:
+    - .windows-qt6-base
+    - .ci-release-job-mixin
+  variables:
+    KDECI_SIGN_BINARIES: True
+    KDECI_BUILD_TYPE: RelWithDebInfo
+    KDECI_ONLY_BUILD: True
+    KRITACI_SKIP_DEBUG_PACKAGE: False
+    KRITACI_BUILD_INSTALLERS: True
+    KRITACI_RELEASE_PACKAGE_NAMING: True
+    KDECI_EXTRA_CMAKE_ARGS: >
+      -DHIDE_SAFE_ASSERTS=ON
+      -DBUILD_TESTING=OFF
+      -DBUILD_WITH_QT6=ON
+      -DALLOW_UNSTABLE=QT6

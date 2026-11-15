@@ -211,6 +211,20 @@ Application.activeWindow().activeView().setForeGroundColor(color)
     void setBrushSize(qreal brushSize);
 
     /**
+     * @brief return the current fade for brush
+     *
+     * @return the brush fade value (0.00 - 1.00)
+     */
+    qreal brushFade() const;
+
+    /**
+     * @brief set the current fade for brush
+     *
+     * @param brushFade the brush fade (0.00 - 1.00)
+     */
+    void setBrushFade(qreal brushFade);
+
+    /**
      * @brief return the current rotation for brush tip
      *
      * @return the brush tip rotation value (in degrees)
@@ -223,6 +237,15 @@ Application.activeWindow().activeView().setForeGroundColor(color)
      * @param brushRotation the brush tip rotation (in degrees)
      */
     void setBrushRotation(qreal brushRotation);
+
+    /**
+     * @brief return the current brush position on the canvas, in canvas
+     * widget coordinates. This is where the brush actually is during a
+     * stroke, which lags the pointer when brush smoothing is active.
+     *
+     * @return the brush position, or a null QPointF when no stroke is active
+     */
+    QPointF brushPosition() const;
 
     /**
      * @brief return the current flow for brush
@@ -342,6 +365,28 @@ print(selected_nodes)
      */
     QTransform flakeToImageTransform() const;
 
+Q_SIGNALS:
+    /**
+     * Emitted when the active tool for this view changes.
+     *
+     * @param toolId the identifier of the new active tool.
+     */
+    void currentToolChanged(const QString &toolId);
+
+    /**
+     * Emitted when the current brush preset for this view changes.
+     */
+    void currentBrushPresetChanged();
+
+    /**
+     * Emitted when this view's foreground color changes.
+     */
+    void foregroundColorChanged();
+
+    /**
+     * Emitted when this view's background color changes.
+     */
+    void backgroundColorChanged();
 private:
 
     friend class Window;

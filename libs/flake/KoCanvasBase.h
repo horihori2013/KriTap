@@ -27,6 +27,7 @@ class KoCanvasController;
 class KoShape;
 class KoSnapGuide;
 class KoSelectedShapesProxy;
+class KoColorDisplayRendererInterface;
 
 class QWidget;
 class QCursor;
@@ -116,6 +117,43 @@ public:
     virtual KoSelectedShapesProxy *selectedShapesProxy() const = 0;
 
     /**
+     * @brief the shape that owns the currently active shape manager
+     *
+     * When the editor enters some kind of "group editing mode", the
+     * user see only shapes belonging to this particular group. In other
+     * words, the shapeManager() of this canvas will contain only shapes
+     * of this "entered" group.
+     *
+     * currentShapeManagerOwnerShape() returns the shape that
+     * represents this currently entered group, so that the tools
+     * could detect it better
+     *
+     * If no group is currently entered, then the function returns
+     * nullptr.
+     *
+     * NOTE: the functionality is currently implemented for text
+     *       shapes only, not for actual groups :)
+     */
+    virtual KoShape *currentShapeManagerOwnerShape() const {
+        return nullptr;
+    }
+
+    /**
+     * @brief sets the group shape that is supposed to be "entered"
+     *
+     * The tool can instruct the canvas to enter the group
+     * represented by shape \p shape. The implementation of the
+     * canvas is supposed to switch its shapeManager() to
+     * the one owned by \p shape.
+     *
+     * NOTE: we currently have no common interface for fetching
+     * the shape manager from a particular shape. The canvas
+     * is supposed to know how to dynamic_cast the shape itself.
+     */
+    virtual void setCurrentShapeManagerOwnerShape(KoShape *source) {
+        Q_UNUSED(source)
+    }
+    /**
      * Tell the canvas to repaint the specified rectangle. The coordinates
      * are document coordinates, not view coordinates.
      */
@@ -134,6 +172,14 @@ public:
      */
     virtual const KoViewConverter *viewConverter() const = 0;
     virtual KoViewConverter *viewConverter() = 0;
+
+    /**
+     * @brief displayRendererInterface
+     * The display renderer interface has a number of color conversion
+     * functions which are useful to convert a KoColor to a QColor.
+     * @return The display renderer interface for this canvas.
+     */
+    virtual KoColorDisplayRendererInterface* displayRendererInterface() const;
 
     /**
      * Convert a coordinate in pixels to pt.

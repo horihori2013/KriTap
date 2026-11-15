@@ -125,7 +125,16 @@ void KoCanvasControllerWidget::resizeEvent(QResizeEvent *event)
 {
     const KisCanvasState oldCanvasState = canvasState();
 
-    updateCanvasWidgetSizeInternal(event->size());
+    /**
+     * When the window is moved from one screen to another,
+     * the screen scaling factor may also change and we should
+     * notify the converter about that.
+     *
+     * The actual signal from KisScreenMigrationTracker will come
+     * much later, when the resize process has already been completed
+     * and it is too late.
+     */
+    updateCanvasWidgetSizeInternal(event->size(), this->devicePixelRatioF());
 
     const KisCanvasState newCanvasState = canvasState();
 
@@ -176,10 +185,6 @@ void KoCanvasControllerWidget::emitSignals(const KisCanvasState &oldState, const
 {
     if (oldState.documentOffsetF != newState.documentOffsetF) {
         proxyObject->emitCanvasOffsetChanged();
-    }
-
-    if (oldState.viewportOffsetF != newState.viewportOffsetF) {
-        proxyObject->emitMoveViewportOffset(oldState.viewportOffsetF, newState.viewportOffsetF);
     }
 
     if (oldState.documentOffsetF != newState.documentOffsetF) {

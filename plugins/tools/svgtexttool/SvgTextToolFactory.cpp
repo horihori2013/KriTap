@@ -34,13 +34,27 @@ KoToolBase *SvgTextToolFactory::createTool(KoCanvasBase *canvas)
     return new SvgTextTool(canvas);
 }
 
-QList<QAction *> SvgTextToolFactory::createActionsImpl()
+QList<QAction *> SvgTextToolFactory::createActionsImpl(KoToolManager *toolManager)
 {
+    Q_UNUSED(toolManager);
+
     QList<QAction *> actions;
     Q_FOREACH(const QString name, SvgTextShortCuts::possibleActions()) {
         actions << KisActionRegistry::instance()->makeQAction(name, this);
     }
     actions << KisActionRegistry::instance()->makeQAction("svg_insert_special_character", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_paste_rich_text", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_paste_plain_text", this);
+    actions << KisActionRegistry::instance()->makeQAction("text_type_preformatted", this);
+    actions << KisActionRegistry::instance()->makeQAction("text_type_pre_positioned", this);
+    actions << KisActionRegistry::instance()->makeQAction("text_type_inline_wrap", this);
+
+    actions << KisActionRegistry::instance()->makeQAction("svg_type_setting_move_selection_start_down_1_px", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_type_setting_move_selection_start_up_1_px", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_type_setting_move_selection_start_left_1_px", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_type_setting_move_selection_start_right_1_px", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_remove_transforms_from_range", this);
+    actions << KisActionRegistry::instance()->makeQAction("svg_clear_formatting", this);
     return actions;
 }
 

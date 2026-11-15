@@ -15,7 +15,7 @@
 #include <QMetaType>
 #include <QTransform>
 
-#include "KoTosContainer.h"
+#include "KoShape.h"
 
 #define KoPathShapeId "KoPathShape"
 
@@ -59,7 +59,7 @@ typedef QList<KoSubpath *> KoSubpathList;
  * generated. See the outline method. The reason for storing it like that is that
  * it is the points that are modified by the user and not the segments.
  */
-class KRITAFLAKE_EXPORT KoPathShape : public KoTosContainer
+class KRITAFLAKE_EXPORT KoPathShape : public KoShape
 {
 public:
     /**
@@ -197,7 +197,7 @@ public:
     /**
      * @brief Returns the path points within the given rectangle.
      * @param rect the rectangle the requested points are in
-     * @param useControlPoints wether to add control points to result or not
+     * @param useControlPoints whether to add control points to result or not
      * @return list of points within the rectangle
      */
     QList<KoPathPoint*> pointsAt(const QRectF &rect, const bool useControlPoints = false) const;
@@ -461,6 +461,8 @@ public:
 
     bool autoFillMarkers() const;
     void setAutoFillMarkers(bool value);
+
+    KoPathSegment segmentAtPoint(const QPointF &point, const QRectF &grabRoi) const;
 
 public:
     struct KRITAFLAKE_EXPORT PointSelectionChangeListener : public ShapeChangeListener {

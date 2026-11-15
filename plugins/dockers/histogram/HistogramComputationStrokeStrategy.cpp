@@ -30,6 +30,8 @@ struct HistogramComputationStrokeStrategy::Private
 
     KisImageSP image;
     std::vector<HistVector> results;
+    std::vector<HistVector> resultsLog;
+    float maximumValue = 0.0f;
 };
 
 
@@ -52,6 +54,7 @@ void HistogramComputationStrokeStrategy::initStrokeCallback()
     int i = 0;
     QVector<QRect> tileRects = KritaUtils::splitRectIntoPatches(m_d->image->bounds(), KritaUtils::optimalPatchSize());
     m_d->results.resize(tileRects.size());
+    m_d->resultsLog.resize(tileRects.size());
 
     Q_FOREACH (const QRect &tileRectangle, tileRects) {
         jobsData << new HistogramComputationStrokeStrategy::Private::ProcessData(tileRectangle, i);
@@ -85,8 +88,33 @@ void HistogramComputationStrokeStrategy::doStrokeCallback(KisStrokeJobData *data
         return;
 
     initiateVector(m_d->results[d_pd->jobId], cs);
+    initiateVector(m_d->resultsLog[d_pd->jobId], cs);
 
     quint32 toSkip = nSkip;
+
+    float maximum = 1.0;
+    QVector<float> channelValues(channelCount);
+    if (cs->hasHighDynamicRange()) {
+        KisSequentialConstIterator it(m_dev, calculate);
+
+        int numConseqPixels = it.nConseqPixels();
+        while (it.nextPixels(numConseqPixels)) {
+            numConseqPixels = it.nConseqPixels();
+            const quint8* pixel = it.rawDataConst();
+            for (int k = 0; k < numConseqPixels; ++k) {
+                cs->normalisedChannelsValue(pixel, channelValues);
+                for (int chan = 0; chan < (int)channelCount; ++chan) {
+                    maximum = qMax(maximum, channelValues.at(chan));
+                }
+                pixel += pixelSize;
+            }
+        }
+    }
+    m_d->maximumValue = maximum;
+
+    const double maximumMultiplier = 255.0/maximum;
+    const double logMaxMultiplier = 255.0/(std::log10(maximum*10)*0.1);
+
 
     KisSequentialConstIterator it(m_dev, calculate);
 
@@ -96,9 +124,12 @@ void HistogramComputationStrokeStrategy::doStrokeCallback(KisStrokeJobData *data
         numConseqPixels = it.nConseqPixels();
         const quint8* pixel = it.rawDataConst();
         for (int k = 0; k < numConseqPixels; ++k) {
+            cs->normalisedChannelsValue(pixel, channelValues);
             if (--toSkip == 0) {
+
                 for (int chan = 0; chan < (int)channelCount; ++chan) {
-                    m_d->results[d_pd->jobId][chan][cs->scaleToU8(pixel, chan)]++;
+                    m_d->results[d_pd->jobId][chan][ qBound(0, qRound(channelValues.at(chan)*maximumMultiplier), 255) ]++;
+                    m_d->resultsLog[d_pd->jobId][chan][ qBound(0, qRound(std::log10(channelValues.at(chan)*10)*0.1*logMaxMultiplier), 255) ]++;
                 }
                 toSkip = nSkip;
             }
@@ -111,15 +142,18 @@ void HistogramComputationStrokeStrategy::finishStrokeCallback()
 {
     HistogramData hisData;
     hisData.colorSpace = m_d->image->projection()->colorSpace();
+    hisData.maximumValue = m_d->maximumValue;
 
     if (m_d->results.size() == 1) {
         hisData.bins = m_d->results[0];
+        hisData.binsLog = m_d->resultsLog[0];
         Q_EMIT computationResultReady(hisData);
     } else {
 
         quint32 channelCount = m_d->image->projection()->channelCount();
 
         initiateVector(hisData.bins, hisData.colorSpace);
+        initiateVector(hisData.binsLog, hisData.colorSpace);
 
         for (int chan = 0; chan < (int)channelCount; chan++) {
             int bsize = hisData.bins[chan].size();
@@ -128,6 +162,14 @@ void HistogramComputationStrokeStrategy::finishStrokeCallback()
                 hisData.bins[chan][bi] = 0;
                 for (int i = 0; i < (int)m_d->results.size(); i++) {
                     hisData.bins[chan][bi] += m_d->results[i][chan][bi];
+                }
+            }
+            int b2size = hisData.binsLog[chan].size();
+
+            for (int bi = 0; bi < b2size; bi++) {
+                hisData.binsLog[chan][bi] = 0;
+                for (int i = 0; i < (int)m_d->resultsLog.size(); i++) {
+                    hisData.binsLog[chan][bi] += m_d->resultsLog[i][chan][bi];
                 }
             }
         }

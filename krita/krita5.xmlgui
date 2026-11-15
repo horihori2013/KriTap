@@ -2,7 +2,7 @@
 <kpartgui xmlns="http://www.kde.org/standards/kxmlgui/1.0"
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 name="Krita"
-version="542"
+version="@KRITA5_XMLGUI_VERSION@"
 xsi:schemaLocation="http://www.kde.org/standards/kxmlgui/1.0  http://www.kde.org/standards/kxmlgui/1.0/kxmlgui.xsd">
   <MenuBar>
     <Menu name="file">
@@ -163,6 +163,7 @@ xsi:schemaLocation="http://www.kde.org/standards/kxmlgui/1.0  http://www.kde.org
       <Action name="trim_to_image"/>
       <Action name="resizeimagetolayer"/>
       <Action name="resizeimagetoselection"/>
+      <Action name="purge_unused_image_data"/>
       <Separator/>
       <Action name="imagesize" group="image_transform_merge"/>
       <Action name="imageresolution"/>
@@ -351,6 +352,9 @@ xsi:schemaLocation="http://www.kde.org/standards/kxmlgui/1.0  http://www.kde.org
       <Action name="shrinkselection"/>
       <Action name="borderselection"/>
       <Action name="smoothselection"/>
+      <Separator/>
+      <Action name="enable_sap"/>
+      <Action name="configure_sap"/>
     </Menu>
     <Menu name="Filter">
       <text>Filte&amp;r</text>
@@ -375,13 +379,17 @@ xsi:schemaLocation="http://www.kde.org/standards/kxmlgui/1.0  http://www.kde.org
     </Menu>
     <Menu name="tools">
       <text>&amp;Tools</text>
-      <Menu name="scripts"><text>Scripts</text></Menu>
+      <Menu name="scripts" icon="scripts"><text>Scripts</text></Menu>
     </Menu>
     <Menu name="settings">
       <text>Setti&amp;ngs</text>
       <Action name="options_configure"/>
+      <Action name="change_interface_scale"/>
       <Action name="manage_bundles"/>
       <Action name="manage_resources"/>
+      <Action name="manage_supporter_bundles"/>
+      <Action name="manage_donations"/>
+      <Action name="manage_subscriptions"/>
       <Separator/>
       <Action name="options_configure_toolbars"/>
       <Merge name="StandardToolBarMenuHandler" />

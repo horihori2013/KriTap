@@ -37,9 +37,16 @@ public:
     void notifyPixelGridModeChanged();
     void notifyColorHistoryModeChanged();
     void notifyTouchPaintingChanged();
+    void notifyColorSamplerPreviewStyleChanged();
 
     void notifyColorThemeChanged(const QString &filename);
     void notifyLongPressChanged(bool enabled);
+
+#ifdef Q_OS_ANDROID
+    void notifyUsePageUpDownMouseButtonEmulationWorkaroundChanged(bool enabled);
+    void notifyUseHighFunctionKeyMouseButtonEmulationWorkaroundChanged(bool enabled);
+    void notifyUseIgnoreHistoricTabletEventsWorkaroundChanged(bool enabled);
+#endif
 
 Q_SIGNALS:
     /**
@@ -50,8 +57,15 @@ Q_SIGNALS:
     void pixelGridModeChanged();
     void colorHistoryModeChanged();
     void touchPaintingChanged();
+    void sigColorSamplerPreviewStyleChanged();
     void signalColorThemeChanged(const QString &filename);
     void sigLongPressChanged(bool enabled);
+#ifdef Q_OS_ANDROID
+    void sigUsePageUpDownMouseButtonEmulationWorkaroundChanged(bool enabled);
+    void sigUseHighFunctionKeyMouseButtonEmulationWorkaroundChanged(bool enabled);
+    void sigUseIgnoreHistoricTabletEventsWorkaroundChanged(bool enabled);
+#endif
+
 private:
     KisConfigNotifier(const KisConfigNotifier&);
     KisConfigNotifier operator=(const KisConfigNotifier&);

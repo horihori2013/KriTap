@@ -65,7 +65,6 @@
 #include "kis_idle_watcher.h"
 #include "kis_image.h"
 #include "KisTranslateLayerNamesVisitor.h"
-#include "kis_color_manager.h"
 
 #include <KisCursorOverrideLock.h>
 #include "kis_action.h"
@@ -108,11 +107,11 @@ public:
     QList<QPointer<KisDocument> > documents;
     KisIdleWatcher idleWatcher;
     KisAnimationCachePopulator animationCachePopulator;
-    QScopedPointer<KisPlaybackEngine> playbackEngine;
+    std::unique_ptr<KisPlaybackEngine> playbackEngine;
 
     KisSessionResourceSP currentSession;
     bool closingSession{false};
-    QScopedPointer<KisSessionManagerDialog> sessionManager;
+    QPointer<KisSessionManagerDialog> sessionManager;
 
     QMap<QUrl, QUrl> pendingAddRecentUrlMap;
 
@@ -150,7 +149,6 @@ KisPart::KisPart()
     // Preload all the resources in the background
     Q_UNUSED(KoResourceServerProvider::instance());
     Q_UNUSED(KisResourceServerProvider::instance());
-    Q_UNUSED(KisColorManager::instance());
 
     connect(this, SIGNAL(documentOpened(QString)),
             this, SLOT(updateIdleWatcherConnections()));
@@ -263,31 +261,7 @@ KisMainWindow *KisPart::createMainWindow(QUuid id)
     dbgUI <<"mainWindow" << (void*)mw << "added to view" << this;
     d->mainWindows.append(mw);
 
-    // Add all actions with a menu property to the main window
-    Q_FOREACH(QAction *action, mw->actionCollection()->actions()) {
-        QString menuLocation = action->property("menulocation").toString();
-        if (!menuLocation.isEmpty()) {
-            QAction *found = 0;
-            QList<QAction *> candidates = mw->menuBar()->actions();
-            Q_FOREACH(const QString &name, menuLocation.split("/")) {
-                Q_FOREACH(QAction *candidate, candidates) {
-                    if (candidate->objectName().toLower() == name.toLower()) {
-                        found = candidate;
-                        candidates = candidate->menu()->actions();
-                        break;
-                    }
-                }
-                if (candidates.isEmpty()) {
-                    break;
-                }
-            }
-
-            if (found && found->menu()) {
-                found->menu()->addAction(action);
-            }
-        }
-    }
-
+    mw->synchronizeDynamicActions();
 
     return mw;
 }
@@ -524,7 +498,7 @@ KisAnimationCachePopulator* KisPart::cachePopulator() const
 
 KisPlaybackEngine *KisPart::playbackEngine() const
 {
-    return d->playbackEngine.data();
+    return d->playbackEngine.get();
 }
 
 void KisPart::prioritizeFrameForCache(KisImageSP image, int frame) {
@@ -650,7 +624,8 @@ KisInputManager* KisPart::currentInputManager()
 void KisPart::showSessionManager()
 {
     if (d->sessionManager.isNull()) {
-        d->sessionManager.reset(new KisSessionManagerDialog());
+        d->sessionManager = new KisSessionManagerDialog();
+        d->sessionManager->setAttribute(Qt::WA_DeleteOnClose);
     }
 
     d->sessionManager->show();
@@ -720,12 +695,12 @@ void KisPart::setPlaybackEngine(KisPlaybackEngine *p_playbackEngine)
 {
     // make sure that the old engine is still alive until the end
     // of the emitted signal
-    QScopedPointer backup(p_playbackEngine);
+    std::unique_ptr<KisPlaybackEngine> backup(p_playbackEngine);
     d->playbackEngine.swap(backup);
 
     // Log all changes to playback engine for easier debugging.
     // (See `krita.log` or `Help > Show Krita log for bug reports`.)
-    KisUsageLogger::log("Audio Playback Engine: " + QString(p_playbackEngine->metaObject()->className()));
+    KisUsageLogger::log("Animation Playback Engine: " + QString(p_playbackEngine->metaObject()->className()));
 
     Q_EMIT playbackEngineChanged(p_playbackEngine);
 }

@@ -398,6 +398,12 @@ bool KisLayer::canMergeAndKeepBlendOptions(KisLayerSP otherLayer)
          *this->colorSpace() == *otherLayer->colorSpace());
 }
 
+KisLayerSP KisLayer::tryCreateInternallyMergedLayerFromMutipleLayers(QList<KisLayerSP> layers)
+{
+    Q_UNUSED(layers);
+    return nullptr;
+}
+
 KisLayerSP KisLayer::createMergedLayerTemplate(KisLayerSP prevLayer)
 {
     const bool keepBlendingOptions = canMergeAndKeepBlendOptions(prevLayer);
@@ -927,7 +933,7 @@ QRect KisLayer::needRectForOriginal(const QRect &rect) const
     return needRect;
 }
 
-QImage KisLayer::createThumbnail(qint32 w, qint32 h, Qt::AspectRatioMode aspectRatioMode)
+QImage KisLayer::createThumbnail(qint32 w, qint32 h, Qt::AspectRatioMode aspectRatioMode, KisThumbnailBoundsMode boundsMode)
 {
     if (w == 0 || h == 0) {
         return QImage();
@@ -935,10 +941,9 @@ QImage KisLayer::createThumbnail(qint32 w, qint32 h, Qt::AspectRatioMode aspectR
 
     KisPaintDeviceSP originalDevice = original();
 
-    return originalDevice ?
-           originalDevice->createThumbnail(w, h, aspectRatioMode, 1,
-                                           KoColorConversionTransformation::internalRenderingIntent(),
-                                           KoColorConversionTransformation::internalConversionFlags()) : QImage();
+    return originalDevice
+        ? originalDevice->createThumbnail(w, h, aspectRatioMode, boundsMode)
+        : QImage();
 }
 
 int KisLayer::thumbnailSeqNo() const
@@ -947,7 +952,7 @@ int KisLayer::thumbnailSeqNo() const
     return originalDevice ? originalDevice->sequenceNumber() : -1;
 }
 
-QImage KisLayer::createThumbnailForFrame(qint32 w, qint32 h, int time, Qt::AspectRatioMode aspectRatioMode)
+QImage KisLayer::createThumbnailForFrame(qint32 w, qint32 h, int time, Qt::AspectRatioMode aspectRatioMode, KisThumbnailBoundsMode boundsMode)
 {
     if (w == 0 || h == 0) {
         return QImage();
@@ -961,13 +966,11 @@ QImage KisLayer::createThumbnailForFrame(qint32 w, qint32 h, int time, Qt::Aspec
             KisPaintDeviceSP targetDevice = new KisPaintDevice(colorSpace());
             KisRasterKeyframeSP keyframe = channel->activeKeyframeAt<KisRasterKeyframe>(time);
             keyframe->writeFrameToDevice(targetDevice);
-            return targetDevice->createThumbnail(w, h, aspectRatioMode, 1,
-                                                 KoColorConversionTransformation::internalRenderingIntent(),
-                                                 KoColorConversionTransformation::internalConversionFlags());
+            return targetDevice->createThumbnail(w, h, aspectRatioMode, boundsMode);
         }
     }
 
-    return createThumbnail(w, h);
+    return createThumbnail(w, h, aspectRatioMode, boundsMode);
 }
 
 qint32 KisLayer::x() const

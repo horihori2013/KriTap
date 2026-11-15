@@ -13,6 +13,7 @@
 
 #include <KoResourcePaths.h>
 
+#include "KoColorDisplayRendererInterface.h"
 #include "kis_coordinates_converter.h"
 #include "tool_transform_args.h"
 #include "transform_transaction_properties.h"
@@ -41,6 +42,7 @@ enum StrokeFunction {
     LEFTSHEAR,
     MOVECENTER,
     PERSPECTIVE,
+    CAMERAHEIGHT,
     ROTATEBOUNDS
 };
 }
@@ -67,8 +69,8 @@ struct KisFreeTransformStrategy::Private
         scaleCursors[6] = KisCursor::sizeVerCursor();
         scaleCursors[7] = KisCursor::sizeBDiagCursor();
 
-        shearCursorPixmap.load(":/shear_cursor.png");
-        rotateHandlesCursor = QCursor(QPixmap(":/rotate_cursor_handles.xpm"));
+        shearCursorPixmap = QIcon(":/shear_cursor.svg").pixmap(22, 22);
+        rotateHandlesCursor = QCursor(QIcon(":/rotate_cursor_handles.svg").pixmap(32, 32));
     }
 
     KisFreeTransformStrategy *q;
@@ -306,6 +308,9 @@ QCursor KisFreeTransformStrategy::getCurrentCursor() const
         //TODO: find another cursor for perspective
         cursor = KisCursor::rotateCursor();
         break;
+    case CAMERAHEIGHT:
+        cursor = KisCursor::sizeVerCursor();
+        break;
     case RIGHTSCALE:
         cursor = m_d->getScaleCursor(m_d->transformedHandles.middleRight);
         break;
@@ -350,7 +355,7 @@ QCursor KisFreeTransformStrategy::getCurrentCursor() const
     return cursor;
 }
 
-void KisFreeTransformStrategy::paint(QPainter &gc)
+void KisFreeTransformStrategy::paint(QPainter &gc, const KoColorDisplayRendererInterface *displayRendererInterface)
 {
     gc.save();
 
@@ -416,7 +421,7 @@ void KisFreeTransformStrategy::paint(QPainter &gc)
     pen[0].setCosmetic(true);
     pen[1].setWidth(decorationThickness() * 2);
     pen[1].setCosmetic(true);
-    pen[1].setColor(Qt::lightGray);
+    pen[1].setColor(displayRendererInterface->convertColorToDisplayColorSpace(KoColor(Qt::lightGray, KoColorSpaceRegistry::instance()->rgb8())));
 
     for (int i = 1; i >= 0; --i) {
         gc.setPen(pen[i]);
@@ -446,12 +451,20 @@ bool KisFreeTransformStrategy::beginPrimaryAction(const QPointF &pt)
     return true;
 }
 
+void KisFreeTransformStrategy::continuePrimaryAction(const QPointF &pt, bool shiftModifierActive, bool altModifierActive)
+{
+    KIS_SAFE_ASSERT_RECOVER_NOOP(0 && "this override is not used in KisFreeTransformStrategy");
+}
+
 void KisFreeTransformStrategy::continuePrimaryAction(const QPointF &mousePos,
                                                      bool shiftModifierActive,
-                                                     bool altModifierActive)
+                                                     bool altModifierActive,
+                                                     bool hasOriginalModifiersSet)
 {
     // Note: "shiftModifierActive" just tells us if the shift key is being pressed
     // Note: "altModifierActive" just tells us if the alt key is being pressed
+    // Note: "hasOriginalModifiersSet" tells if the set of modifiers that triggered
+    //       the whole action is still pressed in the original form
 
     m_d->isTransforming = true;
     const QPointF anchorPoint = m_d->clickArgs.originalCenter() + m_d->clickArgs.rotationCenterOffset();
@@ -563,6 +576,13 @@ void KisFreeTransformStrategy::continuePrimaryAction(const QPointF &mousePos,
     break;
     case PERSPECTIVE:
     {
+        if (!hasOriginalModifiersSet) {
+            m_d->function = CAMERAHEIGHT;
+            m_d->clickArgs = m_d->currentArgs;
+            m_d->clickPos = mousePos;
+            break;
+        }
+
         QPointF diff = mousePos - m_d->clickPos;
         double thetaX = - diff.y() * M_PI / m_d->transaction.originalHalfHeight() / 2 / fabs(m_d->currentArgs.scaleY());
         m_d->currentArgs.setAX(normalizeAngle(m_d->clickArgs.aX() + thetaX));
@@ -580,6 +600,32 @@ void KisFreeTransformStrategy::continuePrimaryAction(const QPointF &mousePos,
         QPointF oldRotationCenter = clickT.map(m_d->clickArgs.originalCenter() + m_d->clickArgs.rotationCenterOffset());
 
         m_d->currentArgs.setTransformedCenter(m_d->currentArgs.transformedCenter() + oldRotationCenter - newRotationCenter);
+    }
+    break;
+    case CAMERAHEIGHT: {
+        if (hasOriginalModifiersSet) {
+            m_d->function = PERSPECTIVE;
+            m_d->clickPos = mousePos;
+            break;
+        }
+
+        qreal dy = mousePos.y() - m_d->clickPos.y();
+        m_d->clickPos = mousePos;
+
+        // normalize distance from extremes 0 (close) to 1 (far)
+        qreal currentHeight = m_d->currentArgs.cameraPos().z();
+        qreal currentHeightScaled = (currentHeight - 10150.0) / 9850.0;
+        qreal heightDelta = -(currentHeightScaled * currentHeightScaled) + 1.001;
+
+        const qreal sensitivityFactor = 0.02;
+        qreal scaledDy = dy / sensitivityFactor;
+
+        // Multiply normalized distance by mouse movement to calculate new camera height to add.
+        heightDelta = heightDelta * scaledDy;
+        qreal newHeight = currentHeight + heightDelta;
+
+        newHeight = qMax(300.0, qMin(20000.0, newHeight));
+        m_d->currentArgs.setCameraPos(QVector3D(0, 0, newHeight));
     }
     break;
     case TOPSCALE:

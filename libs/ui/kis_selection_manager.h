@@ -92,6 +92,8 @@ public Q_SLOTS:
     void convertToRasterSelection();
     void convertShapesToVectorSelection();
     void convertToShape();
+    void enableSelectionActionsPanel(bool enabled);
+    void configChanged();
     
     void copySelectionToNewLayer();
     void toggleDisplaySelection();
@@ -105,6 +107,8 @@ public Q_SLOTS:
     void slotStrokeSelection();
 
     void selectOpaqueOnNode(KisNodeSP node, SelectionAction action);
+
+    void toggleSAPpin();
 
 Q_SIGNALS:
     void currentSelectionChanged();
@@ -162,6 +166,7 @@ private:
     KisAction *m_toggleDisplaySelection {0};
     KisAction *m_toggleSelectionOverlayMode {0};
     KisAction *m_strokeSelected {0};
+    KisAction *m_enableSelectionActionsPanel {0};
 
 
     QList<QAction*> m_pluginActions;

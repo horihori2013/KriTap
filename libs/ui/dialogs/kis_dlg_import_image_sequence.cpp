@@ -13,7 +13,7 @@
 #include "KisImportExportManager.h"
 #include "KoFileDialog.h"
 #include <QStandardPaths>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QListWidgetItem>
 
 class KisDlgImportImageSequence::ListItem : QListWidgetItem {
@@ -27,14 +27,9 @@ public:
     bool operator <(const QListWidgetItem &other) const override
     {
         if (collator->numericMode()) {
-            const QRegExp rx(QLatin1String("[^0-9]+"));
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+            const QRegularExpression rx(QLatin1String("[^0-9]+"));
             QStringList ours = text().split(rx, Qt::SkipEmptyParts);
             QStringList theirs = other.text().split(rx, Qt::SkipEmptyParts);
-#else
-            QStringList ours = rx.splitString(this->text(), Qt::SkipEmptyParts);
-            QStringList theirs = rx.splitString(other.text(), Qt::SkipEmptyParts);
-#endif
 
             // Let's compare the last numbers -- they are most likely to be the serial numbers
             if (ours.size() > 0 && theirs.size() > 0) {
@@ -78,7 +73,11 @@ KisDlgImportImageSequence::KisDlgImportImageSequence(KisMainWindow *mainWindow, 
     connect(m_ui.spinStep, SIGNAL(valueChanged(int)), this, SLOT(slotSkipChanged(int)));
     connect(m_ui.cmbOrder, SIGNAL(currentIndexChanged(int)), this, SLOT(slotOrderOptionsChanged(int)));
     connect(m_ui.cmbSortMode, SIGNAL(currentIndexChanged(int)), this, SLOT(slotOrderOptionsChanged(int)));
+#if QT_VERSION < QT_VERSION_CHECK(6, 7, 0)
     connect(m_ui.autoAddHoldframesBox, &QCheckBox::stateChanged, this, &KisDlgImportImageSequence::autoAddHoldframes);
+#else
+    connect(m_ui.autoAddHoldframesBox, &QCheckBox::checkStateChanged, this, &KisDlgImportImageSequence::autoAddHoldframes);
+#endif
     // cold initialization of the controls
     slotSkipChanged(m_ui.spinStep->value());
     slotOrderOptionsChanged(m_ui.cmbOrder->currentIndex());

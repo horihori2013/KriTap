@@ -48,32 +48,51 @@ struct DstTraitsForSource<KoBgrU8Traits> {
 template <typename src_channel_type,
           typename dst_channel_type>
 struct RemoveSmpte2048Policy {
-    static ALWAYS_INLINE dst_channel_type process(src_channel_type value) {
+    static ALWAYS_INLINE dst_channel_type process(src_channel_type value, float refWhite) {
         return
             KoColorSpaceMaths<float, dst_channel_type>::scaleToA(
             removeSmpte2048Curve(
             KoColorSpaceMaths<src_channel_type, float>::scaleToA(
-            value)));
+            value), refWhite));
+    }
+
+    static ALWAYS_INLINE double getRefWhite(const KoColorSpace *src, const KoColorSpace *target) {
+        Q_UNUSED(target)
+        if (!src || !src->profile()) return 203.0;
+        return src->profile()->hdrReferenceWhite().value_or(203.0);
     }
 };
 
 template <typename src_channel_type,
           typename dst_channel_type>
 struct ApplySmpte2048Policy {
-    static ALWAYS_INLINE dst_channel_type process(src_channel_type value) {
+    static ALWAYS_INLINE dst_channel_type process(src_channel_type value, float refWhite) {
         return
             KoColorSpaceMaths<float, dst_channel_type>::scaleToA(
             applySmpte2048Curve(
             KoColorSpaceMaths<src_channel_type, float>::scaleToA(
-            value)));
+            value), refWhite));
+    }
+
+    static ALWAYS_INLINE double getRefWhite(const KoColorSpace *src, const KoColorSpace *target) {
+        Q_UNUSED(src)
+        if (!target || !target->profile()) return 203.0;
+        return target->profile()->hdrReferenceWhite().value_or(203.0);
     }
 };
 
 template <typename src_channel_type,
           typename dst_channel_type>
 struct NoopPolicy {
-    static ALWAYS_INLINE dst_channel_type process(src_channel_type value) {
+    static ALWAYS_INLINE dst_channel_type process(src_channel_type value, float refWhite) {
+        Q_UNUSED(refWhite)
         return KoColorSpaceMaths<src_channel_type, dst_channel_type>::scaleToA(value);
+    }
+
+    static ALWAYS_INLINE double getRefWhite(const KoColorSpace *src, const KoColorSpace *target) {
+        Q_UNUSED(src)
+        Q_UNUSED(target)
+        return 203.0;
     }
 };
 
@@ -105,10 +124,12 @@ struct ApplyRgbShaper : public KoColorConversionTransformation
         typedef typename DstCSTraits::channels_type dst_channel_type;
         typedef Policy<src_channel_type, dst_channel_type> ConcretePolicy;
 
+        const double refWhite = ConcretePolicy::getRefWhite(srcColorSpace(), dstColorSpace());
+
         for (int i = 0; i < nPixels; i++) {
-            dstPixel->red = ConcretePolicy::process(srcPixel->red);
-            dstPixel->green = ConcretePolicy::process(srcPixel->green);
-            dstPixel->blue = ConcretePolicy::process(srcPixel->blue);
+            dstPixel->red = ConcretePolicy::process(srcPixel->red, refWhite);
+            dstPixel->green = ConcretePolicy::process(srcPixel->green, refWhite);
+            dstPixel->blue = ConcretePolicy::process(srcPixel->blue, refWhite);
             dstPixel->alpha =
                 KoColorSpaceMaths<src_channel_type, dst_channel_type>::scaleToA(
                 srcPixel->alpha);
@@ -124,13 +145,13 @@ template<class ParentColorSpace, class DstColorSpaceTraits = typename DstTraitsF
 class LcmsFromRGBP2020PQTransformationFactory : public KoColorConversionTransformationFactory
 {
 public:
-    LcmsFromRGBP2020PQTransformationFactory()
+    LcmsFromRGBP2020PQTransformationFactory(const QString &targetProfileName, const QString &linearProfileName)
         : KoColorConversionTransformationFactory(RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename ParentColorSpace::ColorSpaceTraits::channels_type>().id(),
-                                                 "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF",
+                                                 targetProfileName,
                                                  RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename DstColorSpaceTraits::channels_type>().id(),
-                                                 "Rec2020-elle-V4-g10.icc")
+                                                 linearProfileName)
     {
     }
 
@@ -153,13 +174,13 @@ template<class ParentColorSpace, class DstColorSpaceTraits = typename DstTraitsF
 class LcmsToRGBP2020PQTransformationFactory : public KoColorConversionTransformationFactory
 {
 public:
-    LcmsToRGBP2020PQTransformationFactory()
+    LcmsToRGBP2020PQTransformationFactory(const QString &targetProfileName, const QString &linearProfileName)
         : KoColorConversionTransformationFactory(RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename DstColorSpaceTraits::channels_type>().id(),
-                                                 "Rec2020-elle-V4-g10.icc",
+                                                 linearProfileName,
                                                  RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename ParentColorSpace::ColorSpaceTraits::channels_type>().id(),
-                                                 "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF")
+                                                 targetProfileName)
     {
     }
 
@@ -182,13 +203,13 @@ template<class ParentColorSpace, class DstColorSpaceTraits>
 class LcmsScaleRGBP2020PQTransformationFactory : public KoColorConversionTransformationFactory
 {
 public:
-    LcmsScaleRGBP2020PQTransformationFactory()
+    LcmsScaleRGBP2020PQTransformationFactory(const QString &targetProfileName)
         : KoColorConversionTransformationFactory(RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename ParentColorSpace::ColorSpaceTraits::channels_type>().id(),
-                                                 "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF",
+                                                 targetProfileName,
                                                  RGBAColorModelID.id(),
                                                  colorDepthIdForChannelType<typename DstColorSpaceTraits::channels_type>().id(),
-                                                 "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF")
+                                                 targetProfileName)
     {
         KIS_SAFE_ASSERT_RECOVER_NOOP(srcColorDepthId() != dstColorDepthId());
     }

@@ -1,5 +1,3 @@
-include(KritaAddBrokenUnitTest)
-
 kis_add_tests(
     TestResourceCacheDb.cpp
     TestResourceLoaderRegistry.cpp
@@ -17,6 +15,7 @@ kis_add_tests(
     TestResourceSearchBoxFilter.cpp
     TestStorageFilterProxyModel.cpp
     TestTagResourceModel.cpp
-    NAME_PREFIX "libs-kritaresources-"
+    TestResource.cpp
+
     LINK_LIBRARIES kritaglobal kritapigment kritaplugin kritaresources kritawidgets kritaversion KF${KF_MAJOR}::ConfigCore Qt${QT_MAJOR_VERSION}::Sql kritatestsdk
     )

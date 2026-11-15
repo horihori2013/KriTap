@@ -276,7 +276,7 @@ KisMetaData::Value deviceSettingDescriptionExifToKMD(const Exiv2::Value::AutoPtr
             break; // Data is not a String, ignore
         const int numChars = (lastIndex - index) / 2; // including trailing zero
 
-        QString setting = QString::fromUtf16((ushort *)(void *)(array.data() + index), numChars);
+        QString setting = QString::fromUtf16((char16_t *)(void *)(array.data() + index), numChars);
         index = lastIndex + 2;
         dbgMetaData << "Setting << " << setting;
         settings.append(KisMetaData::Value(setting));
@@ -311,9 +311,12 @@ KisMetaData::Value cfaPatternExifToKMD(const Exiv2::Value::UniquePtr value, Exiv
 KisMetaData::Value cfaPatternExifToKMD(const Exiv2::Value::AutoPtr value, Exiv2::ByteOrder order)
 #endif
 {
-    QMap<QString, KisMetaData::Value> cfaPatternStructure;
     const Exiv2::DataValue *dvalue = dynamic_cast<const Exiv2::DataValue *>(&*value);
-    Q_ASSERT(dvalue);
+    if (!dvalue) {
+        warnMetaData << "Invalid CFA pattern type" << value->typeId();
+        return KisMetaData::Value();
+    }
+    QMap<QString, KisMetaData::Value> cfaPatternStructure;
     QByteArray array(dvalue->count(), 0);
     dvalue->copy((Exiv2::byte *)array.data());
 #if EXIV2_TEST_VERSION(0,28,0)
@@ -654,9 +657,9 @@ bool KisExifIO::loadFrom(KisMetaData::Store *store, QIODevice *ioDevice) const
                     Q_ASSERT(vUC.type() == KisMetaData::Value::Variant);
                     QVariant commentVar = vUC.asVariant();
                     QString comment;
-                    if (commentVar.type() == QVariant::String) {
+                    if (commentVar.type() == QMetaType::QString) {
                         comment = commentVar.toString();
-                    } else if (commentVar.type() == QVariant::ByteArray) {
+                    } else if (commentVar.type() == QMetaType::QByteArray) {
                         const QByteArray commentString = commentVar.toByteArray();
                         comment = QString::fromLatin1(commentString.constData(), commentString.size());
                     } else {

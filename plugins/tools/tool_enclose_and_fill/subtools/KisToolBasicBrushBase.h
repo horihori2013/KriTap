@@ -10,6 +10,8 @@
 #include <kis_tool_shape.h>
 #include <kis_cursor.h>
 
+class KoColorDisplayRendererInterface;
+
 class KisToolBasicBrushBase : public KisToolShape
 {
     Q_OBJECT
@@ -22,7 +24,7 @@ public:
 
     KisToolBasicBrushBase(KoCanvasBase *canvas,
                           ToolType type,
-                          const QCursor & cursor=KisCursor::load("tool_outline_selection_cursor.png", 5, 5));
+                          const QCursor & cursor=KisCursor::loadWithSize("tool_outline_selection_cursor.svg", 32, 32, 5, 5));
     ~KisToolBasicBrushBase() override;
 
     void mouseMoveEvent(KoPointerEvent *event) override;
@@ -52,6 +54,8 @@ protected:
 protected Q_SLOTS:
     void updateSettings();
     void resetCursorStyle() override;
+private Q_SLOTS:
+    void updatePreviewColor();
 
 private:
     static constexpr int levelOfPressureResolution = 1024;
@@ -73,6 +77,8 @@ private:
     QPoint m_changeSizeInitialGestureGlobalPoint;
 
     QColor m_previewColor;
+
+    KoColorDisplayRendererInterface *m_displayRenderer;
 
     QPainterPath generateSegment(const QPointF &point1, qreal radius1, const QPointF &point2, qreal radius2) const;
     void update(const QRectF &strokeSegmentRect);

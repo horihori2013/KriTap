@@ -49,6 +49,24 @@ static unsigned int firstCharUcs4(const QStringView qsv)
     return QChar::ReplacementCharacter;
 }
 
+std::optional<KoFFWWSConverter::FontFileEntry> getFontFileEntry(const FcPattern *p) {
+
+    FcChar8 *fileValue{};
+    if (FcPatternGetString(p, FC_FILE, 0, &fileValue) != FcResultMatch) {
+        debugFlake << "Failed to get font file for" << p;
+        return {};
+    }
+    const QString fontFileName = QString::fromUtf8(reinterpret_cast<char *>(fileValue));
+
+    int indexValue{};
+    if (FcPatternGetInteger(p, FC_INDEX, 0, &indexValue) != FcResultMatch) {
+        debugFlake << "Failed to get font index for" << p << "(file:" << fontFileName << ")";
+        return {};
+    }
+
+    return {{fontFileName, indexValue}};
+}
+
 Q_GLOBAL_STATIC(KoFontRegistry, s_instance)
 
 class Q_DECL_HIDDEN KoFontRegistry::Private
@@ -65,6 +83,7 @@ private:
         QHash<QString, FT_FaceSP> m_faces;
         QHash<QString, QVector<KoFFWWSConverter::FontFileEntry>> m_suggestedFiles;
         QHash<QString, KoSvgText::FontMetrics> m_fontMetrics;
+        FT_FaceSP m_fallbackFont;
 
         ThreadData(FT_LibrarySP lib)
             : m_library(std::move(lib))
@@ -182,6 +201,44 @@ public:
         return m_config;
     }
 
+    /**
+     * @brief fallbackFont
+     * @return a fall back font for when no other font was found.
+     */
+    FT_FaceSP fallbackFont() {
+        if (!m_data.hasLocalData())
+            initialize();
+        if (!m_data.localData()->m_fallbackFont.data()) {
+
+            FcPatternSP p(FcPatternCreate());
+            QByteArray fallbackBuf = QString("sans-serif").toUtf8();
+            FcValue fallback;
+            fallback.type = FcTypeString;
+            fallback.u.s = reinterpret_cast<FcChar8 *>(fallbackBuf.data());
+            FcPatternAddWeak(p.data(), FC_FAMILY, fallback, true);
+            FcConfigSubstitute(nullptr, p.data(), FcMatchPattern);
+            FcDefaultSubstitute(p.data());
+            FcResult result = FcResultNoMatch;
+            FcCharSet *cs = nullptr;
+            FcFontSetSP fontSet(FcFontSort(FcConfigGetCurrent(), p.data(), FcFalse, &cs, &result));
+
+            KIS_ASSERT_X(fontSet->nfont > 0, "No fallback fonts in font registry", "Cannot load an fallback font, no fonts found");
+
+            for (int j = 0; j < fontSet->nfont; j++) {
+                if(std::optional<KoFFWWSConverter::FontFileEntry> fontFileEntry = getFontFileEntry(fontSet->fonts[j]) ) {
+                    QByteArray utfData = fontFileEntry->fileName.toUtf8();
+                    FT_Face f = nullptr;
+                    FT_Error err = FT_New_Face(library().data(), utfData.data(), fontFileEntry->fontIndex, &f);
+                    if (err == 0) {
+                        m_data.localData()->m_fallbackFont.reset(f);
+                        break;
+                    }
+                }
+            }
+        }
+        return m_data.localData()->m_fallbackFont;
+    }
+
     QSharedPointer<KoFFWWSConverter> converter() const {
         return fontFamilyConverter;
     }
@@ -274,23 +331,7 @@ QString modificationsString(KoCSSFontInfo info, quint32 xRes, quint32 yRes) {
     return modifications;
 }
 
-std::optional<KoFFWWSConverter::FontFileEntry> getFontFileEntry(const FcPattern *p) {
 
-    FcChar8 *fileValue{};
-    if (FcPatternGetString(p, FC_FILE, 0, &fileValue) != FcResultMatch) {
-        debugFlake << "Failed to get font file for" << p;
-        return {};
-    }
-    const QString fontFileName = QString::fromUtf8(reinterpret_cast<char *>(fileValue));
-
-    int indexValue{};
-    if (FcPatternGetInteger(p, FC_INDEX, 0, &indexValue) != FcResultMatch) {
-        debugFlake << "Failed to get font index for" << p << "(file:" << fontFileName << ")";
-        return {};
-    }
-
-    return {{fontFileName, indexValue}};
-}
 
 std::vector<FT_FaceSP> KoFontRegistry::facesForCSSValues(QVector<int> &lengths,
                                                          KoCSSFontInfo info,
@@ -364,7 +405,7 @@ std::vector<FT_FaceSP> KoFontRegistry::facesForCSSValues(QVector<int> &lengths,
         p = [&]() {
             const FcChar32 hash = FcPatternHash(p.data());
             QString patternHash = info.families.join("+")+QString::number(hash);
-            // FCPatternHash breaks down when there's mutliple family names that start
+            // FCPatternHash breaks down when there's multiple family names that start
             // with the same letter and are the same length (Butcherman and Babylonica, Eater and Elsie, all 4 on google fonts).
             const auto oldPattern = d->patterns().find(patternHash);
             if (oldPattern != d->patterns().end()) {
@@ -410,7 +451,7 @@ std::vector<FT_FaceSP> KoFontRegistry::facesForCSSValues(QVector<int> &lengths,
 
             // First, we're going to split up the text into graphemes. This is both
             // because the css spec requires it, but also because of why the css
-            // spec requires it: graphemes' parts should not end up in seperate
+            // spec requires it: graphemes' parts should not end up in separate
             // runs, which they will if they get assigned different fonts,
             // potentially breaking ligatures and emoji sequences.
             QStringList graphemes = KoCssTextUtils::textToUnicodeGraphemeClusters(text, language);
@@ -545,13 +586,30 @@ std::vector<FT_FaceSP> KoFontRegistry::facesForCSSValues(QVector<int> &lengths,
         } else {
             FT_Face f = nullptr;
             QByteArray utfData = font.fileName.toUtf8();
-            if (FT_New_Face(d->library().data(), utfData.data(), font.fontIndex, &f) == 0) {
+            FT_Error err = FT_New_Face(d->library().data(), utfData.data(), font.fontIndex, &f);
+            if (err == 0) {
                 FT_FaceSP face(f);
                 configureFaces({face}, info.size, info.fontSizeAdjust, xRes, yRes, info.computedAxisSettings());
                 faces.emplace_back(face);
                 d->typeFaces().insert(fontCacheEntry, face);
+            } else {
+                qWarning() << "Failed to load font" << font.fileName << "in font registry, FreeType error:" << err;
+                if (faces.size() > 0) {
+                    faces.emplace_back(faces.at(faces.size()-1));
+                } else {
+                    const QMap<QString, qreal> axisSettings;
+                    if (d->fallbackFont().data()->size->metrics.x_ppem == 0) {
+                        // if the font has not been configured yet, it's ppem is set to 0, so we test that and configure it.
+                        configureFaces({d->fallbackFont()}, 12, 1.0, 72, 72, axisSettings);
+                    }
+
+                    faces.emplace_back(d->fallbackFont());
+                }
             }
         }
+    }
+    if (faces.size() == 0) {
+        lengths = QVector<int>();
     }
 
     return faces;
@@ -880,6 +938,13 @@ KoSvgText::FontMetrics KoFontRegistry::generateFontMetrics(FT_FaceSP face, bool 
         }
     }
 
+    /// BUG:517717, some vertical fonts have nonsense values for the caret.
+    /// We can assume a multi-master font is relatively modern and doesn't have this issue.
+    if (!FT_HAS_MULTIPLE_MASTERS(face) && !isHorizontal) {
+        metrics.caretRise = 0;
+        metrics.caretRun = 1;
+    }
+
     // Baselines.
 
     const QVector<hb_ot_layout_baseline_tag_t> baselines ({
@@ -1055,7 +1120,7 @@ KoSvgText::FontMetrics KoFontRegistry::generateFontMetrics(FT_FaceSP face, bool 
     }
 
     if (!isHorizontal) {
-        // SVG 2.0 explicitely requires vertical ascent/descent to be tied to the ideographic em box.
+        // SVG 2.0 explicitly requires vertical ascent/descent to be tied to the ideographic em box.
         ascender = metrics.ideographicOverBaseline;
         descender = metrics.ideographicUnderBaseline;
 
@@ -1129,7 +1194,46 @@ int32_t KoFontRegistry::loadFlagsForFace(FT_Face face, bool isHorizontal, int32_
     return faceLoadFlags;
 }
 
-bool KoFontRegistry::addFontFilePathToRegistery(const QString &path)
+KoCSSFontInfo KoFontRegistry::getCssDataForPostScriptName(const QString postScriptName, QString *foundPostScriptName)
+{
+    KoCSSFontInfo info;
+    FcPatternSP p(FcPatternCreate());
+    QByteArray utfData = postScriptName.toUtf8();
+    const FcChar8 *vals = reinterpret_cast<FcChar8 *>(utfData.data());
+    FcPatternAddString(p.data(), FC_POSTSCRIPT_NAME, vals);
+    FcDefaultSubstitute(p.data());
+
+    FcResult result = FcResultNoMatch;
+    FcPatternSP match(FcFontMatch(FcConfigGetCurrent(), p.data(), &result));
+    if (result != FcResultNoMatch) {
+        FcChar8 *fileValue = nullptr;
+        if (FcPatternGetString(match.data(), FC_FAMILY, 0, &fileValue) == FcResultMatch) {
+            info.families << QString(reinterpret_cast<char *>(fileValue));
+        } else {
+            info.families << postScriptName;
+        }
+        if (FcPatternGetString(match.data(), FC_POSTSCRIPT_NAME, 0, &fileValue) == FcResultMatch) {
+            *foundPostScriptName = QString(reinterpret_cast<char *>(fileValue));
+        } else {
+            *foundPostScriptName = postScriptName;
+        }
+        int value;
+        if (FcPatternGetInteger(match.data(), FC_WEIGHT, 0, &value) == FcResultMatch) {
+            info.weight = FcWeightToOpenType(value);
+        }
+        if (FcPatternGetInteger(match.data(), FC_WIDTH, 0, &value) == FcResultMatch) {
+            info.width = value;
+        }
+        if (FcPatternGetInteger(match.data(), FC_SLANT, 0, &value) == FcResultMatch) {
+            info.slantMode = value != FC_SLANT_ROMAN? value != FC_SLANT_ITALIC? QFont::StyleOblique: QFont::StyleItalic: QFont::StyleNormal;
+        }
+    } else {
+        info.families << postScriptName;
+    }
+    return info;
+}
+
+bool KoFontRegistry::addFontFilePathToRegistry(const QString &path)
 {
     const QByteArray utfData = path.toUtf8();
     const FcChar8 *vals = reinterpret_cast<const FcChar8 *>(utfData.data());
@@ -1140,7 +1244,7 @@ bool KoFontRegistry::addFontFilePathToRegistery(const QString &path)
     return success;
 }
 
-bool KoFontRegistry::addFontFileDirectoryToRegistery(const QString &path)
+bool KoFontRegistry::addFontFileDirectoryToRegistry(const QString &path)
 {
     const QByteArray utfData = path.toUtf8();
     const FcChar8 *vals = reinterpret_cast<const FcChar8 *>(utfData.data());

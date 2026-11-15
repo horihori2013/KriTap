@@ -34,7 +34,13 @@ KoToolBoxDocker::KoToolBoxDocker(KoToolBox *toolBox)
     w->setFrameShadow(QFrame::Raised);
     w->setFrameStyle(QFrame::Panel | QFrame::Raised);
     QFont font = qApp->font();
-    font.setPointSizeF(font.pointSizeF() * 0.9);
+    // Font size may be in pixels (on Android) or points (everywhere else.)
+    qreal ratio = 0.9;
+    if (font.pixelSize() == -1) {
+        font.setPointSizeF(font.pointSizeF() * ratio);
+    } else {
+        font.setPixelSize(qRound(font.pixelSize() * ratio));
+    }
     int titleSize = QFontMetrics(font).height();
     w->setMinimumSize(titleSize, titleSize);
     setTitleBarWidget(w);
@@ -52,6 +58,21 @@ KoToolBoxDocker::KoToolBoxDocker(KoToolBox *toolBox)
         break;
     }
     updateLayoutDir();
+
+    const int orientUnchecked = cfg.readEntry<int>("orientation", Auto);
+    switch (orientUnchecked) {
+    case Horizontal:
+    case Vertical:
+    case Auto:
+        m_orientation = static_cast<Orientation>(orientUnchecked);
+        break;
+    default:
+        m_orientation = Auto;
+        break;
+    }
+    if (m_orientation != Auto) {
+        setToolBoxOrientation(static_cast<Qt::Orientation>(m_orientation));
+    }
 
     connect(this, SIGNAL(dockLocationChanged(Qt::DockWidgetArea)),
             this, SLOT(updateToolBoxOrientation(Qt::DockWidgetArea)));
@@ -76,12 +97,8 @@ void KoToolBoxDocker::setViewManager(KisViewManager *viewManager)
 void KoToolBoxDocker::resizeEvent(QResizeEvent *event)
 {
     QDockWidget::resizeEvent(event);
-    if (isFloating()) {
-        if (width() > height()) {
-            setToolBoxOrientation(Qt::Horizontal);
-        } else {
-            setToolBoxOrientation(Qt::Vertical);
-        }
+    if (m_orientation == Auto) {
+        setToolBoxOrientation(width() > height() ? Qt::Horizontal : Qt::Vertical);
     }
 }
 
@@ -89,10 +106,8 @@ void KoToolBoxDocker::updateToolBoxOrientation(Qt::DockWidgetArea area)
 {
     m_dockArea = area;
     updateLayoutDir();
-    if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
-        setToolBoxOrientation(Qt::Horizontal);
-    } else {
-        setToolBoxOrientation(Qt::Vertical);
+    if (m_orientation == Auto) {
+        setToolBoxOrientation(width() > height() ? Qt::Horizontal : Qt::Vertical);
     }
 }
 
@@ -119,8 +134,33 @@ void KoToolBoxDocker::changeLayoutDir(Qt::LayoutDirection dir)
     updateLayoutDir();
 }
 
+void KoToolBoxDocker::changeOrientation(const Orientation orientation)
+{
+    if (m_orientation == orientation) {
+        return;
+    }
+    KConfigGroup cfg = KSharedConfig::openConfig()->group("KoToolBox");
+    cfg.writeEntry<int>("orientation", orientation);
+    m_orientation = orientation;
+    if (m_orientation == Auto) {
+        setToolBoxOrientation(width() > height() ? Qt::Horizontal : Qt::Vertical);
+    } else {
+        setToolBoxOrientation(static_cast<Qt::Orientation>(m_orientation));
+    }
+}
+
+void KoToolBoxDocker::changeCompact(const bool state)
+{
+    KConfigGroup cfg = KSharedConfig::openConfig()->group("KoToolBox");
+    cfg.writeEntry<bool>("compact", state);
+    m_scrollArea->setCompact(state);
+}
+
 void KoToolBoxDocker::setToolBoxOrientation(Qt::Orientation orientation)
 {
+    if (m_scrollArea->orientation() == orientation) {
+        return;
+    }
     if (orientation == Qt::Horizontal) {
         setFeatures(features() | QDockWidget::DockWidgetVerticalTitleBar);
         m_scrollArea->setOrientation(Qt::Horizontal);
@@ -139,6 +179,12 @@ void KoToolBoxDocker::contextMenuEvent(QContextMenuEvent *event)
 {
     if (!m_contextMenu) {
         m_contextMenu = new QMenu(this);
+
+        QAction *compact = m_contextMenu->addAction(i18n("Compact"));
+        compact->setCheckable(true);
+        compact->setChecked(m_toolBox->isCompact());
+        connect(compact, &QAction::triggered, this, &KoToolBoxDocker::changeCompact);
+
         m_contextMenu->addSection(i18n("Icon Size"));
         m_toolBox->setupIconSizeMenu(m_contextMenu);
 
@@ -175,6 +221,42 @@ void KoToolBoxDocker::contextMenuEvent(QContextMenuEvent *event)
             break;
         case Qt::RightToLeft:
             layoutRtl->setChecked(true);
+            break;
+        }
+
+        m_contextMenu->addSection(i18nc("Toolbox orientation", "Orientation"));
+        QActionGroup *orientActionGroup = new QActionGroup(m_contextMenu);
+
+        QAction *orientAuto = m_contextMenu->addAction(i18nc("@item:inmenu Toolbox orientation", "&Automatic"));
+        orientAuto->setActionGroup(orientActionGroup);
+        orientAuto->setCheckable(true);
+        connect(orientAuto, &QAction::triggered, this, [this]() {
+            changeOrientation(Auto);
+        });
+
+        QAction *orientHorizontal = m_contextMenu->addAction(i18nc("@item:inmenu Toolbox orientation", "&Horizontal"));
+        orientHorizontal->setActionGroup(orientActionGroup);
+        orientHorizontal->setCheckable(true);
+        connect(orientHorizontal, &QAction::triggered, this, [this]() {
+            changeOrientation(Horizontal);
+        });
+
+        QAction *orientVertical = m_contextMenu->addAction(i18nc("@item:inmenu Toolbox orientation", "&Vertical"));
+        orientVertical->setActionGroup(orientActionGroup);
+        orientVertical->setCheckable(true);
+        connect(orientVertical, &QAction::triggered, this, [this]() {
+            changeOrientation(Vertical);
+        });
+
+        switch (m_orientation) {
+        case Horizontal:
+            orientHorizontal->setChecked(true);
+            break;
+        case Vertical:
+            orientVertical->setChecked(true);
+            break;
+        case Auto:
+            orientAuto->setChecked(true);
             break;
         }
     }

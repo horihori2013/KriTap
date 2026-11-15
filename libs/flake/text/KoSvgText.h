@@ -58,7 +58,7 @@ enum UnicodeBidi {
     BidiEmbed, ///< Opens an additional Bidi-reordering level.
     BidiOverride, ///< Opens an additional Bidi-reordering level, implicit part
                   ///< of the algorithm is ignored.
-    BidiIsolate, ///< Content is ordered as if in a seperate paragraph.
+    BidiIsolate, ///< Content is ordered as if in a separate paragraph.
     BidiIsolateOverride, ///< Ordered like a directional override inside an
                          ///< isolated paragraph.
     BidiPlainText ///< Behaves like isolate, except using heuristics defined in
@@ -205,7 +205,7 @@ enum HangingPunctuation {
     HangNone = 0x0, ///< Hang nothing.
     HangFirst = 0x1, ///< Hang opening brackets and quotes.
     HangLast = 0x2, ///< Hang closing brackets and quotes.
-    HangEnd = 0x4, ///< Hang stops and commas. Force/Allow is a seperate boolean.
+    HangEnd = 0x4, ///< Hang stops and commas. Force/Allow is a separate boolean.
     HangForce = 0x8 ///< Whether to force hanging stops or commas.
 };
 
@@ -326,42 +326,42 @@ Q_ENUM_NS(TextRendering)
  */
 struct FontMetrics : public boost::equality_comparable<FontMetrics> {
     bool isVertical = false; ///< Different fontMetrics count between vertical and horizontal.
-    qint32 fontSize; ///< Currently set size, CSS unit 'em'
-    qint32 zeroAdvance; ///< Advance of the character '0', CSS Unit 'ch', defaults to 0.5 em in horizontal and 1.0 em in vertical.
-    qint32 spaceAdvance;///< Advance of the character ' ', used by tabs.
-    qint32 ideographicAdvance; ///< Advance of the character '水' (U+6C34), CSS Unit ic, defaults to 1 em.
+    qint32 fontSize = 0; ///< Currently set size, CSS unit 'em'
+    qint32 zeroAdvance = 0; ///< Advance of the character '0', CSS Unit 'ch', defaults to 0.5 em in horizontal and 1.0 em in vertical.
+    qint32 spaceAdvance = 0;///< Advance of the character ' ', used by tabs.
+    qint32 ideographicAdvance = 0; ///< Advance of the character '水' (U+6C34), CSS Unit ic, defaults to 1 em.
 
-    qint32 xHeight; ///< height of X, defaults to 0.5 fontsize.
-    qint32 capHeight; ///< Height of capital letters, defaults to ascender.
-    QPair<qint32, qint32> subScriptOffset; ///< subscript baseline height, defaults to 1/5th em below alphabetic.
-    QPair<qint32, qint32> superScriptOffset; ///< superscript baseline height, defaults to 2/3rd above alphabetic.
+    qint32 xHeight = 0; ///< height of X, defaults to 0.5 fontsize.
+    qint32 capHeight = 0; ///< Height of capital letters, defaults to ascender.
+    QPair<qint32, qint32> subScriptOffset = qMakePair(0, 0); ///< subscript baseline height, defaults to 1/5th em below alphabetic.
+    QPair<qint32, qint32> superScriptOffset = qMakePair(0, 0); ///< superscript baseline height, defaults to 2/3rd above alphabetic.
 
-    qint32 ascender; ///< distance from origin to top.
-    qint32 descender; ///< distance for origin to bottom.
-    qint32 lineGap; ///< additional linegap between consequetive lines.
+    qint32 ascender = 0; ///< distance from origin to top.
+    qint32 descender = 0; ///< distance for origin to bottom.
+    qint32 lineGap = 0; ///< additional linegap between consecutive lines.
 
-    qint32 alphabeticBaseline; ///< location of alphabetic baseline from origin.
-    qint32 mathematicalBaseline; ///< location of mathematical baseline from origin.
+    qint32 alphabeticBaseline = 0; ///< location of alphabetic baseline from origin.
+    qint32 mathematicalBaseline = 0; ///< location of mathematical baseline from origin.
 
-    qint32 ideographicUnderBaseline; ///< location of ideographic under baseline from origin, may fall back to descender.
-    qint32 ideographicCenterBaseline; ///< location of ideographic center baseline from origin,
+    qint32 ideographicUnderBaseline = 0; ///< location of ideographic under baseline from origin, may fall back to descender.
+    qint32 ideographicCenterBaseline = 0; ///< location of ideographic center baseline from origin,
                                    ///< default baseline for vertical, centered between over and under.
-    qint32 ideographicOverBaseline; ///< location of ideographic over baseline from origin.
+    qint32 ideographicOverBaseline = 0; ///< location of ideographic over baseline from origin.
 
-    qint32 ideographicFaceUnderBaseline; ///< location of ideographic face under baseline, that is, the bottom of the glyphs.
-    qint32 ideographicFaceOverBaseline; ///< location of ideographic face over baseline, that is, the top of the glyphs.
+    qint32 ideographicFaceUnderBaseline = 0; ///< location of ideographic face under baseline, that is, the bottom of the glyphs.
+    qint32 ideographicFaceOverBaseline = 0; ///< location of ideographic face over baseline, that is, the top of the glyphs.
 
-    qint32 hangingBaseline; ///< location of the hanging baseline used in north brahmic scripts.
+    qint32 hangingBaseline = 0; ///< location of the hanging baseline used in north brahmic scripts.
 
-    qint32 underlineOffset; ///< underline offset from alphabetic, positive.
-    qint32 underlineThickness; ///< underline thickness from font.
-    qint32 lineThroughOffset; ///< offset of strike-through from alphabetic baseline.
-    qint32 lineThroughThickness; ///< strikethrough thickness, from font.
+    qint32 underlineOffset = 0; ///< underline offset from alphabetic, positive.
+    qint32 underlineThickness = 0; ///< underline thickness from font.
+    qint32 lineThroughOffset = 0; ///< offset of strike-through from alphabetic baseline.
+    qint32 lineThroughThickness = 0; ///< strikethrough thickness, from font.
 
     /// These are only used to determine the caret slant proportion.
-    qint32 caretRun;
-    qint32 caretRise;
-    qint32 caretOffset;
+    qint32 caretRun = 0;
+    qint32 caretRise = 0;
+    qint32 caretOffset = 0;
 
     FontMetrics () {
 
@@ -410,8 +410,8 @@ struct CssLengthPercentage : public boost::equality_comparable<CssLengthPercenta
         Em, /// multiply by Font-size
         Ex, /// multiply by font-x-height.
         Cap,/// multiply by font cap height
-        Ch, /// multiply by width of "0", represents avarage proportional script advance.
-        Ic, /// multiply by width of "U+6C34", represents avarage full width script advance.
+        Ch, /// multiply by width of "0", represents average proportional script advance.
+        Ic, /// multiply by width of "U+6C34", represents average full width script advance.
         Lh, /// multiply by lineheight.
     };
 
@@ -638,7 +638,7 @@ struct TextTransformInfo : public boost::equality_comparable<TextTransformInfo> 
     bool fullWidth = false; ///< Convert proportional or half-width text to
                             ///< full-width text. 'at-risk'
     bool fullSizeKana = false; ///< Convert Japanese Katakana and Hiragana to
-                               ///< their 'fullsize' equivelants. 'at-risk'
+                               ///< their 'fullsize' equivalents. 'at-risk'
     bool operator==(const TextTransformInfo &rhs) const
     {
         return (capitals == rhs.capitals) && (fullWidth == rhs.fullWidth) && (fullSizeKana == rhs.fullSizeKana);
@@ -780,7 +780,7 @@ struct FontFamilyAxis : public boost::equality_comparable<FontFamilyAxis> {
     qreal value = 0;
     qreal defaultValue = 0;
     bool variableAxis = false;
-    bool axisHidden = false; /// Some variable fonts have axes that are not really supossed to be shown to the user.
+    bool axisHidden = false; /// Some variable fonts have axes that are not really supposed to be shown to the user.
 
     QString debugInfo() const {
         QString label;

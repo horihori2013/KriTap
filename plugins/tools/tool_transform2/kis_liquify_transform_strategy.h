@@ -30,7 +30,7 @@ public:
     ~KisLiquifyTransformStrategy() override;
 
     void setTransformFunction(const QPointF &mousePos, bool perspectiveModifierActive, bool shiftModifierActive);
-    void paint(QPainter &gc) override;
+    void paint(QPainter &gc, const KoColorDisplayRendererInterface *displayRendererInterface) override;
     QCursor getCurrentCursor() const override;
     QPainterPath getCursorOutline() const override;
 
@@ -50,6 +50,9 @@ public:
     void continueAlternateAction(KoPointerEvent *event, KisTool::AlternateAction action) override;
     bool endAlternateAction(KoPointerEvent *event, KisTool::AlternateAction action) override;
 
+    void increaseBrushSize(KoCanvasBase *canvas) override;
+    void decreaseBrushSize(KoCanvasBase *canvas) override;
+
 Q_SIGNALS:
     void requestCanvasUpdate();
     void requestUpdateOptionWidget();
@@ -57,6 +60,8 @@ Q_SIGNALS:
     void requestImageRecalculation();
 
 private:
+    void changeBrushSize(KoCanvasBase *canvas, bool increase);
+
     struct Private;
     const QScopedPointer<Private> m_d;
 };

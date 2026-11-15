@@ -149,6 +149,11 @@ void KisCanvasWidgetBase::setDecorations(const QList<KisCanvasDecorationSP > &de
 {
     m_d->decorations=decorations;
     std::stable_sort(m_d->decorations.begin(), m_d->decorations.end(), KisCanvasDecoration::comparePriority);
+
+    Q_FOREACH(auto d, m_d->decorations)
+    {
+        d->setCanvasWidget(this);
+    }
 }
 
 QList<KisCanvasDecorationSP > KisCanvasWidgetBase::decorations() const
@@ -246,4 +251,14 @@ void KisCanvasWidgetBase::processFocusInEvent(QFocusEvent *event)
 void KisCanvasWidgetBase::processFocusOutEvent(QFocusEvent *event)
 {
     m_d->toolProxy->focusOutEvent(event);
+}
+
+KisAbstractCanvasWidget::BitDepthMode KisCanvasWidgetBase::currentBitDepthMode() const
+{
+    return BitDepthMode::Depth8Bit;
+}
+
+QString KisCanvasWidgetBase::currentBitDepthUserReport() const
+{
+    return QString("Canvas bit depth management is not supported\n");
 }

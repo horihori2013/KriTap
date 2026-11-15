@@ -57,6 +57,7 @@
 #include <kaboutdata.h>
 #include <kis_workspace_resource.h>
 #include <input/kis_input_manager.h>
+#include "dialogs/KisDlgCreateNewDocument.h"
 #include "kis_selection_manager.h"
 #include "kis_icon_utils.h"
 #include <krecentfilesaction.h>
@@ -98,9 +99,13 @@
 #include <KisPlaybackEngine.h>
 
 #ifdef Q_OS_ANDROID
+#include "KisAndroidDonations.h"
+#include "dialogs/KisDonationManagementDialog.h"
 #include <QtAndroid>
+#include <KisAndroidUtils.h>
 #endif
 
+#include <KisScopedPerformanceLogger.h>
 #include <KisUsageLogger.h>
 #include <brushengine/kis_paintop_settings.h>
 #include "dialogs/kis_about_application.h"
@@ -154,17 +159,14 @@
 #include "KisWidgetConnectionUtils.h"
 #include "KisToolBarStateModel.h"
 #include <config-qmdiarea-always-show-subwindow-title.h>
-
-
-#include <config-use-surface-color-management-api.h>
-
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-
-#include <KisSRGBSurfaceColorSpaceManager.h>
-
-#endif /* KRITA_USE_SURFACE_COLOR_MANAGEMENT_API */
+#include <config-qt-patches-present.h>
+#include <KisPlatformPluginInterfaceFactory.h>
 
 #include <mutex>
+
+#if defined(Q_OS_ANDROID) && KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+#include <KisAndroidScaling.h>
+#endif
 
 class ToolDockerFactory : public KoDockFactoryBase
 {
@@ -239,6 +241,9 @@ public:
 
     bool firstTime {true};
     bool windowSizeDirty {false};
+#ifdef Q_OS_ANDROID
+    bool flashWindowHackInProgress {false};
+#endif
 
     KisAction *showDocumentInfo {nullptr};
     KisAction *saveAction {nullptr};
@@ -261,7 +266,13 @@ public:
     KisAction *toggleDockers {nullptr};
     KisAction *resetConfigurations {nullptr};
     KisAction *toggleDockerTitleBars {nullptr};
-#ifndef Q_OS_ANDROID
+#ifdef Q_OS_ANDROID
+    KisAction *showDonationManagementDialog {nullptr};
+    KisAction *manageSubscriptions {nullptr};
+#if KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    KisAction *changeInterfaceScale {nullptr};
+#endif
+#else
     KisAction *toggleDetachCanvas {nullptr};
     KisAction *newWindow {nullptr};
 #endif
@@ -318,11 +329,6 @@ public:
 
     KateCommandBar *commandBar {nullptr};
 
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-    // lifetime is managed by the QObject hierarchy
-    QPointer<KisSRGBSurfaceColorSpaceManager> surfaceColorSpaceManager;
-#endif
-
     KisActionManager * actionManager() {
         return viewManager->actionManager();
     }
@@ -359,9 +365,7 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     : KXmlGuiWindow()
     , d(new Private(this, uuid))
 {
-    // Krita's main window handles sRGB space itself, exclude that
-    // from auto-srgb-assignment
-    setProperty("krita_skip_srgb_surface_manager_assignment", true);
+    KisScopedPerformanceLogger perfLog(QStringLiteral("KisMainWindow::KisMainWindow"));
 
     KAcceleratorManager::setNoAccel(this);
 
@@ -380,12 +384,18 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     setStandardToolBarMenuEnabled(true);
     setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
     setDockNestingEnabled(true);
+#ifdef Q_OS_ANDROID
+    // On Android, the animations for docks and menus are not only slow, but
+    // also can cause crashes in some circumstances. Turning them off feels
+    // better and avoids those.
+    setAnimated(false);
+#endif
 
     qApp->setStartDragDistance(25);     // 25 px is a distance that works well for Tablet and Mouse events
 
     connect(this, SIGNAL(restoringDone()), this, SLOT(forceDockTabFonts()));
     connect(this, SIGNAL(themeChanged()), d->viewManager, SLOT(updateIcons()));
-    connect(this, SIGNAL(themeChanged()), KoToolManager::instance(), SLOT(themeChanged()));
+    connect(this, SIGNAL(themeChanged()), d->viewManager->toolManager(), SLOT(themeChanged()));
     connect(KisPart::instance(), SIGNAL(documentClosed(QString)), SLOT(updateWindowMenu()));
     connect(KisPart::instance(), SIGNAL(documentOpened(QString)), SLOT(updateWindowMenu()));
     connect(KisConfigNotifier::instance(), SIGNAL(configChanged()), this, SLOT(configChanged()));
@@ -413,8 +423,8 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     if (toolbox) {
         dockwidgetActions[toolbox->toggleViewAction()->text()] = toolbox->toggleViewAction();
     }
-    Q_FOREACH (const QString & docker, KoDockRegistry::instance()->keys()) {
-        KoDockFactoryBase *factory = KoDockRegistry::instance()->value(docker);
+
+    for (KoDockFactoryBase *factory : KoDockRegistry::instance()->sortedDockWidgetFactories()) {
         QDockWidget *dw = createDockWidget(factory);
         if (dw) {
             dockwidgetActions[dw->toggleViewAction()->text()] = dw->toggleViewAction();
@@ -424,7 +434,7 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     if (d->toolOptionsDocker) {
         dockwidgetActions[d->toolOptionsDocker->toggleViewAction()->text()] = d->toolOptionsDocker->toggleViewAction();
     }
-    connect(KoToolManager::instance(), SIGNAL(toolOptionWidgetsChanged(KoCanvasController*,QList<QPointer<QWidget> >)), this, SLOT(newOptionWidgets(KoCanvasController*,QList<QPointer<QWidget> >)));
+    connect(d->viewManager->toolManager(), SIGNAL(toolOptionWidgetsChanged(KoCanvasController*,QList<QPointer<QWidget> >)), this, SLOT(newOptionWidgets(KoCanvasController*,QList<QPointer<QWidget> >)));
 
     Q_FOREACH (QString title, dockwidgetActions.keys()) {
         d->dockWidgetMenu->addAction(dockwidgetActions[title]);
@@ -435,34 +445,19 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     d->styleActions = new QActionGroup(this);
     QAction * action;
 
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-    QStringList allowableStyles = QStringList() << "macintosh" << "breeze" << "fusion";
-#else
-    QStringList allowableStyles = QStringList() << "macos" << "breeze" << "fusion";
-#endif
+#ifndef Q_OS_ANDROID
 
     Q_FOREACH (QString styleName, QStyleFactory::keys()) {
-#ifdef Q_OS_ANDROID
-        // disable the style for android platform
-        if (styleName.toLower().contains("android")) {
-            continue;
-        }
-#endif
-        if (qgetenv("KRITA_NO_STYLE_OVERRIDE").isEmpty()) {
-            if (!allowableStyles.contains(styleName.toLower())) {
-                continue;
-            }
-        }
+
         action = new QAction(styleName, d->styleActions);
         action->setCheckable(true);
         d->actionMap.insert(styleName, action);
         d->styleMenu->addAction(d->actionMap.value(styleName));
     }
 
-
     // select the config value, or the current style if that does not exist
     QString styleFromConfig = cfg.widgetStyle().toLower();
-    QString styleToSelect = styleFromConfig == "" ? style()->objectName().toLower() : styleFromConfig;
+    QString styleToSelect = styleFromConfig.isEmpty() ? style()->objectName().toLower() : styleFromConfig;
 
     Q_FOREACH (auto key, d->actionMap.keys()) {
         if(key.toLower() == styleToSelect) { // does the key match selection
@@ -472,12 +467,12 @@ KisMainWindow::KisMainWindow(QUuid uuid)
 
     connect(d->styleActions, SIGNAL(triggered(QAction*)),
             this, SLOT(slotUpdateWidgetStyle()));
-
+#endif
 
     // Load all the actions from the tool plugins
     // ToolBoxDocker needs them when at setViewManager()
     Q_FOREACH(KoToolFactoryBase *toolFactory, KoToolRegistry::instance()->values()) {
-        toolFactory->createActions(actionCollection());
+        toolFactory->createActions(actionCollection(), d->viewManager->toolManager());
     }
 
 
@@ -524,11 +519,7 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     updateWindowMenu();
 
     if (isHelpMenuEnabled() && !d->helpMenu) {
-        QGuiApplication *app = qApp;
-        KAboutData aboutData(KAboutData::applicationData());
-        aboutData.setOrganizationDomain(app->organizationDomain().toUtf8());
-
-        d->helpMenu = new KisKHelpMenu(this, aboutData, false);
+        d->helpMenu = new KisKHelpMenu(this, KAboutData::applicationData(), false);
 
         // workaround-less version:
         // d->helpMenu = new KisKHelpMenu(this, QString()/*unused*/, false);
@@ -565,9 +556,9 @@ KisMainWindow::KisMainWindow(QUuid uuid)
         connect(d->helpMenu, SIGNAL(showAboutApplication()), SLOT(showAboutApplication()));
     }
 
-    // KDE' libs 4''s help contents action is broken outside kde, for some reason... We can handle it just as easily ourselves
+    // Custom handling of help action for manual URL outside docs.kde.org.
     QAction *helpAction = actionCollection()->action("help_contents");
-    helpAction->disconnect();
+    helpAction->disconnect(SIGNAL(triggered()));
     connect(helpAction, SIGNAL(triggered()), this, SLOT(showManual()));
 
 #if 0
@@ -655,6 +646,19 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     s->setOrientationUpdateMask(Qt::LandscapeOrientation|Qt::InvertedLandscapeOrientation|Qt::PortraitOrientation|Qt::InvertedPortraitOrientation);
     connect(s, SIGNAL(orientationChanged(Qt::ScreenOrientation)), this, SLOT(orientationChanged()));
 
+#if KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    // When the screen's UI scale changes, we have to hide and show it to get
+    // its contents to update, otherwise it fails to re-render altogether.
+    KisAndroidScaling *androidScaling = KisAndroidScaling::instance();
+    if (androidScaling) {
+        connect(androidScaling,
+                &KisAndroidScaling::sigInterfaceScaleChanged,
+                this,
+                &KisMainWindow::slotFlashWindowHack,
+                Qt::QueuedConnection);
+    }
+#endif
+
     // When Krita starts, Java side sends an event to set applicationState() to active. But, before
     // the event could reach KisApplication's platform integration, it is cleared by KisOpenGLModeProber::probeFormat.
     // So, we send it manually when MainWindow shows up.
@@ -673,16 +677,6 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     }
 
     applyMainWindowSettings(d->windowStateConfig);
-
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-    /**
-     * Load platform plugin for surface color management and set
-     * the surface color space to sRGB exactly
-     */
-
-    d->surfaceColorSpaceManager = KisSRGBSurfaceColorSpaceManager::tryCreateForCurrentPlatform(this);
-#endif /* KRITA_USE_SURFACE_COLOR_MANAGEMENT_API */
-
 }
 
 KisMainWindow::~KisMainWindow()
@@ -706,6 +700,22 @@ KisMainWindow::~KisMainWindow()
     //            dbgKrita << "Got a non-qaction:" << ac->objectName();
     //        }
     //    }
+
+    /**
+     * Destructor of KisView accesses KisViewManager is multiple ways,
+     * directly and via KoToolManager. Hence we should destroy all the
+     * subwindows **before** we actually destroy the view manager.
+     *
+     * Please note that we cannot just `close()` the subwindows, becasue
+     * they are deleted with deleteLater(), which may postpone their
+     * destruction till after KisViewManager's death.
+     */
+    Q_FOREACH (QMdiSubWindow *subwin, d->mdiArea->subWindowList()) {
+        if (subwin) {
+            (void) subwin->close();
+            delete subwin;
+        }
+    }
 
     // The doc and view might still exist (this is the case when closing the window)
     KisPart::instance()->removeMainWindow(this);
@@ -773,6 +783,26 @@ void KisMainWindow::showView(KisView *imageView, QMdiSubWindow *subwin)
             QMdiSubWindow *currentSubWin = d->mdiArea->currentSubWindow();
             bool shouldMaximize = currentSubWin ? currentSubWin->isMaximized() : true;
             subwin = d->mdiArea->addSubWindow(imageView);
+
+            /**
+             * We set Qt::WA_DontCreateNativeAncestors in KisOpenGLCanvas2,
+             * so the parents will not receive native surfaces automatically.
+             * That is a problem for MDI-subwindows, since they may overlap.
+             * This overlapping cannot be resolved when the MDI-subwindow
+             * is an alien widget, but the wrapped widget is a native widget.
+             * The docorations of any subwindow will always be lower than
+             * the content of any of the subwindows.
+             *
+             * Therefore we explicitly create a native surface for every
+             * MDI-subwindow.
+             */
+            const bool osManagedSurfacePresent = KisPlatformPluginInterfaceFactory::instance()->surfaceColorManagedByOS();
+            const bool useNativeSurfaceForCanvas = KisConfig(true).effectiveShouldUseNativeSurfaceForCanvas(osManagedSurfacePresent);
+            if (useNativeSurfaceForCanvas) {
+                subwin->setAttribute(Qt::WA_DontCreateNativeAncestors);
+                subwin->setAttribute(Qt::WA_NativeWindow);
+            }
+
             if (shouldMaximize) {
                 subwin->setWindowState(Qt::WindowMaximized);
             }
@@ -820,7 +850,7 @@ void KisMainWindow::showView(KisView *imageView, QMdiSubWindow *subwin)
          * So here we just explicitly call the tool activation stub.
          */
 
-        KoToolManager::instance()->initializeCurrentToolForCanvas();
+        d->viewManager->toolManager()->initializeCurrentToolForCanvas();
 
         // No, no, no: do not try to call this _before_ the show() has
         // been called on the view; only when that has happened is the
@@ -837,9 +867,27 @@ void KisMainWindow::showView(KisView *imageView, QMdiSubWindow *subwin)
 
 void KisMainWindow::slotPreferences()
 {
+    std::optional<KisDlgPreferences::PageDesc>page = std::nullopt;
+
+    KisAction* action = d->actionManager()->actionByName("options_configure");
+    QVariant data  = action->data();
+    if (data.userType() == QMetaType::QVariantList) {
+        // Reset the data first
+        action->setData(QVariant());
+        QList<QVariant> list = data.toList();
+
+        Q_ASSERT(list.length() == 2);
+        Q_ASSERT(list[0].userType() == QMetaType::Int);
+        Q_ASSERT(list[1].userType() == QMetaType::Int);
+
+        KisDlgPreferences::Page p = (KisDlgPreferences::Page)list[0].toInt();
+        int t = list[1].toInt();
+        page = KisDlgPreferences::PageDesc{p, t};
+    }
+
     QScopedPointer<KisDlgPreferences> dlgPreferences(new KisDlgPreferences(this));
 
-    if (dlgPreferences->editPreferences()) {
+    if (dlgPreferences->editPreferences(page)) {
         KisConfigNotifier::instance()->notifyConfigChanged();
         KisConfigNotifier::instance()->notifyPixelGridModeChanged();
         KisImageConfigNotifier::instance()->notifyConfigChanged();
@@ -964,7 +1012,8 @@ void KisMainWindow::customizeTabBar()
     QString tabStyleSheet = QStringLiteral(R"(
             QTabBar::close-button {
                 image: url(%1);
-                padding-top: 3px;
+                padding: 1.5px;
+                border-radius: 3px;
             }
             QTabBar::close-button:hover {
                 background-color: %2;
@@ -1153,6 +1202,21 @@ KisView* KisMainWindow::addViewAndNotifyLoadingCompleted(KisDocument *document,
 
     Q_EMIT guiLoadingFinished();
 
+#ifdef Q_OS_ANDROID
+    // HACK: When opening documents on Android, the main window sometimes fails
+    // to update until the application is shunted to the background and brought
+    // back or the menu bar is fiddled with. Flickering the window fixes this.
+    // Having a docker that uses QML somehow also fixes this, so this hack is
+    // gone again in 5.3 with the introduction of the text properties docker.
+    // UNHACK: But not on Xiaomi devices! There flickering the window makes it
+    // sorta exit fullscreen, adding black bars at the top and bottom. Just
+    // opening a document seems to work fine on these devices though, it delays
+    // for a moment then displays fine, so just skip this there I guess.
+    if (!KisAndroidUtils::looksLikeXiaomiDevice()) {
+        slotFlashWindowHack();
+    }
+#endif
+
     return view;
 }
 
@@ -1312,6 +1376,11 @@ bool KisMainWindow::saveDocument(KisDocument *document, bool saveas, bool isExpo
         saveas = true;
     }
 
+    QFile target(document->path());
+    if (!target.exists()) { // Possible when file is moved/unmounted during Krita session.
+        saveas = true;
+    }
+
     connect(document, SIGNAL(completed()), this, SLOT(slotSaveCompleted()));
     connect(document, SIGNAL(canceled(QString)), this, SLOT(slotSaveCanceled(QString)));
 
@@ -1458,7 +1527,7 @@ bool KisMainWindow::saveDocument(KisDocument *document, bool saveas, bool isExpo
                     }
                 }
                 else { // Export
-                    ret = document->exportDocument(newFilePath, outputFormat, isAdvancedExporting, true);
+                    ret = document->exportDocument(newFilePath, outputFormat, isAdvancedExporting, false);
                     if (ret) {
                         d->lastExportLocation = newFilePath;
                         d->lastExportedFormat = outputFormat;
@@ -1613,6 +1682,15 @@ void KisMainWindow::showEvent(QShowEvent *event)
     if (!event->spontaneous()) {
         setMainWindowLayoutForCurrentMainWidget(d->widgetStack->currentIndex(), false);
     }
+#ifdef Q_OS_ANDROID
+    // The user can conceivably purchase a product from the splash screen while
+    // Krita is still loading. In that case, the "pending" flag will be set. The
+    // dialog in question will clear the flag.
+    KisAndroidDonations *androidDonations = KisAndroidDonations::instance();
+    if (androidDonations && androidDonations->isShowDonationManagementDialogPending()) {
+        QTimer::singleShot(0, this, &KisMainWindow::slotShowDonationManagementDialog);
+    }
+#endif
     return KXmlGuiWindow::showEvent(event);
 }
 
@@ -1760,56 +1838,9 @@ void KisMainWindow::showWelcomeScreen(bool show)
 
 void KisMainWindow::slotFileNew()
 {
-    const QStringList mimeFilter = KisImportExportManager::supportedMimeTypes(KisImportExportManager::Import);
-
-    KisOpenPane *startupWidget = new KisOpenPane(this, mimeFilter, QStringLiteral("templates/"));
-    startupWidget->setWindowModality(Qt::WindowModal);
-    startupWidget->setWindowTitle(i18n("Create new document"));
-
-
-    KisConfig cfg(true);
-
-    int w = cfg.defImageWidth();
-    int h = cfg.defImageHeight();
-    const double resolution = cfg.defImageResolution();
-    const QString colorModel = cfg.defColorModel();
-    const QString colorDepth = cfg.defaultColorDepth();
-    const QString colorProfile = cfg.defColorProfile();
-
-
-    CustomDocumentWidgetItem item;
-    item.widget = new KisCustomImageWidget(startupWidget,
-                                           w,
-                                           h,
-                                           resolution,
-                                           colorModel,
-                                           colorDepth,
-                                           colorProfile,
-                                           i18n("Unnamed"));
-
-    item.icon = "document-new";
-    item.title = i18n("Custom Document");
-    startupWidget->addCustomDocumentWidget(item.widget, item.title, "Custom Document", item.icon);
-
-    item.widget = new KisImageFromClipboardWidget(startupWidget,
-                                            0,
-                                            0,
-                                            resolution,
-                                            colorModel,
-                                            colorDepth,
-                                            colorProfile,
-                                            i18n("Unnamed"));
-
-    item.title = i18n("Create from Clipboard");
-    item.icon = "tab-new";
-
-    startupWidget->addCustomDocumentWidget(item.widget, item.title, "Create from ClipBoard", item.icon);
-
-    connect(startupWidget, SIGNAL(documentSelected(KisDocument*)), KisPart::instance(), SLOT(startCustomDocument(KisDocument*)));
-    connect(startupWidget, SIGNAL(openTemplate(QUrl)), KisPart::instance(), SLOT(openTemplate(QUrl)));
-
-    startupWidget->exec();
-    startupWidget->deleteLater();
+    KisDlgCreateNewDocument* dlg = new KisDlgCreateNewDocument(this);
+    dlg->exec();
+    dlg->deleteLater();
 }
 
 void KisMainWindow::slotImportFile()
@@ -1850,6 +1881,16 @@ void KisMainWindow::slotFileSave()
     }
 }
 
+void KisMainWindow::slotChangeInterfaceScale()
+{
+#if defined(Q_OS_ANDROID) && KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    KisAndroidScaling *androidScaling = KisAndroidScaling::instance();
+    if (androidScaling) {
+        androidScaling->showDialog();
+    }
+#endif
+}
+
 void KisMainWindow::slotFileSaveAs()
 {
     if (saveDocument(d->activeView->document(), true, false,false)) {
@@ -1873,6 +1914,53 @@ void KisMainWindow::slotExportAdvance()
 void KisMainWindow::slotShowSessionManager() {
     KisPart::instance()->showSessionManager();
 }
+
+#ifdef Q_OS_ANDROID
+void KisMainWindow::slotShowDonationManagementDialog()
+{
+    // Don't show the donation management dialog on top of another dialog
+    // that may have triggered a donation flow, such as the bundle manager.
+    QWidget *win = qApp->activeWindow();
+    if (win && !qobject_cast<KisMainWindow *>(win) && (win->isModal() || win->windowModality() != Qt::NonModal)) {
+        return;
+    }
+
+    // We don't use `exec` here because the purchase stuff runs in Android's
+    // event loop, so it's legitimately possible that we get hit by another
+    // request to show the donation management dialog while it's already up
+    // and it's more convenient for the dialog to handle the deduplication.
+    QString objectName = QStringLiteral("kisdonationmanagementdialog");
+    KisDonationManagementDialog *dlg = findChild<KisDonationManagementDialog *>(objectName, Qt::FindDirectChildrenOnly);
+    if (dlg) {
+        dlg->reshow();
+    } else {
+        dlg = new KisDonationManagementDialog(this);
+
+        QAction *action = actionCollection()->action("manage_supporter_bundles");
+        if (action) {
+            connect(dlg, &KisDonationManagementDialog::sigShowSupporterBundles, action, &QAction::trigger);
+        }
+
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setObjectName(objectName);
+        dlg->show();
+    }
+}
+
+void KisMainWindow::slotFlashWindowHack()
+{
+    if (!d->flashWindowHackInProgress) {
+        d->flashWindowHackInProgress = true;
+        QTimer::singleShot(0, this, [this] {
+            hide();
+            QTimer::singleShot(0, this, [this] {
+                show();
+                d->flashWindowHackInProgress = false;
+            });
+        });
+    }
+}
+#endif
 
 KoCanvasResourceProvider *KisMainWindow::resourceManager() const
 {
@@ -2172,6 +2260,8 @@ void KisMainWindow::importAnimation()
 
 void KisMainWindow::importVideoAnimation()
 {
+    // Importing video requires ffmpeg, which is not available on Android.
+#ifndef Q_OS_ANDROID
     KisDocument *document;
     KisDlgImportVideoAnimation dlg(this, activeView());
 
@@ -2250,6 +2340,7 @@ void KisMainWindow::importVideoAnimation()
         document->image()->waitForDone();
 
     }
+#endif
 }
 
 void KisMainWindow::renderAnimation()
@@ -2351,6 +2442,14 @@ void KisMainWindow::slotToolbarToggled(bool toggle)
 
 void KisMainWindow::viewFullscreen(bool fullScreen)
 {
+#ifdef Q_OS_ANDROID
+    // Full-screening on Android applies to the entire application, not this
+    // window in particular. Qt tries to paper over that matter, but it causes
+    // some pretty horrid flickering when the main window gets hidden. We just
+    // talk to the Android interface directly to get around that.
+    KisAndroidUtils::setFullScreen(fullScreen);
+    d->fullScreenMode->setChecked(fullScreen);
+#else
     KisConfig cfg(false);
     cfg.setFullscreenMode(fullScreen);
 
@@ -2360,6 +2459,7 @@ void KisMainWindow::viewFullscreen(bool fullScreen)
         setWindowState(windowState() & ~Qt::WindowFullScreen);   // reset
     }
     d->fullScreenMode->setChecked(isFullScreen());
+#endif
 }
 
 QDockWidget* KisMainWindow::createDockWidget(KoDockFactoryBase* factory)
@@ -2368,6 +2468,7 @@ QDockWidget* KisMainWindow::createDockWidget(KoDockFactoryBase* factory)
     const bool showTitlebars = KisConfig(false).showDockerTitleBars();
 
     if (!d->dockWidgetsMap.contains(factory->id())) {
+        KisScopedPerformanceLogger perfLog(QStringLiteral("KisMainWindow::createDockWidget(%1)").arg(factory->id()));
         dockWidget = factory->createDockWidget();
         KAcceleratorManager::setNoAccel(dockWidget);
 
@@ -2390,17 +2491,12 @@ QDockWidget* KisMainWindow::createDockWidget(KoDockFactoryBase* factory)
         }
 
         if (dockWidget->titleBarWidget() && !dockWidget->titleBarWidget()->inherits("KisUtilityTitleBar")) {
-            dockWidget->titleBarWidget()->setVisible(KisConfig(true).showDockerTitleBars());
+            dockWidget->titleBarWidget()->setVisible(showTitlebars);
         }
 
         dockWidget->setObjectName(factory->id());
         dockWidget->setParent(this);
-        if (!showTitlebars) {
-            if (dockWidget->titleBarWidget() && !dockWidget->titleBarWidget()->inherits("KisUtilityTitleBar")) {
-                dockWidget->titleBarWidget()->setVisible(false);
-            }
-            dockWidget->setFeatures(QDockWidget::NoDockWidgetFeatures);
-        }
+
         if (dockWidget->widget() && dockWidget->widget()->layout())
             dockWidget->widget()->layout()->setContentsMargins(1, 1, 1, 1);
 
@@ -2481,12 +2577,13 @@ void KisMainWindow::slotUpdateWidgetStyle()
 
             // When switching to a style that uses system colors, reset the theme
 #ifndef Q_OS_HAIKU
+            QString currentStyle = qApp->style()->objectName();
 #if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-            if (qApp->style()->objectName() == "macintosh") {
+            if (currentStyle == "macintosh" || currentStyle == "windowsvista") {
                 d->themeManager->setCurrentTheme("System");
             }
 #else
-            if (qApp->style()->name() == "macos") {
+            if (currentStyle == "macos" || currentStyle == "windowsvista" || currentStyle == "windows11") {
                 d->themeManager->setCurrentTheme("System");
             }
 #endif
@@ -2679,6 +2776,7 @@ void KisMainWindow::updateWindowMenu()
 
     connect(workspaceMenu->addAction(i18nc("@action:inmenu", "&New Workspace...")),
             &QAction::triggered,
+            this,
             [=]() {
         QString name;
         name = QInputDialog::getText(this, i18nc("@title:window", "New Workspace..."),
@@ -2799,6 +2897,9 @@ void KisMainWindow::configChanged()
     KisConfig cfg(true);
     QMdiArea::ViewMode viewMode = (QMdiArea::ViewMode)cfg.readEntry<int>("mdi_viewmode", (int)QMdiArea::TabbedView);
     d->mdiArea->setViewMode(viewMode);
+    //Do it here to avoid the wrong icon briefly flashing
+    customizeTabBar();
+
     Q_FOREACH (QMdiSubWindow *subwin, d->mdiArea->subWindowList()) {
         subwin->setOption(QMdiSubWindow::RubberBandMove, cfg.readEntry<int>("mdi_rubberband", cfg.useOpenGL()));
         subwin->setOption(QMdiSubWindow::RubberBandResize, cfg.readEntry<int>("mdi_rubberband", cfg.useOpenGL()));
@@ -2936,7 +3037,7 @@ QPointer<KisView> KisMainWindow::activeKisView()
 
 void KisMainWindow::newOptionWidgets(KoCanvasController *controller, const QList<QPointer<QWidget> > &optionWidgetList)
 {
-    KIS_ASSERT_RECOVER_NOOP(controller == KoToolManager::instance()->activeCanvasController());
+    KIS_ASSERT_RECOVER_NOOP(controller == d->viewManager->toolManager()->activeCanvasController());
     bool isOurOwnView = false;
 
     Q_FOREACH (QPointer<KisView> view, KisPart::instance()->views()) {
@@ -2994,9 +3095,12 @@ void KisMainWindow::createActions()
     d->importAnimation  = actionManager->createAction("file_import_animation");
     connect(d->importAnimation, SIGNAL(triggered()), this, SLOT(importAnimation()));
 
+    // Importing video requires ffmpeg, which is not available on Android.
+#ifndef Q_OS_ANDROID
     d->importVideoAnimation = actionManager->createAction("file_import_video_animation");
     connect(d->importVideoAnimation, SIGNAL(triggered()), this, SLOT(importVideoAnimation()));
-    
+#endif
+
     d->renderAnimation = actionManager->createAction("render_animation");
     d->renderAnimation->setActivationFlags(KisAction::IMAGE_HAS_ANIMATION);
     connect( d->renderAnimation, SIGNAL(triggered()), this, SLOT(renderAnimation()));
@@ -3066,7 +3170,34 @@ void KisMainWindow::createActions()
     d->mdiPreviousWindow = actionManager->createAction("windows_previous");
     connect(d->mdiPreviousWindow, SIGNAL(triggered()), d->mdiArea, SLOT(activatePreviousSubWindow()));
 
-#ifndef Q_OS_ANDROID
+#ifdef Q_OS_ANDROID
+    d->showDonationManagementDialog = actionManager->createAction("manage_donations");
+    connect(d->showDonationManagementDialog,
+            &QAction::triggered,
+            this,
+            &KisMainWindow::slotShowDonationManagementDialog);
+
+    KisAndroidDonations *androidDonations = KisAndroidDonations::instance();
+    if (androidDonations) {
+        d->manageSubscriptions = actionManager->createAction("manage_subscriptions");
+        connect(d->manageSubscriptions,
+                &QAction::triggered,
+                androidDonations,
+                &KisAndroidDonations::slotManageSubscriptions);
+        connect(androidDonations,
+                &KisAndroidDonations::sigShowDonationManagementDialogRequested,
+                this,
+                &KisMainWindow::slotShowDonationManagementDialog,
+                Qt::QueuedConnection);
+    }
+#if KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+    KisAndroidScaling *androidScaling = KisAndroidScaling::instance();
+    if (androidScaling && androidScaling->isSupported()) {
+        d->changeInterfaceScale = actionManager->createAction("change_interface_scale");
+        connect(d->changeInterfaceScale, &QAction::triggered, this, &KisMainWindow::slotChangeInterfaceScale);
+    }
+#endif
+#else
     d->newWindow = actionManager->createAction("view_newwindow");
     connect(d->newWindow, SIGNAL(triggered(bool)), this, SLOT(newWindow()));
 #endif
@@ -3146,7 +3277,13 @@ void KisMainWindow::initializeGeometry()
         move(x,y);
         setGeometry(geometry().x(), geometry().y(), w, h);
     }
-    d->fullScreenMode->setChecked(isFullScreen());
+#ifdef Q_OS_ANDROID
+    // We handle full-screening differently on Android, see viewFullScreen.
+    bool fullScreen = KisAndroidUtils::isInFullScreen();
+#else
+    bool fullScreen = isFullScreen();
+#endif
+    d->fullScreenMode->setChecked(fullScreen);
 }
 
 void KisMainWindow::showManual()
@@ -3229,37 +3366,6 @@ bool KisMainWindow::checkPaintOpAvailable()
     return (rserver->resourceCount() > 0);
 }
 
-const KoColorProfile* KisMainWindow::managedSurfaceProfile() const
-{
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-    return d->surfaceColorSpaceManager ? KoColorSpaceRegistry::instance()->p709SRGBProfile() : nullptr;
-#else
-    return nullptr;
-#endif
-}
-
-QString KisMainWindow::colorManagementReport() const
-{
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-    return d->surfaceColorSpaceManager ?
-        d->surfaceColorSpaceManager->colorManagementReport() :
-        QString("Surface color management is not supported on this platform\n");
-#else
-    return "Surface color management is disabled\n";
-#endif
-}
-
-QString KisMainWindow::osPreferredColorSpaceReport() const
-{
-#if KRITA_USE_SURFACE_COLOR_MANAGEMENT_API
-    return d->surfaceColorSpaceManager ?
-        d->surfaceColorSpaceManager->osPreferredColorSpaceReport() :
-        QString("Surface color management is not supported on this platform\n");
-#else
-    return "Surface color management is disabled\n";
-#endif
-}
-
 // One action has only one icon override, local XML contains ActionIconOverrides like so:
 // <ActionIconOverrides>
 //    <Action name="erase_action" icon="wheel-sectors"/>
@@ -3295,6 +3401,12 @@ void KisMainWindow::applyActionIconOverridesFromLocalXML()
             }
         }
     }
+}
+
+void KisMainWindow::synchronizeDynamicActions()
+{
+    // Add all actions with a menu property to the main window
+    KisActionManager::synchronizeDynamicActions(this->actionCollection()->actions(), this->menuBar()->actions());
 }
 
 #include <moc_KisMainWindow.cpp>

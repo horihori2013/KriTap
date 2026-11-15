@@ -562,14 +562,16 @@ public:
      * @param renderingIntent Rendering intent
      * @param conversionFlags Conversion flags
      */
-    QImage createThumbnail(qint32 maxw, qint32 maxh, QRect rect, qreal oversample = 1,
+    QImage createThumbnailUncached(qint32 maxw, qint32 maxh, QRect rect, qreal oversample = 1,
                            KoColorConversionTransformation::Intent renderingIntent = KoColorConversionTransformation::internalRenderingIntent(),
                            KoColorConversionTransformation::ConversionFlags conversionFlags = KoColorConversionTransformation::internalConversionFlags());
 
     /**
      * Cached version of createThumbnail(qint32 maxw, qint32 maxh, const KisSelection *selection, QRect rect)
      */
-    QImage createThumbnail(qint32 maxw, qint32 maxh, qreal oversample = 1,
+    QImage createThumbnail(qint32 maxw, qint32 maxh,
+                           KisThumbnailBoundsMode boundsMode = KisThumbnailBoundsMode::Precise,
+                           qreal oversample = 1,
                            KoColorConversionTransformation::Intent renderingIntent = KoColorConversionTransformation::internalRenderingIntent(),
                            KoColorConversionTransformation::ConversionFlags conversionFlags = KoColorConversionTransformation::internalConversionFlags());
 
@@ -579,6 +581,7 @@ public:
      */
     QImage createThumbnail(qint32 maxw, qint32 maxh,
                            Qt::AspectRatioMode aspectRatioMode,
+                           KisThumbnailBoundsMode boundsMode = KisThumbnailBoundsMode::Precise,
                            qreal oversample = 1,
                            KoColorConversionTransformation::Intent renderingIntent = KoColorConversionTransformation::internalRenderingIntent(),
                            KoColorConversionTransformation::ConversionFlags conversionFlags = KoColorConversionTransformation::internalConversionFlags());
@@ -773,24 +776,6 @@ public:
      * An interface to modify/load/save frames stored inside this device
      */
     KisPaintDeviceFramesInterface* framesInterface();
-
-    /**
-     * @brief burnKeyframe
-     *
-     * Take a frame from the keyframe channel,
-     * Copy the contents onto the "base" frame,
-     * and completely remove the keyframe channel.
-     *
-     * Should be useful for copy+paste operations where
-     * we shouldn't expect keyframe data to persist.
-     *
-     * Parameterless version simply gets the current frameID.
-     *
-     * @param frameID -- frameID (from the framesInterface, **not the time**) to burn to device.
-     * @return success
-     */
-    bool burnKeyframe(int frameID);
-    bool burnKeyframe();
 
 public:
 

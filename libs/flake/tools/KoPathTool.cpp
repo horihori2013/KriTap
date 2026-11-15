@@ -25,6 +25,7 @@
 #include "KoShapeManager.h"
 #include "KoSnapGuide.h"
 #include "KoToolBase_p.h"
+#include "KoCanvasController.h"
 #include "KoToolManager.h"
 #include "KoViewConverter.h"
 #include "PathToolOptionWidget.h"
@@ -41,6 +42,7 @@
 #include "kis_pointer_utils.h"
 #include <KisHandlePainterHelper.h>
 #include <KoShapeStrokeModel.h>
+#include <KoColorDisplayRendererInterface.h>
 #include <commands/KoKeepShapesSelectedCommand.h>
 #include <commands/KoMultiPathPointJoinCommand.h>
 #include <commands/KoMultiPathPointMergeCommand.h>
@@ -86,6 +88,7 @@ struct KoPathTool::PathSegment {
 KoPathTool::KoPathTool(KoCanvasBase *canvas)
     : KoToolBase(canvas)
     , m_pointSelection(this)
+    , m_textOutlineHelper(new KoSvgTextShapeOutlineHelper(canvas))
 {
     m_actionPathPointCorner = action("pathpoint-corner");
     m_actionPathPointSmooth = action("pathpoint-smooth");
@@ -104,6 +107,8 @@ KoPathTool::KoPathTool(KoCanvasBase *canvas)
     m_actionConvertToPath = action("convert-to-path");
 
     m_contextMenu.reset(new QMenu());
+    m_textOutlineHelper->setDrawBoundingRect(true);
+    m_textOutlineHelper->setDrawShapeOutlines(false);
 
     m_selectCursor = QCursor(QIcon(":/cursor-needle.svg").pixmap(32), 0, 0);
     m_moveCursor = QCursor(QIcon(":/cursor-needle-move.svg").pixmap(32), 0, 0);
@@ -437,11 +442,16 @@ void KoPathTool::breakAtSegment()
 void KoPathTool::paint(QPainter &painter, const KoViewConverter &converter)
 {
     Q_D(KoToolBase);
+    m_textOutlineHelper->setDecorationThickness(decorationThickness());
+    m_textOutlineHelper->setHandleRadius(handleRadius());
+    m_textOutlineHelper->paint(&painter, converter);
+
+    const KisHandlePalette palette = canvas()->displayRendererInterface()->handlePaletteForDisplayColorSpace();
 
     Q_FOREACH (KoPathShape *shape, m_pointSelection.selectedShapes()) {
         KisHandlePainterHelper helper =
                 KoShape::createHandlePainterHelperView(&painter, shape, converter, handleRadius(), decorationThickness());
-        helper.setHandleStyle(KisHandleStyle::primarySelection());
+        helper.setHandleStyle(KisHandleStyle::primarySelection(palette));
 
         KoParameterShape * parameterShape = dynamic_cast<KoParameterShape*>(shape);
         if (parameterShape && parameterShape->isParametricShape()) {
@@ -451,22 +461,22 @@ void KoPathTool::paint(QPainter &painter, const KoViewConverter &converter)
         }
 
         if (!shape->stroke() || !shape->stroke()->isVisible()) {
-            helper.setHandleStyle(KisHandleStyle::secondarySelection());
+            helper.setHandleStyle(KisHandleStyle::secondarySelection(palette));
             helper.drawPath(shape->outline());
         }
     }
 
     if (m_currentStrategy) {
         painter.save();
-        m_currentStrategy->paint(painter, converter);
+        m_currentStrategy->paint(painter, converter, canvas()->displayRendererInterface());
         painter.restore();
     }
 
-    m_pointSelection.paint(painter, converter, handleRadius());
+    m_pointSelection.paint(painter, converter, handleRadius(), canvas()->displayRendererInterface());
 
     if (m_activeHandle) {
         if (m_activeHandle->check(m_pointSelection.selectedShapes())) {
-            m_activeHandle->paint(painter, converter, handleRadius(), decorationThickness());
+            m_activeHandle->paint(painter, converter, handleRadius(), decorationThickness(), canvas()->displayRendererInterface());
         } else {
             m_activeHandle.reset();
         }
@@ -483,7 +493,7 @@ void KoPathTool::paint(QPainter &painter, const KoViewConverter &converter)
 
             KisHandlePainterHelper helper =
                     KoShape::createHandlePainterHelperView(&painter, shape, converter, handleRadius(), decorationThickness());
-            helper.setHandleStyle(KisHandleStyle::secondarySelection());
+            helper.setHandleStyle(KisHandleStyle::secondarySelection(palette));
 
             QPainterPath path;
             path.moveTo(segment.first()->point());
@@ -500,7 +510,7 @@ void KoPathTool::paint(QPainter &painter, const KoViewConverter &converter)
     if (m_currentStrategy) {
         painter.save();
         painter.setTransform(converter.documentToView(), true);
-        d->canvas->snapGuide()->paint(painter, converter);
+        d->canvas->snapGuide()->paint(painter, converter, canvas()->displayRendererInterface());
         painter.restore();
     }
 }
@@ -533,6 +543,8 @@ QRectF KoPathTool::decorationsRect() const
         newDecorationsRect |= kisGrowRect(rect, handleDocRadius());
     }
 
+    newDecorationsRect |= m_textOutlineHelper->decorationRect();
+
     return newDecorationsRect;
 }
 
@@ -544,11 +556,25 @@ void KoPathTool::repaintDecorations()
 
 void KoPathTool::mousePressEvent(KoPointerEvent *event)
 {
+    // When using touch drawing, we only ever receive move events after the
+    // finger has pressed down. We have to issue an artificial move here so that
+    // the tool's state is updated properly to handle the press.
+    if (event->isTouchEvent()) {
+        mouseMoveEvent(event);
+    }
+
+    if (KoSvgTextShape *shape = m_textOutlineHelper->contourModeButtonHovered(event->point)) {
+        m_textOutlineHelper->toggleTextContourMode(shape);
+        event->accept();
+    }
     // we are moving if we hit a point and use the left mouse button
     if (m_activeHandle) {
         m_currentStrategy.reset(m_activeHandle->handleMousePress(event));
     } else {
+
         if (event->button() & Qt::LeftButton) {
+
+            bool shift_pressed = (event->modifiers() & Qt::ShiftModifier);
 
             // check if we hit a path segment
             if (m_activeSegment && m_activeSegment->isValid()) {
@@ -557,8 +583,15 @@ void KoPathTool::mousePressEvent(KoPointerEvent *event)
                 KoPathPointIndex index = shape->pathPointIndex(m_activeSegment->segmentStart);
                 KoPathSegment segment = shape->segmentByIndex(index);
 
-                m_pointSelection.add(segment.first(), !(event->modifiers() & Qt::ShiftModifier));
-                m_pointSelection.add(segment.second(), false);
+                // The segment is selected so now need to deselect it
+                if (m_pointSelection.contains(segment.first()) && m_pointSelection.contains(segment.second())
+                    && shift_pressed) {
+                    m_pointSelection.remove(segment.first());
+                    m_pointSelection.remove(segment.second());
+                } else {
+                    m_pointSelection.add(segment.first(), !shift_pressed);
+                    m_pointSelection.add(segment.second(), false);
+                }
 
                 KoPathPointData data(shape, index);
                 m_currentStrategy.reset(new KoPathSegmentChangeStrategy(this, event->point, data, m_activeSegment->positionOnSegment));
@@ -570,7 +603,7 @@ void KoPathTool::mousePressEvent(KoPointerEvent *event)
 
                 if (shape && !selection->isSelected(shape)) {
 
-                    if (!(event->modifiers() & Qt::ShiftModifier)) {
+                    if (!shift_pressed) {
                         selection->deselectAll();
                     }
 
@@ -786,7 +819,7 @@ void KoPathTool::keyReleaseEvent(QKeyEvent *event)
     event->accept();
 }
 
-void KoPathTool::mouseDoubleClickEvent(KoPointerEvent */*event*/)
+void KoPathTool::mouseDoubleClickEvent(KoPointerEvent *event)
 {
     Q_D(KoToolBase);
     // check if we are doing something else at the moment
@@ -806,6 +839,9 @@ void KoPathTool::mouseDoubleClickEvent(KoPointerEvent */*event*/)
             m_pointSelection.add(p, false);
         }
         updateActions();
+
+        // Call a mouse move event to update the cursor and allow the user to drag the new point immediately
+        mouseMoveEvent(event);
     } else if (!m_activeHandle && !m_activeSegment) {
         explicitUserStrokeEndRequest();
     }
@@ -815,39 +851,18 @@ KoPathTool::PathSegment* KoPathTool::segmentAtPoint(const QPointF &point)
 {
     // the max allowed distance from a segment
     const QRectF grabRoi = handleGrabRect(point);
-    const qreal distanceThreshold = 0.5 * KisAlgebra2D::maxDimension(grabRoi);
-
-    QScopedPointer<PathSegment> segment(new PathSegment);
+    std::unique_ptr<PathSegment> segment(new PathSegment);
 
     Q_FOREACH (KoPathShape *shape, m_pointSelection.selectedShapes()) {
         KoParameterShape * parameterShape = dynamic_cast<KoParameterShape*>(shape);
         if (parameterShape && parameterShape->isParametricShape())
             continue;
 
-        // convert document point to shape coordinates
-        const QPointF p = shape->documentToShape(point);
-        // our region of interest, i.e. a region around our mouse position
-        const QRectF roi = shape->documentToShape(grabRoi);
-
-        qreal minDistance = std::numeric_limits<qreal>::max();
-
-        // check all segments of this shape which intersect the region of interest
-        const QList<KoPathSegment> segments = shape->segmentsAt(roi);
-
-        foreach (const KoPathSegment &s, segments) {
-            const qreal nearestPointParam = s.nearestPoint(p);
-            const QPointF nearestPoint = s.pointAt(nearestPointParam);
-            const qreal distance = kisDistance(p, nearestPoint);
-
-            // are we within the allowed distance ?
-            if (distance > distanceThreshold)
-                continue;
-            // are we closer to the last closest point ?
-            if (distance < minDistance) {
-                segment->path = shape;
-                segment->segmentStart = s.first();
-                segment->positionOnSegment = nearestPointParam;
-            }
+        const KoPathSegment s = shape->segmentAtPoint(point, grabRoi);
+        if (s.isValid()) {
+            segment->path = shape;
+            segment->segmentStart = s.first();
+            segment->positionOnSegment = s.nearestPoint(shape->documentToShape(point));
         }
     }
 
@@ -855,7 +870,7 @@ KoPathTool::PathSegment* KoPathTool::segmentAtPoint(const QPointF &point)
         segment.reset();
     }
 
-    return segment.take();
+    return segment.release();
 }
 
 void KoPathTool::activate(const QSet<KoShape*> &shapes)
@@ -1205,7 +1220,7 @@ void KoPathTool::requestStrokeEnd()
 
 void KoPathTool::explicitUserStrokeEndRequest()
 {
-    KoToolManager::instance()->switchToolRequested("InteractionTool");
+    canvas()->canvasController()->toolManager()->switchToolRequested("InteractionTool");
 }
 
 bool KoPathTool::selectAll()

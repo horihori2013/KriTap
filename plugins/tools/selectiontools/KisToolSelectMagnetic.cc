@@ -20,6 +20,7 @@
 #include <KoPathShape.h>
 #include <KoColorSpace.h>
 #include <KoCompositeOp.h>
+#include <KoColorDisplayRendererInterface.h>
 #include <KoViewConverter.h>
 
 #include <kis_layer.h>
@@ -47,7 +48,7 @@
 
 KisToolSelectMagnetic::KisToolSelectMagnetic(KoCanvasBase *canvas)
     : KisToolSelect(canvas,
-                    KisCursor::load("tool_magnetic_selection_cursor.png", 6, 6),
+                    KisCursor::loadWithSize("tool_magnetic_selection_cursor.svg", 32, 32, 6, 6),
                     i18n("Magnetic Selection"))
   , m_worker(nullptr)
   , m_mouseHoverCompressor(100, KisSignalCompressor::FIRST_ACTIVE)
@@ -629,15 +630,16 @@ void KisToolSelectMagnetic::paint(QPainter& gc, const KoViewConverter &converter
 
 void KisToolSelectMagnetic::drawAnchors(QPainter &gc)
 {
+    const KisHandlePalette palette = canvas()->displayRendererInterface()->handlePaletteForDisplayColorSpace();
     int sides = updateInitialAnchorBounds(m_anchorPoints.first());
     Q_FOREACH (const QPoint pt, m_anchorPoints) {
         KisHandlePainterHelper helper(&gc, handleRadius(), decorationThickness());
         QRect r(QPoint(0, 0), QSize(sides, sides));
         r.moveCenter(pt);
         if (r.contains(m_lastCursorPos.toPoint())) {
-            helper.setHandleStyle(KisHandleStyle::highlightedPrimaryHandles());
+            helper.setHandleStyle(KisHandleStyle::highlightedPrimaryHandles(palette));
         } else {
-            helper.setHandleStyle(KisHandleStyle::primarySelection());
+            helper.setHandleStyle(KisHandleStyle::primarySelection(palette));
         }
         helper.drawHandleRect(pixelToView(pt), 4, QPoint(0, 0));
     }
@@ -876,13 +878,13 @@ void KisToolSelectMagnetic::slotSetAnchorGap(int g)
 void KisToolSelectMagnetic::resetCursorStyle()
 {
     if (selectionAction() == SELECTION_ADD) {
-        useCursor(KisCursor::load("tool_magnetic_selection_cursor_add.png", 6, 6));
+        useCursor(KisCursor::loadWithSize("tool_magnetic_selection_cursor_add.svg", 32, 32, 6, 6));
     } else if (selectionAction() == SELECTION_SUBTRACT) {
-        useCursor(KisCursor::load("tool_magnetic_selection_cursor_sub.png", 6, 6));
+        useCursor(KisCursor::loadWithSize("tool_magnetic_selection_cursor_sub.svg", 32, 32, 6, 6));
     } else if (selectionAction() == SELECTION_INTERSECT) {
-        useCursor(KisCursor::load("tool_magnetic_selection_cursor_inter.png", 6, 6));
+        useCursor(KisCursor::loadWithSize("tool_magnetic_selection_cursor_inter.svg", 32, 32, 6, 6));
     } else if (selectionAction() == SELECTION_SYMMETRICDIFFERENCE) {
-        useCursor(KisCursor::load("tool_magnetic_selection_cursor_symdiff.png", 6, 6));
+        useCursor(KisCursor::loadWithSize("tool_magnetic_selection_cursor_symdiff.svg", 32, 32, 6, 6));
     } else {
         KisToolSelect::resetCursorStyle();
     }

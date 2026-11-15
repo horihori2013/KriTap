@@ -19,6 +19,7 @@
 
 struct  Q_DECL_HIDDEN KisResourceItemListWidget::Private
 {
+    Private(KisResourceItemListWidget *_q) : tip(_q) {}
     ListViewMode viewMode = ListViewMode::IconGrid;
     bool strictSelectionMode {false};
     KisIconToolTip tip;
@@ -29,11 +30,12 @@ struct  Q_DECL_HIDDEN KisResourceItemListWidget::Private
 
 KisResourceItemListWidget::KisResourceItemListWidget(QWidget *parent)
     : QListWidget(parent)
-    , m_d(new Private)
+    , m_d(new Private(this))
 {
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setContextMenuPolicy(Qt::DefaultContextMenu);
     setViewMode(QListView::IconMode);
+    setMovement(QListView::Static);
     setGridSize(QSize(56, 56));
     setIconSize(QSize(56, 56));
     setResizeMode(QListWidget::Adjust);

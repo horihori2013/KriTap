@@ -33,6 +33,8 @@
 #include <QTranslator>
 #include <QImageReader>
 
+#include <kaboutdata.h>
+
 #include <KisApplication.h>
 #include <KisMainWindow.h>
 #include <KisSupportedArchitectures.h>
@@ -43,6 +45,7 @@
 #include <kis_debug.h>
 #include <kis_image_config.h>
 #include <opengl/kis_opengl.h>
+#include "KritaVersionWrapper.h"
 
 #include "KisApplicationArguments.h"
 #include "KisDocument.h"
@@ -55,7 +58,7 @@
 #ifdef Q_OS_ANDROID
 #include <QtAndroid>
 #include <KisAndroidCrashHandler.h>
-#include <KisAndroidLogHandler.h>
+#include <KisAndroidUtils.h>
 #endif
 
 #if defined Q_OS_WIN
@@ -176,27 +179,6 @@ Java_org_krita_android_JNIWrappers_saveState(JNIEnv* /*env*/,
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_org_krita_android_JNIWrappers_exitFullScreen(JNIEnv* /*env*/,
-                                                  jobject /*obj*/,
-                                                  jint    /*n*/)
-{
-    if (!KisPart::exists()) {
-        return false;
-    }
-
-    KisMainWindow *mainWindow = KisPart::instance()->currentMainwindow();
-    if (mainWindow && mainWindow->isFullScreen()) {
-        // since, this calls KisConfig, we need to make sure it happens on that
-        // thread (we get here from the Android Main thread)
-        QMetaObject::invokeMethod(mainWindow, "viewFullscreen",
-                                  Qt::QueuedConnection, Q_ARG(bool, false));
-        return true;
-    } else {
-        return false;
-    }
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
 Java_org_krita_android_JNIWrappers_hasMainWindowLoaded(JNIEnv * /*env*/,
                                                        jobject /*obj*/,
                                                        jint /*n*/)
@@ -235,7 +217,7 @@ Java_org_krita_android_JNIWrappers_openFileFromIntent(JNIEnv* /*env*/,
 extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
 {
 #ifdef Q_OS_ANDROID
-    KisAndroidLogHandler::handler_init();
+    KisAndroidUtils::performInitialSetup();
 #endif
 
 #ifdef Q_OS_WIN
@@ -267,8 +249,10 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts, true);
 
     QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings, true);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    //Does nothing on Qt6.
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
-
+#endif
     QCoreApplication::setAttribute(Qt::AA_DisableShaderDiskCache, true);
 
     // In Qt6, QImageReader has an allocation limit to prevent large memory allocations.
@@ -277,7 +261,7 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     QImageReader::setAllocationLimit(0);
 #endif
 
-#ifdef HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY
+#if defined(Q_OS_WIN) && defined(HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY)
     // This rounding policy depends on a series of patches to Qt related to
     // https://bugreports.qt.io/browse/QTBUG-53022. These patches are applied
     // in ext_qt for WIndows (patches 0031-0036).
@@ -378,6 +362,14 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     const QDir configPath(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
     QSettings kritarc(configPath.absoluteFilePath("kritadisplayrc"), QSettings::IniFormat);
 
+    // KFI18N is broken on Android. See kswitchlanguagedialog_p.cpp for details.
+    // If/when removing this, also remove the matching logic from there!
+#ifdef Q_OS_ANDROID
+    static constexpr bool ALLOW_FALLBACK_LANGUAGES = false;
+#else
+    static constexpr bool ALLOW_FALLBACK_LANGUAGES = true;
+#endif
+
     QString root;
     QString language;
     {
@@ -394,19 +386,35 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     bool openGLDebugSynchronous = false;
     bool logUsage = true;
     {
-        if (kritarc.value("EnableHiDPI", true).toBool()) {
+        bool enableHighDpiScaling = kritarc.value("EnableHiDPI", true).toBool() || !qgetenv("KRITA_HIDPI").isEmpty();
+        // The AA_(Enable|Disable)HighDpiScaling attributes no longer have an
+        // effect on Qt6, high-DPI scaling is always enabled. To "disable" it,
+        // we need to use an environment variable instead, but we'll only do
+        // that if the user doesn't have it set yet to avoid clobberage.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (!enableHighDpiScaling && !qEnvironmentVariableIsSet("QT_ENABLE_HIGHDPI_SCALING")) {
+            qputenv("QT_ENABLE_HIGHDPI_SCALING", "0");
+        }
+#else
+        if (enableHighDpiScaling) {
             QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
         }
-        if (!qgetenv("KRITA_HIDPI").isEmpty()) {
-            QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-        }
-#ifdef HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY
+#endif
+#if defined(Q_OS_WIN) && defined(HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY)
         if (kritarc.value("EnableHiDPIFractionalScaling", false).toBool()) {
             QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
         }
 #endif
 
-        if (!qEnvironmentVariableIsEmpty("KRITA_OPENGL_DEBUG")) {
+#ifdef HAVE_X11
+    if (!qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
+        if (KisConfig::preferXcbEglProvider(&kritarc)) {
+            qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+        }
+    }
+#endif
+
+if (!qEnvironmentVariableIsEmpty("KRITA_OPENGL_DEBUG")) {
             enableOpenGLDebug = true;
         } else {
             enableOpenGLDebug = kritarc.value("EnableOpenGLDebug", false).toBool();
@@ -427,8 +435,11 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
 #endif
         preferredRenderer = KisOpenGL::convertConfigToOpenGLRenderer(preferredRendererString);
 
+        const KisConfig::CanvasSurfaceBitDepthMode bitDepthMode =
+            KisConfig::canvasSurfaceBitDepthMode(&kritarc);
+
         const KisOpenGL::RendererConfig config =
-            KisOpenGL::selectSurfaceConfig(preferredRenderer, rootSurfaceFormat, enableOpenGLDebug);
+            KisOpenGL::selectSurfaceConfig(preferredRenderer, rootSurfaceFormat, bitDepthMode, enableOpenGLDebug);
 
         KisOpenGL::setDefaultSurfaceConfig(config);
         KisOpenGL::setDebugSynchronous(openGLDebugSynchronous);
@@ -457,6 +468,22 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
         if (!qEnvironmentVariableIsSet("QT_PREFILL_RHI_SURFACE")) {
             qInfo() << "INFO: activating QT_PREFILL_RHI_SURFACE...";
             qputenv("QT_PREFILL_RHI_SURFACE", "1");
+        }
+    }
+#endif
+
+#if defined Q_OS_WIN
+    /**
+     * Disabling accessibility at the runtime is currently available on Windows only
+     */
+    if (!qEnvironmentVariableIsSet("QT_DISABLE_ACCESSIBILITY")) {
+        if (kritarc.value("DisableAccessibilityInQt", false).toBool()) {
+            qInfo() << "INFO: activating QT_DISABLE_ACCESSIBILITY via kritadisplayrc...";
+            qputenv("QT_DISABLE_ACCESSIBILITY", "1");
+        }
+    } else {
+        if (qEnvironmentVariableIntValue("QT_DISABLE_ACCESSIBILITY")) {
+            qInfo() << "INFO: QT_DISABLE_ACCESSIBILITY is activated via environment...";
         }
     }
 #endif
@@ -511,10 +538,16 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     dbgLocale << "Override language:" << language;
     bool rightToLeft = false;
     if (!language.isEmpty()) {
-        KLocalizedString::setLanguages(language.split(":"));
+        QStringList languageList = language.split(QStringLiteral(":"));
+        const QString &firstLanguage = languageList.constFirst();
+        if (ALLOW_FALLBACK_LANGUAGES) {
+            KLocalizedString::setLanguages(languageList);
+        } else {
+            KLocalizedString::setLanguages(QStringList() << firstLanguage);
+        }
 
         // And override Qt's locale, too
-        QLocale locale(language.split(":").first());
+        QLocale locale(firstLanguage);
         QLocale::setDefault(locale);
 #ifdef Q_OS_MAC
         // prevents python >=3.7 nl_langinfo(CODESET) fail bug 417312.
@@ -526,7 +559,7 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
         const QStringList rtlLanguages = QStringList()
                 << "ar" << "dv" << "he" << "ha" << "ku" << "fa" << "ps" << "ur" << "yi";
 
-        if (rtlLanguages.contains(language.split(':').first())) {
+        if (rtlLanguages.contains(firstLanguage)) {
             rightToLeft = true;
         }
     }
@@ -592,7 +625,11 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
                 qputenv("LANG", (envLanguage + ".UTF-8").toLocal8Bit());
                 qputenv("LANGUAGE", (envLanguage + ".UTF-8").toLocal8Bit());
 #else
-                KLocalizedString::setLanguages(QStringList() << uiLanguages);
+                if (ALLOW_FALLBACK_LANGUAGES) {
+                    KLocalizedString::setLanguages(QStringList() << uiLanguages.first());
+                } else {
+                    KLocalizedString::setLanguages(QStringList() << uiLanguages);
+                }
                 qputenv("LANG", envLanguage.toLocal8Bit());
                 qputenv("LANGUAGE", envLanguage.toLocal8Bit());
 #endif
@@ -651,14 +688,50 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
 #ifdef Q_OS_ANDROID
     KisApplication::setAttribute(Qt::AA_DontUseNativeMenuBar);
 #endif
-    // Enable debugging translations from undeployed apps
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0) || defined Q_OS_WIN || defined Q_OS_MACOS
+    /**
+     * In Qt5 version of Krita we used to patch ki18n to look for translations
+     * in QStandardPaths::AppLocalDataLocation and then manually move them
+     * into this location in the AppImage creation script. It meant that
+     * translations wouldn't work for undeployed builds, e.g. the one in
+     * the docker, where the translations were automatically installed
+     * into the default location, i.e. krita.appdir/usr/share/locale.
+     *
+     * In Qt6 we dropped this patch over ki18n and it now searches
+     * translations in the correct location, i.e.
+     * in QStandardPaths::GenericDataLocation.
+     *
+     * On MacOS and Windows we should still be able to fetch translations
+     * without deploying the entire package
+     */
     KLocalizedString::addDomainLocaleDir("krita", QDir(root + "share/locale").absolutePath());
+#endif
 
     KLocalizedString::setApplicationDomain("krita");
 
     dbgLocale << "Available translations" << KLocalizedString::availableApplicationTranslations();
     dbgLocale << "Available domain translations" << KLocalizedString::availableDomainTranslations("krita");
 
+    /// Initialize application info, it will be used by both, Qt and
+    /// DrKonqi of the host system
+    KAboutData aboutData("krita",
+                            i18n("Krita"),
+                            KritaVersionWrapper::versionString(true),
+                            i18n("Krita is the full-featured digital art studio"),
+                            KAboutLicense::GPL,
+                            i18nc("@info:credit", "© 1999–2026 The Krita Developers"));
+    aboutData.setHomepage(QStringLiteral("https://krita.org"));
+    aboutData.setOrganizationDomain("krita.org");
+
+    // this call sets corresponding fields of QApplication as well
+    KAboutData::setApplicationData(aboutData);
+
+    // Note: Qt docs suggest we set organization name, but if we do, we get resource
+    // paths of the form of krita/krita, which is weird.
+    KIS_SAFE_ASSERT_RECOVER(app.organizationName().isEmpty()) {
+        app.setOrganizationName("");
+    }
 
 #ifdef Q_OS_WIN
     QDir appdir(KoResourcePaths::getApplicationRoot());
@@ -732,7 +805,7 @@ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
     app.setDesktopFileName(QStringLiteral("org.kde.krita"));
 
     if (!args.noSplash()) {
-        QWidget *splash = new KisSplashScreen();
+        QWidget *splash = new KisSplashScreen(480);
         app.setSplashScreen(splash);
     }
 
@@ -869,7 +942,11 @@ void installQtTranslations(KisApplication &app)
         localeList.append(defaultLocale);
     }
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QString translationsPath = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+#else
+    QString translationsPath = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+#endif
     dbgLocale << "Qt translations path:" << translationsPath;
 
     Q_FOREACH(const auto &localeToLoad, localeList) {
@@ -891,14 +968,18 @@ void installEcmTranslations(KisApplication &app)
     // Load translations created using the ECMPoQmTools module.
     // This function is based on the code in:
     // https://invent.kde.org/frameworks/extra-cmake-modules/-/blob/master/modules/ECMQmLoader.cpp.in
-
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    const QString catalogVersion = "5";
+#else
+    const QString catalogVersion = "6";
+#endif
     QStringList ecmCatalogs = {
-        QStringLiteral("kcompletion5_qt"),
-        QStringLiteral("kconfig5_qt"),
-        QStringLiteral("kcoreaddons5_qt"),
-        QStringLiteral("kitemviews5_qt"),
-        QStringLiteral("kwidgetsaddons5_qt"),
-        QStringLiteral("kwindowsystem5_qt"),
+        QStringLiteral("kcompletion%1_qt").arg(catalogVersion),
+        QStringLiteral("kconfig%1_qt").arg(catalogVersion),
+        QStringLiteral("kcoreaddons%1_qt").arg(catalogVersion),
+        QStringLiteral("kitemviews%1_qt").arg(catalogVersion),
+        QStringLiteral("kwidgetsaddons%1_qt").arg(catalogVersion),
+        QStringLiteral("kwindowsystem%1_qt").arg(catalogVersion),
         QStringLiteral("seexpr2_qt"),
     };
 
@@ -934,7 +1015,11 @@ void installEcmTranslations(KisApplication &app)
 #if defined(Q_OS_ANDROID)
             const QString fullPath = QStringLiteral("assets:/") + subPath;
 #else
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
             const QString root = QLibraryInfo::location(QLibraryInfo::PrefixPath);
+#else
+            const QString root = QLibraryInfo::path(QLibraryInfo::PrefixPath);
+#endif
 
             // Our patched k18n uses AppDataLocation (for AppImage). Not using
             // KoResourcePaths::getAppDataLocation is correct here, because we

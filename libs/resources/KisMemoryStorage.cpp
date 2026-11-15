@@ -6,6 +6,7 @@
 
 #include "KisMemoryStorage.h"
 
+#include <optional>
 #include <QVector>
 
 #include <KisMimeDatabase.h>
@@ -17,7 +18,30 @@
 #include <kis_pointer_utils.h>
 #include <KoMD5Generator.h>
 #include <kis_assert.h>
+#include <KisMpl.h>
 
+
+namespace detail {
+
+    /**
+     * TODO: move this function into KisStorageVersioningHelper with fixing the
+     * versioning functions to handle subfolders as well
+     */
+    std::optional<std::pair<QString, QString>> splitResourceUrl(const QString &url)
+    {
+        if (!url.contains('/')) return std::nullopt;
+
+        QStringList parts = url.split('/', Qt::SkipEmptyParts);
+
+        if (parts.isEmpty()) return std::nullopt;
+
+        const QString resourceType = parts[0];
+        parts.removeFirst();
+        const QString resourceFilename = parts.join('/');
+        return std::make_pair(resourceType, resourceFilename);
+    }
+
+}
 
 struct StoredResource
 {
@@ -29,28 +53,28 @@ struct StoredResource
 class MemoryTagIterator : public KisResourceStorage::TagIterator
 {
 public:
-
-    MemoryTagIterator(QVector<KisTagSP> /*tags*/, const QString &resourceType)
-        : m_resourceType(resourceType)
+    MemoryTagIterator(const QVector<KisTagSP> &tags)
+        : m_it(tags)
     {
     }
 
     bool hasNext() const override
     {
-        return false;
+        return m_it.hasNext();
     }
 
     void next() override
     {
+        m_it.next();
     }
 
     KisTagSP tag() const override
     {
-        return nullptr;
+        return m_it.peekPrevious();
     }
 
 private:
-    QString m_resourceType;
+    QVectorIterator<KisTagSP> m_it;
 };
 
 
@@ -178,13 +202,9 @@ bool KisMemoryStorage::loadVersionedResource(KoResourceSP resource)
 
 bool KisMemoryStorage::importResource(const QString &url, QIODevice *device)
 {
-
-    QStringList parts = url.split('/', Qt::SkipEmptyParts);
-
-    Q_ASSERT(parts.size() == 2);
-
-    const QString resourceType = parts[0];
-    const QString resourceFilename = parts[1];
+    auto parsedUrl = detail::splitResourceUrl(url);
+    if (!parsedUrl) return false;
+    auto [resourceType, resourceFilename] = *parsedUrl;
 
     // we cannot overwrite existing file by API convention
     if (d->resourcesNew.contains(resourceType) &&
@@ -205,11 +225,9 @@ bool KisMemoryStorage::importResource(const QString &url, QIODevice *device)
 
 bool KisMemoryStorage::exportResource(const QString &url, QIODevice *device)
 {
-    QStringList parts = url.split('/', Qt::SkipEmptyParts);
-    Q_ASSERT(parts.size() == 2);
-
-    const QString resourceType = parts[0];
-    const QString resourceFilename = parts[1];
+    auto parsedUrl = detail::splitResourceUrl(url);
+    if (!parsedUrl) return false;
+    auto [resourceType, resourceFilename] = *parsedUrl;
 
     if (!d->resourcesNew.contains(resourceType) ||
         !d->resourcesNew[resourceType].contains(resourceFilename)) {
@@ -233,6 +251,9 @@ bool KisMemoryStorage::addResource(const QString &resourceType,  KoResourceSP re
     QHash<QString, StoredResource> &typedResources = d->resourcesNew[resourceType];
 
     if (typedResources.contains(resource->filename())) {
+        /// here we silently overwrite the resource if the filename
+        /// is the same; it is the job of higher-level code to actually
+        /// resolve file name clashes
         return true;
     };
 
@@ -257,12 +278,9 @@ bool KisMemoryStorage::addResource(const QString &resourceType,  KoResourceSP re
 
 bool KisMemoryStorage::testingRemoveResource(const QString &url)
 {
-    QStringList parts = url.split('/', Qt::SkipEmptyParts);
-
-    Q_ASSERT(parts.size() == 2);
-
-    const QString resourceType = parts[0];
-    const QString resourceFilename = parts[1];
+    auto parsedUrl = detail::splitResourceUrl(url);
+    if (!parsedUrl) return false;
+    auto [resourceType, resourceFilename] = *parsedUrl;
 
     if (d->resourcesNew.contains(resourceType)) {
         return d->resourcesNew[resourceType].remove(resourceFilename) > 0;
@@ -271,14 +289,40 @@ bool KisMemoryStorage::testingRemoveResource(const QString &url)
     return false;
 }
 
+bool KisMemoryStorage::testingAddTag(const QString &resourceType, KisTagSP tag)
+{
+    KIS_SAFE_ASSERT_RECOVER_NOOP(resourceType == tag->resourceType());
+
+    QVector<KisTagSP> &typedTags = d->tags[resourceType];
+
+    auto existingIt = std::find_if(typedTags.begin(), typedTags.end(), kismpl::mem_equal_to(&KisTag::url, tag->url()));
+    if (existingIt != typedTags.end()) {
+        typedTags.erase(existingIt);
+    }
+
+    typedTags.append(tag);
+
+    return true;
+}
+
+bool KisMemoryStorage::testingRemoveTag(const QString &resourceType, const QString &tagUrl)
+{
+    QVector<KisTagSP> &typedTags = d->tags[resourceType];
+
+    auto existingIt = std::find_if(typedTags.begin(), typedTags.end(), kismpl::mem_equal_to(&KisTag::url, tagUrl));
+    if (existingIt != typedTags.end()) {
+        typedTags.erase(existingIt);
+        return true;
+    }
+
+    return false;
+}
+
 QString KisMemoryStorage::resourceMd5(const QString &url)
 {
-    QStringList parts = url.split('/', Qt::SkipEmptyParts);
-
-    Q_ASSERT(parts.size() == 2);
-
-    const QString resourceType = parts[0];
-    const QString resourceFilename = parts[1];
+    auto parsedUrl = detail::splitResourceUrl(url);
+    if (!parsedUrl) return QString();
+    auto [resourceType, resourceFilename] = *parsedUrl;
 
     QString result;
 
@@ -323,7 +367,7 @@ QSharedPointer<KisResourceStorage::ResourceIterator> KisMemoryStorage::resources
 
 QSharedPointer<KisResourceStorage::TagIterator> KisMemoryStorage::tags(const QString &resourceType)
 {
-    return QSharedPointer<KisResourceStorage::TagIterator>(new MemoryTagIterator(d->tags[resourceType], resourceType));
+    return QSharedPointer<KisResourceStorage::TagIterator>(new MemoryTagIterator(d->tags[resourceType]));
 }
 
 void KisMemoryStorage::setMetaData(const QString &key, const QVariant &value)

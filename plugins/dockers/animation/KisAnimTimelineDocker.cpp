@@ -306,7 +306,7 @@ KisAnimTimelineDocker::KisAnimTimelineDocker()
     // Titlebar Widget..
     setTitleBarWidget(m_d->titlebar);
 
-    connect(m_d->titlebar->btnOnionSkinsMenu, &QToolButton::released, [this](){
+    connect(m_d->titlebar->btnOnionSkinsMenu, &QToolButton::released, this, [this](){
         if (m_d->mainWindow) {
             QDockWidget *docker = m_d->mainWindow->dockWidget("OnionSkinsDocker");
             if (docker) {
@@ -512,6 +512,68 @@ void KisAnimTimelineDocker::setImageAnimSettings()
     applicator->end();
 }
 
+void KisAnimTimelineDocker::establishPlaybackEngineConnections(KisPlaybackEngine *playbackEngine, KisActionManager *actionManager)
+{
+    if (actionManager) {
+        // Connect actions..
+        KisAction *action = nullptr;
+
+        action = actionManager->createAction("stop_playback");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(stop()));
+
+        action = actionManager->createAction("previous_frame");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(previousFrame()));
+
+        action = actionManager->createAction("next_frame");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(nextFrame()));
+
+        action = actionManager->createAction("previous_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(previousKeyframe()));
+
+        action = actionManager->createAction("next_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(nextKeyframe()));
+
+        action = actionManager->createAction("previous_matching_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(previousMatchingKeyframe()));
+
+        action = actionManager->createAction("next_matching_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(nextMatchingKeyframe()));
+
+        action = actionManager->createAction("previous_unfiltered_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(previousUnfilteredKeyframe()));
+
+        action = actionManager->createAction("next_unfiltered_keyframe");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(nextUnfilteredKeyframe()));
+
+        action = actionManager->createAction("first_frame");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(firstFrame()));
+
+        action = actionManager->createAction("last_frame");
+        action->setActivationFlags(KisAction::ACTIVE_IMAGE);
+        connect(action, SIGNAL(triggered(bool)), playbackEngine, SLOT(lastFrame()));
+    }
+
+    // Connect transport controls gui..
+    connect(m_d->titlebar->transport, SIGNAL(skipBack()), playbackEngine, SLOT(previousKeyframe()), Qt::UniqueConnection);
+    connect(m_d->titlebar->transport, SIGNAL(back()), playbackEngine, SLOT(previousFrame()), Qt::UniqueConnection);
+    connect(m_d->titlebar->transport, SIGNAL(stop()), playbackEngine, SLOT(stop()), Qt::UniqueConnection);
+    connect(m_d->titlebar->transport, SIGNAL(playPause()), this, SLOT(togglePlayback()), Qt::UniqueConnection);
+    connect(m_d->titlebar->transport, SIGNAL(forward()), playbackEngine, SLOT(nextFrame()), Qt::UniqueConnection);
+    connect(m_d->titlebar->transport, SIGNAL(skipForward()), playbackEngine, SLOT(nextKeyframe()), Qt::UniqueConnection);
+
+    connect(m_d->titlebar->frameRegister, SIGNAL(valueChanged(int)), playbackEngine, SLOT(seek(int)), Qt::UniqueConnection);
+}
+
 void KisAnimTimelineDocker::updateFrameCache()
 {
     m_d->framesModel->setFrameCache(m_d->canvas->frameCache());
@@ -603,73 +665,29 @@ void KisAnimTimelineDocker::setViewManager(KisViewManager *view)
     KisAnimTimelineDockerTitlebar* titleBar = static_cast<KisAnimTimelineDockerTitlebar*>(titleBarWidget());
 
     action = actionManager->actionByName("add_blank_frame");
-    titleBar->btnAddKeyframe->setDefaultAction(action);
+    titleBar->btnAddKeyframe->setIcon(KisIconUtils::loadIcon("addblankframe"));
     titleBar->btnAddKeyframe->setIconSize(QSize(22, 22));
+    titleBar->btnAddKeyframe->setToolTip(action->toolTip());
+    QObject::connect(titleBar->btnAddKeyframe, SIGNAL(released()), action, SLOT(trigger()));
 
     action = actionManager->actionByName("add_duplicate_frame");
-    titleBar->btnDuplicateKeyframe->setDefaultAction(action);
+    titleBar->btnDuplicateKeyframe->setIcon(KisIconUtils::loadIcon("addduplicateframe"));
     titleBar->btnDuplicateKeyframe->setIconSize(QSize(22, 22));
+    titleBar->btnDuplicateKeyframe->setToolTip(action->toolTip());
+    QObject::connect(titleBar->btnDuplicateKeyframe, SIGNAL(released()), action, SLOT(trigger()));
 
     action = actionManager->actionByName("remove_frames");
-    titleBar->btnRemoveKeyframe->setDefaultAction(action);
+    titleBar->btnRemoveKeyframe->setIcon(KisIconUtils::loadIcon("deletekeyframe"));
     titleBar->btnRemoveKeyframe->setIconSize(QSize(22, 22));
+    titleBar->btnRemoveKeyframe->setToolTip(action->toolTip());
+    QObject::connect(titleBar->btnRemoveKeyframe, SIGNAL(released()), action, SLOT(trigger()));
 
     // Connect playback-related actions..
     action = actionManager->createAction("toggle_playback");
     action->setActivationFlags(KisAction::ACTIVE_IMAGE);
     connect(action, SIGNAL(triggered(bool)), this, SLOT(togglePlayback()));
 
-    action = actionManager->createAction("stop_playback");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(stop()));
-
-    action = actionManager->createAction("previous_frame");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(previousFrame()));
-
-    action = actionManager->createAction("next_frame");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(nextFrame()));
-
-    action = actionManager->createAction("previous_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(previousKeyframe()));
-
-    action = actionManager->createAction("next_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(nextKeyframe()));
-
-    action = actionManager->createAction("previous_matching_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(previousMatchingKeyframe()));
-
-    action = actionManager->createAction("next_matching_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(nextMatchingKeyframe()));
-
-    action = actionManager->createAction("previous_unfiltered_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(previousUnfilteredKeyframe()));
-
-    action = actionManager->createAction("next_unfiltered_keyframe");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, SIGNAL(triggered(bool)), m_d->playbackEngine, SLOT(nextUnfilteredKeyframe()));
-
-    action = actionManager->createAction("first_frame");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, &KisAction::triggered, this, [this](bool){
-       if (m_d->canvas) {
-           m_d->playbackEngine->firstFrame();
-       }
-    });
-
-    action = actionManager->createAction("last_frame");
-    action->setActivationFlags(KisAction::ACTIVE_IMAGE);
-    connect(action, &KisAction::triggered, this, [this](bool){
-       if (m_d->canvas) {
-           m_d->playbackEngine->lastFrame();
-       }
-    });
+    establishPlaybackEngineConnections(m_d->playbackEngine, actionManager);
 
     {
         action = actionManager->createAction("auto_key");
@@ -700,19 +718,15 @@ void KisAnimTimelineDocker::setPlaybackEngine(KisPlaybackEngine *playbackEngine)
 {
     if (!playbackEngine) return;
 
-    // Connect transport controls..
-    connect(m_d->titlebar->transport, SIGNAL(skipBack()), playbackEngine, SLOT(previousKeyframe()), Qt::UniqueConnection);
-    connect(m_d->titlebar->transport, SIGNAL(back()), playbackEngine, SLOT(previousFrame()), Qt::UniqueConnection);
-    connect(m_d->titlebar->transport, SIGNAL(stop()), playbackEngine, SLOT(stop()), Qt::UniqueConnection);
-    connect(m_d->titlebar->transport, SIGNAL(playPause()), this, SLOT(togglePlayback()), Qt::UniqueConnection);
-    connect(m_d->titlebar->transport, SIGNAL(forward()), playbackEngine, SLOT(nextFrame()), Qt::UniqueConnection);
-    connect(m_d->titlebar->transport, SIGNAL(skipForward()), playbackEngine, SLOT(nextKeyframe()), Qt::UniqueConnection);
-
-    connect(m_d->titlebar->frameRegister, SIGNAL(valueChanged(int)), playbackEngine, SLOT(seek(int)), Qt::UniqueConnection);
-
     m_d->controlsModel.connectPlaybackEngine(playbackEngine);
 
     m_d->playbackEngine = playbackEngine;
+
+    KisActionManager *actionManager = nullptr;
+    if (m_d->canvas && m_d->canvas->viewManager()) {
+        actionManager = m_d->canvas->viewManager()->actionManager();
+    }
+    establishPlaybackEngineConnections(m_d->playbackEngine, actionManager);
 }
 
 void KisAnimTimelineDocker::togglePlayback()

@@ -14,6 +14,7 @@
 #include <commands/KoShapeAlignCommand.h>
 #include <commands/KoShapeReorderCommand.h>
 #include "SelectionDecorator.h"
+#include <KoSvgTextShapeOutlineHelper.h>
 #include "KoShapeMeshGradientHandles.h"
 #include <KoSvgTextPropertiesInterface.h>
 
@@ -90,6 +91,9 @@ public:
      */
     KoFlake::SelectionHandle handleAt(const QPointF &point, bool *innerHandleMeaning = 0);
 
+    bool updateTextContourMode();
+
+    KoSvgTextShape* tryFetchCurrentShapeManagerOwnerTextShape() const;
 
 public Q_SLOTS:
     void activate(const QSet<KoShape *> &shapes) override;
@@ -119,6 +123,14 @@ private Q_SLOTS:
 
     void slotActivateEditFillMeshGradient(bool value);
     void slotResetMeshGradientState();
+
+    void slotChangeTextType(int index);
+    void slotAddShapesToFlow();
+    void slotPutTextOnPath();
+    void slotSubtractShapesFromFlow();
+    void slotRemoveShapesFromFlow();
+    void slotToggleFlowShapeType();
+    void slotReorderFlowShapes(int type);
 
 protected Q_SLOTS:
     /// Update actions on selection change
@@ -183,6 +195,7 @@ private:
     QPointF m_lastPoint;
 
     QScopedPointer<SelectionDecorator> m_decorator;
+    QScopedPointer<KoSvgTextShapeOutlineHelper> m_textOutlineHelper;
 
     KoShapeMeshGradientHandles::Handle m_selectedMeshHandle;
     KoShapeMeshGradientHandles::Handle m_hoveredMeshHandle;
@@ -201,6 +214,8 @@ private:
     KisSignalMapper *m_distributeSignalsMapper {0};
     KisSignalMapper *m_transformSignalsMapper {0};
     KisSignalMapper *m_booleanSignalsMapper {0};
+    KisSignalMapper *m_textTypeSignalsMapper {0};
+    KisSignalMapper *m_textFlowSignalsMapper {0};
 
     DefaultToolTextPropertiesInterface *m_textPropertyInterface{0};
 };
@@ -215,9 +230,12 @@ public:
     DefaultToolTextPropertiesInterface(DefaultTool *parent);
     ~DefaultToolTextPropertiesInterface();
     virtual QList<KoSvgTextProperties> getSelectedProperties() override;
+    virtual QList<KoSvgTextProperties> getCharacterProperties() override;
     virtual KoSvgTextProperties getInheritedProperties() override;
     virtual void setPropertiesOnSelected(KoSvgTextProperties properties, QSet<KoSvgTextProperties::PropertyId> removeProperties = QSet<KoSvgTextProperties::PropertyId>()) override;
+    virtual void setCharacterPropertiesOnSelected(KoSvgTextProperties properties, QSet<KoSvgTextProperties::PropertyId> removeProperties = QSet<KoSvgTextProperties::PropertyId>()) override;
     virtual bool spanSelection() override;
+    virtual bool characterPropertiesEnabled() override;
 
     virtual void notifyCursorPosChanged(int pos, int anchor) override;
     virtual void notifyMarkupChanged() override;

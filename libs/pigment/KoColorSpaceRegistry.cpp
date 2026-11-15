@@ -12,6 +12,7 @@
 #include <QReadWriteLock>
 #include <QDir>
 #include <QGlobalStatic>
+#include <QColorSpace>
 
 #include "KoPluginLoader.h"
 #include "KoGenericRegistry.h"
@@ -21,6 +22,7 @@
 #include "KoColorProfile.h"
 #include "KoColorConversionCache.h"
 #include "KoColorConversionSystem.h"
+#include "KoColorProfileQuery.h"
 
 #include "colorspaces/KoAlphaColorSpace.h"
 #include "colorspaces/KoLabColorSpace.h"
@@ -40,8 +42,6 @@ Q_GLOBAL_STATIC(KoColorSpaceRegistry, s_instance)
 
 struct Q_DECL_HIDDEN KoColorSpaceRegistry::Private {
 
-    // interface for KoColorSpaceFactory
-    struct ProfileRegistrationInterface;
     // interface for KoColorConversionSystem
     struct ConversionSystemInterface;
 
@@ -231,6 +231,19 @@ KoColorSpaceRegistry::~KoColorSpaceRegistry()
 
 void KoColorSpaceRegistry::add(KoColorSpaceFactory* item)
 {
+    {
+        QReadLocker l(&d->registrylock);
+        auto connectionProfileRequests = d->colorConversionSystem->requiredConnectionProfilesFor(item);
+
+        // the actual connection profiles should be added without any lock held
+        l.unlock();
+
+        for (auto it = connectionProfileRequests.begin(); it != connectionProfileRequests.end(); ++it) {
+            const KoColorProfile *profile = this->profileFor(*it, true); // auto-generate all the required profiles
+            KIS_SAFE_ASSERT_RECOVER_NOOP(profile);
+        }
+    }
+
     QWriteLocker l(&d->registrylock);
     d->colorSpaceFactoryRegistry.add(item);
     d->colorConversionSystem->insertColorSpace(item);
@@ -258,6 +271,11 @@ void KoColorSpaceRegistry::remove(KoColorSpaceFactory* item)
 void KoColorSpaceRegistry::addProfileAlias(const QString& name, const QString& to)
 {
     d->profileStorage.addProfileAlias(name, to);
+}
+
+void KoColorSpaceRegistry::removeProfileAlias(const QString& name)
+{
+    d->profileStorage.removeProfileAlias(name);
 }
 
 QString KoColorSpaceRegistry::profileAlias(const QString& name) const
@@ -312,6 +330,20 @@ void KoColorSpaceRegistry::addProfileToMap(KoColorProfile *p)
 void KoColorSpaceRegistry::addProfile(KoColorProfile *p)
 {
     if (!p->valid()) return;
+
+    {
+        QReadLocker l(&d->registrylock);
+        auto connectionProfileRequests = d->colorConversionSystem->requiredConnectionProfilesFor(p);
+
+        // the actual connection profiles should be added without any lock held
+        l.unlock();
+
+        for (auto it = connectionProfileRequests.begin(); it != connectionProfileRequests.end(); ++it) {
+            const KoColorProfile *profile = this->profileFor(*it, true); // auto-generate all the required profiles
+            KIS_SAFE_ASSERT_RECOVER_NOOP(profile);
+        }
+
+    }
 
     QWriteLocker locker(&d->registrylock);
     if (p->valid()) {
@@ -680,7 +712,7 @@ const KoColorProfile *KoColorSpaceRegistry::p2020G10Profile() const
 
 const KoColorProfile *KoColorSpaceRegistry::p2020PQProfile() const
 {
-    return profileByName("High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF");
+    return profileByName("Krita Rec. 2100 Perceptual Quantizer (203cd/m²)");
 }
 
 const KoColorProfile *KoColorSpaceRegistry::p709G10Profile() const
@@ -693,35 +725,155 @@ const KoColorProfile *KoColorSpaceRegistry::p709SRGBProfile() const
     return profileByName("sRGB-elle-V2-srgbtrc.icc");
 }
 
-const KoColorProfile *KoColorSpaceRegistry::profileFor(const QVector<double> &colorants, ColorPrimaries colorPrimaries, TransferCharacteristics transferFunction) const
+const KoColorProfile *KoColorSpaceRegistry::profileFor(const KoColorProfileQuery &query, const bool generate) const
 {
-    if (colorPrimaries == PRIMARIES_ITU_R_BT_709_5) {
-        if (transferFunction == TRC_IEC_61966_2_1) {
+    // We're currently disabling on-the-fly generation of PQ profiles, because it can cause
+    // some issues with inconsistent hdr-reference-white value, i.e. the user of this
+    // code may get nits value he/she didn't expect
+    return profileForInternal(query, generate && query.transfer != TRC_ITU_R_BT_2100_0_PQ);
+}
+
+const KoColorProfile *KoColorSpaceRegistry::profileForInternal(const KoColorProfileQuery &query, const bool generate) const
+{
+    if (query.primaries == PRIMARIES_ITU_R_BT_709_5) {
+        if (query.transfer == TRC_IEC_61966_2_1) {
             return p709SRGBProfile();
-        } else if (transferFunction == TRC_LINEAR) {
+        } else if (query.transfer == TRC_LINEAR) {
             return p709G10Profile();
         }
     }
 
-    if (colorPrimaries == PRIMARIES_ITU_R_BT_2020_2_AND_2100_0) {
-        if (transferFunction == TRC_ITU_R_BT_2100_0_PQ) {
+    if (query.primaries == PRIMARIES_ITU_R_BT_2020_2_AND_2100_0) {
+        if (query.transfer == TRC_ITU_R_BT_2100_0_PQ
+            && query.hdrReferenceWhite
+            && qFuzzyCompare(*query.hdrReferenceWhite, 203.0)) {
             return p2020PQProfile();
-        } else if (transferFunction == TRC_LINEAR) {
+        } else if (query.transfer == TRC_LINEAR) {
             return p2020G10Profile();
         }
     }
 
-    QList<const KoColorProfile*> list = d->profileStorage.profilesFor(colorants, colorPrimaries, transferFunction);
+    QList<const KoColorProfile*> list = d->profileStorage.profilesFor(query);
     if (!list.empty()) {
         return list.first();
     }
 
     KoColorSpaceEngine *engine = KoColorSpaceEngineRegistry::instance()->get("icc");
-    if (engine) {
-        return engine->getProfile(colorants, colorPrimaries, transferFunction);
+
+    if (engine && generate) {
+        return engine->getProfile(query);
     }
 
     return nullptr;
+}
+
+static QMap<QColorSpace::Primaries, ColorPrimaries> mapQColorSpaceColorPrimaries {
+    {QColorSpace::Primaries::SRgb, PRIMARIES_ITU_R_BT_709_5},
+    {QColorSpace::Primaries::AdobeRgb, PRIMARIES_ADOBE_RGB_1998},
+    {QColorSpace::Primaries::DciP3D65, PRIMARIES_SMPTE_EG_432_1},
+    {QColorSpace::Primaries::ProPhotoRgb, PRIMARIES_PROPHOTO},
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    {QColorSpace::Primaries::Bt2020, PRIMARIES_ITU_R_BT_2020_2_AND_2100_0},
+#endif
+    {QColorSpace::Primaries::Custom, PRIMARIES_UNSPECIFIED}
+};
+
+static QMap<QColorSpace::TransferFunction, TransferCharacteristics> mapQColorSpaceColorTransfer {
+    {QColorSpace::TransferFunction::Linear, TRC_LINEAR},
+    {QColorSpace::TransferFunction::SRgb, TRC_IEC_61966_2_1},
+    {QColorSpace::TransferFunction::ProPhotoRgb, TRC_PROPHOTO},
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    {QColorSpace::TransferFunction::Bt2020, TRC_ITU_R_BT_2020_2_12bit},
+    {QColorSpace::TransferFunction::St2084, TRC_ITU_R_BT_2100_0_PQ},
+    {QColorSpace::TransferFunction::Hlg, TRC_ITU_R_BT_2100_0_HLG},
+#endif
+    {QColorSpace::TransferFunction::Custom, TRC_UNSPECIFIED}
+};
+
+const KoColorProfile *KoColorSpaceRegistry::profileForQColorSpace(const QColorSpace &space)
+{
+    if (!space.isValid()) return p709SRGBProfile();
+    const KoColorProfile *profile = nullptr;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    ColorPrimaries primaries = mapQColorSpaceColorPrimaries.value(space.primaries(), PRIMARIES_UNSPECIFIED);
+    TransferCharacteristics transfer = mapQColorSpaceColorTransfer.value(space.transferFunction(), TRC_UNSPECIFIED);
+    if (space.transferFunction() == QColorSpace::TransferFunction::Gamma || (transfer == TRC_UNSPECIFIED && primaries == PRIMARIES_UNSPECIFIED)) {
+        // load icc profile.
+        QByteArray profileData = space.iccProfile();
+        profile = createColorProfile(RGBAColorModelID.id(), Integer8BitsColorDepthID.id(), profileData);
+    } else {
+        QVector<double> colorants;
+        profile = profileFor(KoColorProfileQuery(primaries, transfer));
+    }
+#else
+    // We want to test RGB before testing wether we are dealing with a LUT, because we want to funnel rec2020 pq into loading our profile.
+
+    if (space.colorModel() == QColorSpace::ColorModel::Rgb) {
+        if (space.transferFunction() == QColorSpace::TransferFunction::Gamma) {
+            // load icc profile.
+            QByteArray profileData = space.iccProfile();
+            profile = createColorProfile(RGBAColorModelID.id(), Integer8BitsColorDepthID.id(), profileData);
+        }
+        ColorPrimaries primaries = mapQColorSpaceColorPrimaries.value(space.primaries(), PRIMARIES_UNSPECIFIED);
+        TransferCharacteristics transfer = mapQColorSpaceColorTransfer.value(space.transferFunction(), TRC_UNSPECIFIED);
+        // In qt6.9 we can get the 'primary points'.
+        if (!profile && (primaries != PRIMARIES_UNSPECIFIED) && transfer != TRC_UNSPECIFIED) {
+            profile = profileFor(KoColorProfileQuery(primaries, transfer));
+        }
+    } else if (space.colorModel() == QColorSpace::ColorModel::Gray) {
+        TransferCharacteristics transfer = mapQColorSpaceColorTransfer.value(space.transferFunction(), TRC_UNSPECIFIED);
+        if (space.transferFunction() == QColorSpace::TransferFunction::Gamma) {
+            QByteArray profileData = space.iccProfile();
+            profile = createColorProfile(GrayAColorModelID.id(), Integer8BitsColorDepthID.id(), profileData);
+
+        }
+        QVector<double> colorants;
+        KoColorProfileQuery query(PRIMARIES_UNSPECIFIED, transfer);
+        query.whitePoint = {space.whitePoint().x(), space.whitePoint().y()};
+        if (!profile && query.isValid()) {
+            profile = profileFor(query);
+        }
+    }
+#endif
+    if (!profile) {
+        // We might now have a non-qt supported colormodel. Let's load the raw data directly.
+        KoColorSpaceEngine *engine = KoColorSpaceEngineRegistry::instance()->get("icc");
+        if (engine) {
+            QByteArray profileData = space.iccProfile();
+            profile = engine->addProfile(profileData);
+        }
+    }
+    if (profile) {
+        const KoColorProfile *preExisting = profileByUniqueId(profile->uniqueId());
+        if (!preExisting) {
+            preExisting = profileByName(profile->name());
+        }
+        if (preExisting) {
+            return preExisting;
+        } else {
+            addProfile(profile);
+        }
+    }
+
+    return profile;
+}
+
+QColorSpace KoColorSpaceRegistry::QColorSpaceForProfile(const KoColorProfile *profile) const
+{
+    if (!profile) return QColorSpace(QColorSpace::SRgb);
+    if (profile == p709SRGBProfile()) {
+        return QColorSpace(QColorSpace::SRgb);
+    }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    if (profile == p2020PQProfile()
+        || (profile->getColorPrimaries() == PRIMARIES_ITU_R_BT_2020_2_AND_2100_0
+            && profile->getTransferCharacteristics() == TRC_ITU_R_BT_2100_0_PQ)) {
+        return QColorSpace(QColorSpace::Bt2100Pq);
+    }
+    // TODO: we'll need to fine tune the conversion between non "rec 2100" pq profiles and qcolorspace.
+    // Though, arguably, these probably don't show up in a QColorSpace way, and should roundtrip in the icc cicp values.
+#endif
+    return QColorSpace::fromIccProfile(profile->rawData());
 }
 
 QList<KoID> KoColorSpaceRegistry::colorModelsList(ColorSpaceListVisibility option) const
@@ -848,29 +1000,33 @@ QList<KoID> KoColorSpaceRegistry::listKeys() const
     return answer;
 }
 
-struct KoColorSpaceRegistry::Private::ProfileRegistrationInterface : public KoColorSpaceFactory::ProfileRegistrationInterface
-{
-    ProfileRegistrationInterface(KoColorSpaceRegistry::Private *_d) : d(_d) {}
-
-    const KoColorProfile* profileByName(const QString &profileName) const override {
-        return d->profileStorage.profileByName(profileName);
-    }
-
-    void registerNewProfile(KoColorProfile *profile) override {
-        d->profileStorage.addProfile(profile);
-        d->colorConversionSystem->insertColorProfile(profile);
-    }
-
-    KoColorSpaceRegistry::Private *d {nullptr};
-};
-
 const KoColorProfile* KoColorSpaceRegistry::createColorProfile(const QString& colorModelId, const QString& colorDepthId, const QByteArray& rawData)
 {
-    QWriteLocker l(&d->registrylock);
-    KoColorSpaceFactory* factory_ = d->colorSpaceFactoryRegistry.get(d->colorSpaceIdImpl(colorModelId, colorDepthId));
+    return createColorProfile(colorModelId, colorDepthId, rawData, {});
+}
 
-    Private::ProfileRegistrationInterface interface(d);
-    return factory_->colorProfile(rawData, &interface);
+const KoColorProfile* KoColorSpaceRegistry::createColorProfile(const QString & colorModelId, const QString & colorDepthId, const QByteArray& rawData, CustomProfileNameAlias customProfileNameAlias)
+{
+    QReadLocker l(&d->registrylock);
+
+    KoColorSpaceFactory* factory_ = d->colorSpaceFactoryRegistry.get(d->colorSpaceIdImpl(colorModelId, colorDepthId));
+    std::unique_ptr<KoColorProfile> profile(factory_->createColorProfile(rawData));
+
+    l.unlock();
+
+    if (profile && profile->valid()) {
+        const QString effectiveProfileName = customProfileNameAlias.value(profile->name(), profile->name());
+        if (const KoColorProfile* existingProfile = profileByName(effectiveProfileName)) {
+            return existingProfile;
+        }
+
+        const KoColorProfile *constProfile = profile.get();
+        this->addProfile(profile.release());
+
+        return constProfile;
+    }
+
+    return nullptr;
 }
 
 QList<const KoColorSpace*> KoColorSpaceRegistry::allColorSpaces(ColorSpaceListVisibility visibility, ColorSpaceListProfilesSelection pSelection)

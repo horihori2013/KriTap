@@ -147,7 +147,7 @@ void KisCanvasController::keyPressEvent(QKeyEvent *event)
      * Do not call the KoCanvasControllerWidget::keyPressEvent()
      * to avoid activation of Pan and Default tool activation shortcuts
      */
-    Q_UNUSED(event);
+    event->ignore();
 }
 
 void KisCanvasController::wheelEvent(QWheelEvent *event)
@@ -157,7 +157,7 @@ void KisCanvasController::wheelEvent(QWheelEvent *event)
      * Do not call the KoCanvasControllerWidget::wheelEvent()
      * to disable the default behavior of KoCanvasControllerWidget and QAbstractScrollArea
      */
-    Q_UNUSED(event);
+    event->ignore();
 }
 
 bool KisCanvasController::eventFilter(QObject *watched, QEvent *event)
@@ -269,11 +269,14 @@ void KisCanvasController::mirrorCanvasAroundCanvas(bool enable)
 void KisCanvasController::Private::showRotationValueOnCanvas()
 {
     qreal rotationAngle = coordinatesConverter->rotationAngle();
+    // Prevent the displayed rotation angle from jittering between -0.0 and 0.0.
+    if (rotationAngle > -0.05 && rotationAngle < 0.05) {
+        rotationAngle = 0.0;
+    }
     view->viewManager()->
-        showFloatingMessage(
+        showFloatingRotationMessage(
             i18nc("floating message about rotation", "Rotation: %1° ",
-                  KritaUtils::prettyFormatReal(rotationAngle)),
-            QIcon(), 500, KisFloatingMessage::Low, Qt::AlignCenter);
+                  KritaUtils::prettyFormatReal(rotationAngle)));
 }
 
 void KisCanvasController::beginCanvasRotation()
@@ -513,8 +516,9 @@ void KisCanvasController::updateCanvasOffsetInternal(const QPointF &newOffset)
     m_d->coordinatesConverter->setDocumentOffset(newOffset);
 }
 
-void KisCanvasController::updateCanvasWidgetSizeInternal(const QSize &newSize)
+void KisCanvasController::updateCanvasWidgetSizeInternal(const QSize &newSize, qreal devicePixelRatio)
 {
+    m_d->coordinatesConverter->setDevicePixelRatio(devicePixelRatio);
     m_d->coordinatesConverter->setCanvasWidgetSizeKeepZoom(newSize);
 }
 

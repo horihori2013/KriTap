@@ -9,7 +9,7 @@
 #include <string>
 
 #include <QIODevice>
-#include <QRegExp>
+#include <QRegularExpression>
 
 #include <kis_exiv2_common.h>
 #include <kis_meta_data_entry.h>
@@ -19,6 +19,7 @@
 #include <kis_meta_data_store.h>
 #include <kis_meta_data_type_info.h>
 #include <kis_meta_data_value.h>
+#include <KisUsageLogger.h>
 
 
 #include <kis_debug.h>
@@ -136,8 +137,11 @@ bool KisXMPIO::saveTo(const KisMetaData::Store *store, QIODevice *ioDevice, Head
             } else {
                 dbgMetaData << ppVar(key.key().c_str());
                 Exiv2::Value *v = kmdValueToExivXmpValue(value);
-                if (v) {
+                if (v && v->typeId() != Exiv2::TypeId::invalidTypeId) {
                     xmpData_.add(key, v);
+                } else {
+                    warnMetaData << "Invalid metadata value " << value << "for: " << entry.name();
+                    KisUsageLogger::log(QString("Invalid metadata value \"%1\" for key %2. The metadata key is therefore skipped during saving.").arg(value.toString(), entry.name()));
                 }
             }
         }
@@ -180,10 +184,17 @@ bool parseTagName(const QString &tagString,
     }
 
     if (numSubNames == 2) {
-        QRegExp regexp("([A-Za-z]\\w+)/([A-Za-z]\\w+):([A-Za-z]\\w+)");
-        if (regexp.indexIn(tagString) != -1) {
-            structName = regexp.capturedTexts()[1];
-            tagName = regexp.capturedTexts()[3];
+        /**
+         * We use Unicode-matching mode, because according to XML specification
+         * the name of an entity can contain Unicode characters.
+         */
+        QRegularExpression regexp("([A-Za-z]\\w+)/([A-Za-z]\\w+):([A-Za-z]\\w+)");
+        regexp.setPatternOptions(QRegularExpression::UseUnicodePropertiesOption);
+
+        QRegularExpressionMatch match;
+        if (tagString.contains(regexp, &match)) {
+            structName = match.captured(1);
+            tagName = match.captured(3);
             *typeInfo = schema->propertyType(structName);
 
             if (*typeInfo && (*typeInfo)->propertyType() == KisMetaData::TypeInfo::StructureType) {
@@ -193,11 +204,14 @@ bool parseTagName(const QString &tagString,
             return true;
         }
 
-        QRegExp regexp2("([A-Za-z]\\w+)\\[(\\d+)\\]/([A-Za-z]\\w+):([A-Za-z]\\w+)");
-        if (regexp2.indexIn(tagString) != -1) {
-            structName = regexp2.capturedTexts()[1];
-            arrayIndex = regexp2.capturedTexts()[2].toInt() - 1;
-            tagName = regexp2.capturedTexts()[4];
+        QRegularExpression regexp2("([A-Za-z]\\w+)\\[(\\d+)\\]/([A-Za-z]\\w+):([A-Za-z]\\w+)");
+        regexp2.setPatternOptions(QRegularExpression::UseUnicodePropertiesOption);
+
+        QRegularExpressionMatch match2;
+        if (tagString.contains(regexp2, &match2)) {
+            structName = match2.captured(1);
+            arrayIndex = match2.captured(2).toInt() - 1;
+            tagName = match2.captured(4);
 
             if (schema->propertyType(structName)) {
                 *typeInfo = schema->propertyType(structName)->embeddedPropertyType();
@@ -293,7 +307,12 @@ bool KisXMPIO::loadFrom(KisMetaData::Store *store, QIODevice *ioDevice) const
 #endif
                     QString value = QString::fromStdString(xav->toString(i));
                     if (parser) {
-                        array.push_back(parser->parse(value));
+                        KisMetaData::Value parsed = parser->parse(value);
+                        if (parsed.type() == KisMetaData::Value::Invalid) {
+                            KisUsageLogger::log(QString("Cannot parse metadata value \"%1\" for %2. Assigning invalid value.").arg(value, tagName));
+                        }
+                        array.push_back(parsed);
+
                     } else {
                         dbgImage << "No parser " << tagName;
                         array.push_back(KisMetaData::Value(value));
@@ -332,6 +351,9 @@ bool KisXMPIO::loadFrom(KisMetaData::Store *store, QIODevice *ioDevice) const
                 QString valTxt = value->toString().c_str();
                 if (typeInfo && typeInfo->parser()) {
                     v = typeInfo->parser()->parse(valTxt);
+                    if (v.type() == KisMetaData::Value::Invalid) {
+                        KisUsageLogger::log(QString("Cannot parse metadata value \"%1\" for %2. Assigning invalid value.").arg(valTxt, tagName));
+                    }
                 } else {
                     dbgMetaData << "No parser " << tagName;
                     v = KisMetaData::Value(valTxt);

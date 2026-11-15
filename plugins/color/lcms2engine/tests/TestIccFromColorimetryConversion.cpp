@@ -26,6 +26,7 @@ void TestIccFromColorimetryConversion::testRequestConstruction_data()
     QTest::addColumn<bool>("isValid");
     QTest::addColumn<ColorPrimaries>("expectedPrimaries");
     QTest::addColumn<TransferCharacteristics>("expectedTransferFunction");
+    QTest::addColumn<double>("expectedReferenceWhite");
 
     using KisSurfaceColorimetry::ColorSpace;
     using KisSurfaceColorimetry::NamedPrimaries;
@@ -35,6 +36,7 @@ void TestIccFromColorimetryConversion::testRequestConstruction_data()
         ColorSpace cs;
         cs.primaries = p;
         cs.transferFunction = tf;
+        cs.luminance->referenceLuminance = 80;
         return cs;
     };
 
@@ -42,49 +44,57 @@ void TestIccFromColorimetryConversion::testRequestConstruction_data()
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_srgb)
         << true
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_IEC_61966_2_1;
+        << TRC_IEC_61966_2_1
+        << 0.0;
 
     QTest::newRow("srgb-linear")
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_ext_linear)
         << true
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_LINEAR;
+        << TRC_LINEAR
+        << 0.0;
 
     QTest::newRow("srgb-2.2")
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_gamma22)
         << true
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_ITU_R_BT_470_6_SYSTEM_M;
+        << TRC_ITU_R_BT_470_6_SYSTEM_M
+        << 0.0;
 
     QTest::newRow("srgb-2.8")
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_gamma28)
         << true
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_ITU_R_BT_470_6_SYSTEM_B_G;
+        << TRC_ITU_R_BT_470_6_SYSTEM_B_G
+        << 0.0;
 
     QTest::newRow("bt2020-linear")
         << makeCS(NamedPrimaries::primaries_bt2020, NamedTransferFunction::transfer_function_ext_linear)
         << true
         << PRIMARIES_ITU_R_BT_2020_2_AND_2100_0
-        << TRC_LINEAR;
+        << TRC_LINEAR
+        << 0.0;
 
     QTest::newRow("bt2020-pq")
         << makeCS(NamedPrimaries::primaries_bt2020, NamedTransferFunction::transfer_function_st2084_pq)
         << true
         << PRIMARIES_ITU_R_BT_2020_2_AND_2100_0
-        << TRC_ITU_R_BT_2100_0_PQ;
+        << TRC_ITU_R_BT_2100_0_PQ
+        << 80.0;
 
     QTest::newRow("unknown-srgb")
         << makeCS(NamedPrimaries::primaries_unknown, NamedTransferFunction::transfer_function_srgb)
         << false
         << PRIMARIES_UNSPECIFIED
-        << TRC_IEC_61966_2_1;
+        << TRC_IEC_61966_2_1
+        << 0.0;
 
     QTest::newRow("srgb-unknown")
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_unknown)
         << false
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_UNSPECIFIED;
+        << TRC_UNSPECIFIED
+        << 0.0;
 
     // any pq-space that is not bt2020pq is considered unsupported
 
@@ -92,13 +102,15 @@ void TestIccFromColorimetryConversion::testRequestConstruction_data()
         << makeCS(NamedPrimaries::primaries_srgb, NamedTransferFunction::transfer_function_st2084_pq)
         << false
         << PRIMARIES_ITU_R_BT_709_5
-        << TRC_UNSPECIFIED;
+        << TRC_UNSPECIFIED
+        << 0.0;
 
     QTest::newRow("adobergb-pq")
         << makeCS(NamedPrimaries::primaries_adobe_rgb, NamedTransferFunction::transfer_function_st2084_pq)
         << false
         << PRIMARIES_ADOBE_RGB_1998
-        << TRC_UNSPECIFIED;
+        << TRC_UNSPECIFIED
+        << 0.0;
 }
 
 void TestIccFromColorimetryConversion::testRequestConstruction()
@@ -107,47 +119,61 @@ void TestIccFromColorimetryConversion::testRequestConstruction()
     QFETCH(bool, isValid);
     QFETCH(ColorPrimaries, expectedPrimaries);
     QFETCH(TransferCharacteristics, expectedTransferFunction);
+    QFETCH(double, expectedReferenceWhite);
 
     auto request = KisSurfaceColorimetry::colorSpaceToRequest(colorSpace);
 
-    QCOMPARE(request.isValid(), isValid);
-    QCOMPARE(request.colorPrimariesType, expectedPrimaries);
-    QCOMPARE(request.transferFunction, expectedTransferFunction);
-    QVERIFY(request.colorants.isEmpty());
+    QCOMPARE(request.isRgb(), isValid);
+    QCOMPARE(request.primaries, expectedPrimaries);
+    QCOMPARE(request.transfer, expectedTransferFunction);
+    if (expectedReferenceWhite > 0.0) {
+        QVERIFY(request.hdrReferenceWhite);
+        QVERIFY(qFuzzyCompare(*request.hdrReferenceWhite, expectedReferenceWhite));
+    } else {
+        QVERIFY(!request.hdrReferenceWhite);
+    }
+    QVERIFY(request.rgbColorants.isEmpty());
 }
 
 void TestIccFromColorimetryConversion::testRequestConstructionCustomPrimaries()
 {
-    using KisColorimetryUtils::Colorimetry;
+    using KoColorimetryUtils::Colorimetry;
     using KisSurfaceColorimetry::ColorSpace;
     using KisSurfaceColorimetry::NamedTransferFunction;
 
     ColorSpace  colorSpace;
     colorSpace.primaries = Colorimetry::BT709;
     colorSpace.transferFunction = NamedTransferFunction::transfer_function_srgb;
-    const QVector<double> expectedColorants = {
-        0.3127, 0.3290, // white
-        0.64, 0.33, // red
-        0.30, 0.60, // green
-        0.15, 0.06, // blue
+    const QVector<KoColorimetryUtils::xy> expectedColorants = {
+        {0.64, 0.33}, // red
+        {0.30, 0.60}, // green
+        {0.15, 0.06}, // blue
     };
+
+    KoColorimetryUtils::xy expectedWp = {0.3127, 0.3290};
 
     auto request = KisSurfaceColorimetry::colorSpaceToRequest(colorSpace);
 
     QCOMPARE(request.isValid(), true);
-    QCOMPARE(request.colorPrimariesType, PRIMARIES_UNSPECIFIED);
-    QCOMPARE(request.transferFunction, TRC_IEC_61966_2_1);
-    QCOMPARE(request.colorants.size(), expectedColorants.size());
+    QCOMPARE(request.primaries, PRIMARIES_UNSPECIFIED);
+    QCOMPARE(request.transfer, TRC_IEC_61966_2_1);
+    QCOMPARE(request.rgbColorants.size(), expectedColorants.size());
+
+    QVERIFY(expectedWp == request.whitePoint);
+
+    auto compareXY = [] (KoColorimetryUtils::xy lhs, KoColorimetryUtils::xy rhs) {
+        return lhs == rhs;
+    };
 
     auto it =
-        std::mismatch(request.colorants.begin(), request.colorants.end(),
-                      expectedColorants.begin(), qOverload<double, double>(qFuzzyCompare));
+        std::mismatch(request.rgbColorants.begin(), request.rgbColorants.end(),
+                      expectedColorants.begin(), compareXY);
 
-    if (it.first != request.colorants.end()) {
+    if (it.first != request.rgbColorants.end()) {
         qWarning() << Qt::fixed << qSetRealNumberPrecision(8)
             <<  "Failed to compare colorants array, result:" << *it.first << "expected:" <<*it.second;
         qWarning() << Qt::fixed << qSetRealNumberPrecision(8)
-            << "    " << ppVar(request.colorants);
+            << "    " << ppVar(request.rgbColorants);
         qWarning() << Qt::fixed << qSetRealNumberPrecision(8)
             << "    " << ppVar(expectedColorants);
         QFAIL("check failed");
@@ -177,7 +203,7 @@ void TestIccFromColorimetryConversion::testRequestConstructionCustomGamma()
     QFETCH(bool, isValid);
     QFETCH(TransferCharacteristics, expectedTransferFunction);
 
-    using KisColorimetryUtils::Colorimetry;
+    using KoColorimetryUtils::Colorimetry;
     using KisSurfaceColorimetry::ColorSpace;
     using KisSurfaceColorimetry::NamedTransferFunction;
     using KisSurfaceColorimetry::NamedPrimaries;
@@ -189,9 +215,9 @@ void TestIccFromColorimetryConversion::testRequestConstructionCustomGamma()
     auto request = KisSurfaceColorimetry::colorSpaceToRequest(colorSpace);
 
     QCOMPARE(request.isValid(), isValid);
-    QCOMPARE(request.colorPrimariesType, TRC_ITU_R_BT_709_5);
-    QCOMPARE(request.transferFunction, expectedTransferFunction);
-    QVERIFY(request.colorants.isEmpty());
+    QCOMPARE(request.primaries, TRC_ITU_R_BT_709_5);
+    QCOMPARE(request.transfer, expectedTransferFunction);
+    QVERIFY(request.rgbColorants.isEmpty());
 
 }
 
@@ -206,6 +232,7 @@ void TestIccFromColorimetryConversion::testProfileConstruction()
     QFETCH(bool, isValid);
     QFETCH(ColorPrimaries, expectedPrimaries);
     QFETCH(TransferCharacteristics, expectedTransferFunction);
+    QFETCH(double, expectedReferenceWhite);
 
     // skip inherited invalid requests
     if (!isValid) return;
@@ -213,19 +240,18 @@ void TestIccFromColorimetryConversion::testProfileConstruction()
     auto request = KisSurfaceColorimetry::colorSpaceToRequest(colorSpace);
     QVERIFY(request.isValid());
 
-    const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(request.colorants,
-                                                                                 request.colorPrimariesType,
-                                                                                 request.transferFunction);
+    const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(request);
 
     QVERIFY(profile);
 
-    if (QLatin1String(QTest::currentDataTag()) == "bt2020-pq") {
-        // we use a fake profile with a special color space for bt2020pq space, so
-        // just verify that the profile name is consistent
-        QCOMPARE(profile->name(), "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF");
+    QCOMPARE(profile->getColorPrimaries(), expectedPrimaries);
+    QCOMPARE(profile->getTransferCharacteristics(), expectedTransferFunction);
+
+    if (expectedReferenceWhite > 0.0) {
+        QVERIFY(profile->hdrReferenceWhite());
+        QVERIFY(qFuzzyCompare(*profile->hdrReferenceWhite(), expectedReferenceWhite));
     } else {
-        QCOMPARE(profile->getColorPrimaries(), expectedPrimaries);
-        QCOMPARE(profile->getTransferCharacteristics(), expectedTransferFunction);
+        QVERIFY(!profile->hdrReferenceWhite());
     }
 
     qDebug() << ppVar(profile->name()) << ppVar(profile->fileName());
@@ -233,7 +259,7 @@ void TestIccFromColorimetryConversion::testProfileConstruction()
 
 void TestIccFromColorimetryConversion::testProfileConstructionCustomPrimaries()
 {
-    using KisColorimetryUtils::Colorimetry;
+    using KoColorimetryUtils::Colorimetry;
     using KisSurfaceColorimetry::ColorSpace;
     using KisSurfaceColorimetry::NamedTransferFunction;
 
@@ -245,9 +271,7 @@ void TestIccFromColorimetryConversion::testProfileConstructionCustomPrimaries()
 
     QCOMPARE(request.isValid(), true);
 
-    const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(request.colorants,
-                                                                                 request.colorPrimariesType,
-                                                                                 request.transferFunction);
+    const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileFor(request);
 
     QVERIFY(profile);
     QCOMPARE(profile->getColorPrimaries(), PRIMARIES_ITU_R_BT_709_5);

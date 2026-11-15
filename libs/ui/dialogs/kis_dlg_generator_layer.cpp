@@ -19,10 +19,12 @@
 #include <kis_paint_device.h>
 #include <kis_transaction.h>
 #include <commands/kis_change_filter_command.h>
+#include <commands/KisNodeRenameCommand.h>
 #include <kis_generator_layer.h>
 #include <KisViewManager.h>
 #include <KisDocument.h>
 #include <KisGlobalResourcesInterface.h>
+#include <kis_command_utils.h>
 #include <kis_icon_utils.h>
 
 #define UPDATE_DELAY 100 /*ms */
@@ -60,8 +62,9 @@ KisDlgGeneratorLayer::KisDlgGeneratorLayer(const QString & defaultName, KisViewM
 
     connect(dlgWidget.btnBox, SIGNAL(accepted()), this, SLOT(accept()));
     connect(dlgWidget.btnBox, SIGNAL(rejected()), this, SLOT(reject()));
-    connect(this, SIGNAL(accepted()), this, SLOT(saveLayer()));
-    connect(this, SIGNAL(rejected()), this, SLOT(restoreLayer()));
+    // Call these in the destructor instead to avoid a crash where the object was deleted mid `saveLayer()` call
+    // connect(this, SIGNAL(accepted()), this, SLOT(saveLayer()));
+    // connect(this, SIGNAL(rejected()), this, SLOT(restoreLayer()));
 
     if (layer && !isEditing) {
         slotDelayedPreviewGenerator();
@@ -78,7 +81,7 @@ void KisDlgGeneratorLayer::saveLayer()
      * the user has accepted the changes.
      */
     if (isEditing) {
-        layer->setName(layerName());
+        KUndo2Command *cmd = nullptr;
 
         KisFilterConfigurationSP configAfter(configuration());
         Q_ASSERT(configAfter);
@@ -86,18 +89,28 @@ void KisDlgGeneratorLayer::saveLayer()
         QString xmlAfter = configAfter->toXML();
 
         if (xmlBefore != xmlAfter) {
-            KisChangeFilterCmd *cmd
-                    = new KisChangeFilterCmd(layer,
-                                             configBefore,
-                                             configAfter->cloneWithResourcesSnapshot());
+            cmd = KisCommandUtils::composeCommands(cmd,
+                new KisChangeFilterCmd(layer,
+                                       configBefore,
+                                       configAfter->cloneWithResourcesSnapshot()));
 
+        }
+
+        if (layer->name() != layerName()) {
+            cmd = KisCommandUtils::composeCommands(cmd,
+                new KisNodeRenameCommand(layer,
+                                         layer->name(),
+                                         layerName()));
+        }
+
+        if (cmd) {
             m_view->undoAdapter()->addCommand(cmd);
-            m_view->document()->setModified(true);
         }
     } else {
         KIS_ASSERT_RECOVER_RETURN(layer);
         layer->setFilter(configuration()->cloneWithResourcesSnapshot());
     }
+
 }
 
 void KisDlgGeneratorLayer::restoreLayer()
@@ -110,6 +123,14 @@ void KisDlgGeneratorLayer::restoreLayer()
 
 KisDlgGeneratorLayer::~KisDlgGeneratorLayer()
 {
+    //Qt doc says not to use `result()` if `WA_DeleteOnClose` flag is set, but since we're doing this inside the dialog, before it is being deleted, it's fine
+    if (result() == QDialog:: Accepted) {
+        saveLayer();
+    }
+    else{
+        restoreLayer();
+    }
+
     KisConfig(false).writeEntry("generatordialog/geometry", saveGeometry());
 }
 

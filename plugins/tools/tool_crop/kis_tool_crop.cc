@@ -40,6 +40,7 @@
 
 #include <kundo2command.h>
 #include <kis_crop_saved_extra_data.h>
+#include <kis_display_color_converter.h>
 
 
 struct DecorationLine
@@ -94,7 +95,7 @@ DecorationLine decors[20] =
 const int decorsIndex[DECORATION_COUNT] = {0,4,12,18,20};
 
 KisToolCrop::KisToolCrop(KoCanvasBase * canvas)
-        : KisTool(canvas, KisCursor::load("tool_crop_cursor.png", 6, 6))
+        : KisTool(canvas, KisCursor::loadWithSize("tool_crop_cursor.svg", 32, 32, 6, 6))
 {
     setObjectName("tool_crop");
     m_handleSize = 13;
@@ -124,6 +125,12 @@ KisToolCrop::KisToolCrop(KoCanvasBase * canvas)
     
     lockRatioToggleOption = new KisAction(i18n("Lock Ratio"));
     lockRatioToggleOption->setCheckable(true);
+
+    KisCanvas2 *kisCanvas =dynamic_cast<KisCanvas2*>(canvas);
+    if (kisCanvas) {
+        connect(kisCanvas->displayColorConverter(), SIGNAL(displayConfigurationChanged()), this, SLOT(updateDecorationColors()));
+    }
+    updateDecorationColors();
 }
 
 KisToolCrop::~KisToolCrop()
@@ -432,16 +439,16 @@ void KisToolCrop::paintOutlineWithHandles(QPainter& gc)
         path.addRect(wholeImageRect);
         path.addRect(borderRect);
         gc.setPen(Qt::NoPen);
-        gc.setBrush(QColor(0, 0, 0, OUTSIDE_CROP_ALPHA));
+        gc.setBrush(m_transparentBlack);
         gc.drawPath(path);
 
         // Handles
         QPen pen(Qt::SolidLine);
         pen.setWidth(HANDLE_BORDER_LINE_WIDTH * decorationThickness());
-        pen.setColor(Qt::black);
+        pen.setColor(m_black);
         pen.setCosmetic(true);
         gc.setPen(pen);
-        gc.setBrush(QColor(200, 200, 200, OUTSIDE_CROP_ALPHA));
+        gc.setBrush(m_transparentGrey);
         gc.drawPath(handlesPath());
 
         gc.setClipRect(borderRect, Qt::IntersectClip);
@@ -560,6 +567,20 @@ void KisToolCrop::slotRectChanged()
     doCanvasUpdate(boundingRect().toAlignedRect());
 }
 
+void KisToolCrop::updateDecorationColors()
+{
+    KisCanvas2 *kisCanvas =dynamic_cast<KisCanvas2*>(canvas());
+    if (!kisCanvas) return;
+
+    KoColor c;
+    c.fromQColor(QColor(Qt::black));
+    m_black = kisCanvas->displayColorConverter()->convertColorToDisplayColorSpace(c);
+    c.fromQColor(QColor(0, 0, 0, OUTSIDE_CROP_ALPHA));
+    m_transparentBlack = kisCanvas->displayColorConverter()->convertColorToDisplayColorSpace(c);
+    c.fromQColor(QColor(200, 200, 200, OUTSIDE_CROP_ALPHA));
+    m_transparentGrey = kisCanvas->displayColorConverter()->convertColorToDisplayColorSpace(c);
+}
+
 void KisToolCrop::setCropX(int x)
 {
     if(x == m_finalRect.rect().x())
@@ -661,6 +682,11 @@ void KisToolCrop::setAllowGrow(bool g)
     m_finalRect.setCanGrow(g);
     m_finalRect.setCropRect(image()->bounds());
     configGroup.writeEntry("allowGrow", g);
+
+    // Do a dummy move for the crop area to snap back to the canvas if grow is no longer allowed
+    if (!g) {
+        m_finalRect.moveHandle(KisConstrainedRect::HandleType::Inside, QPoint(0, 0), m_finalRect.rect());
+    }
 
     Q_EMIT canGrowChanged(g);
 }

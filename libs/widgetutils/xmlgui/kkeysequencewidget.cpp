@@ -230,11 +230,7 @@ void KisKKeySequenceWidgetPrivate::init()
     clearButton = new QToolButton(q);
     layout->addWidget(clearButton);
 
-    if (qApp->isLeftToRight()) {
-        clearButton->setIcon(KisIconUtils::loadIcon(QStringLiteral("edit-clear-locationbar-rtl")));
-    } else {
-        clearButton->setIcon(KisIconUtils::loadIcon(QStringLiteral("edit-clear-locationbar-ltr")));
-    }
+    clearButton->setIcon(KisIconUtils::loadIcon(QStringLiteral("edit-clear")));
 }
 
 KisKKeySequenceWidget::~KisKKeySequenceWidget()
@@ -948,6 +944,26 @@ void KKeySequenceButton::keyReleaseEvent(QKeyEvent *e)
     e->accept();
 
     uint newModifiers = e->modifiers() & (Qt::SHIFT | Qt::CTRL | Qt::ALT | Qt::META);
+
+#ifdef Q_OS_ANDROID
+    // On Android, releasing a modifier will still carry the modifiers on the
+    // release event, so we have to clear those out explicitly.
+    switch (e->key()) {
+    case Qt::Key_Shift:
+        newModifiers &= ~Qt::SHIFT;
+        break;
+    case Qt::Key_Control:
+        newModifiers &= ~Qt::CTRL;
+        break;
+    case Qt::Key_Alt:
+    case Qt::Key_AltGr:
+        newModifiers &= ~Qt::ALT;
+        break;
+    case Qt::Key_Meta:
+        newModifiers &= ~Qt::META;
+        break;
+    }
+#endif
 
     //if a modifier that belongs to the shortcut was released...
     if ((newModifiers & d->modifierKeys) < d->modifierKeys) {

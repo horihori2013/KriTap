@@ -1,3 +1,4 @@
+
 /*
  * SPDX-FileCopyrightText: 2021 Mathias Wein <lynx.mw+kde@gmail.com>
  *
@@ -258,7 +259,8 @@ void WGActionManager::slotShowColorHistoryPopup()
 {
     if (!m_colorHistoryPopup) {
         m_colorHistoryPopup = new WGSelectorPopup;
-        WGColorPatches *history = new WGColorPatches(m_displayConfig, m_docker->colorHistory());
+        // when settings or a document changes, the model is switched in updateColorHistoryModel()
+        WGColorPatches *history = new WGColorPatches(m_displayConfig, m_docker->colorHistoryModel());
         history->setUiMode(WGSelectorWidgetBase::PopupMode);
         history->setPreset(WGColorPatches::History);
         history->updateSettings();
@@ -352,4 +354,14 @@ void WGActionManager::slotColorSelected(const KoColor &color)
 void WGActionManager::slotUpdateDocker()
 {
     m_docker->setChannelValues(m_colorModel->channelValues());
+}
+
+void WGActionManager::updateColorHistoryModel()
+{
+    if (!m_colorHistoryPopup) return;
+
+    WGColorPatches *history = dynamic_cast<WGColorPatches*>(m_colorHistoryPopup->selectorWidget());
+    if (history) {
+        history->setColorHistoryModel(m_docker->colorHistoryModel());
+    }
 }

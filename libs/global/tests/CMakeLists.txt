@@ -1,14 +1,14 @@
-
-include(KritaAddBrokenUnitTest)
-
 kis_add_tests(KisSignalAutoConnectionTest.cpp
     KisSignalCompressorTest.cpp
     KisForestTest.cpp
+    KisMplTest.cpp
+    KisLagerTest.cpp
     KisRectsGridTest.cpp
     KisLazyStorageTest.cpp
     KisValueCacheTest.cpp
     KisHistoryListTest.cpp
-    NAME_PREFIX "libs-global-"
+    KisAdaptedLockTest.cpp
+    KisGlobalTest.cpp
     LINK_LIBRARIES kritaglobal kritatestsdk
     )
 

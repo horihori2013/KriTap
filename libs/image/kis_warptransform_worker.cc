@@ -245,8 +245,17 @@ void KisWarpTransformWorker::run(KisPaintDeviceSP srcDev, KisPaintDeviceSP dstDe
 
     FunctionTransformOp functionOp(m_warpMathFunction, m_origPoint, m_transfPoint, m_alpha);
     GridIterationTools::PaintDevicePolygonOp polygonOp(srcDev, dstDev);
+    /**
+     * The lazy rects copying is currently explicitly  disabled for Warp transform.
+     * To activate it we need:
+     *
+     * 1) A proper detection with GridIterationTools::canProcessRectsInRandomOrder()
+     * 2) A unittest to test this mode
+     */
+    polygonOp.setCanMergeRects(false);
     GridIterationTools::processGrid(polygonOp, functionOp,
                                     srcBounds, pixelPrecision);
+    polygonOp.finalize();
 }
 
 #include "krita_utils.h"
@@ -346,7 +355,16 @@ QImage KisWarpTransformWorker::transformQImage(WarpType warpType,
 
     const int pixelPrecision = 32;
     GridIterationTools::QImagePolygonOp polygonOp(srcImage, dstImage, srcQImageOffset, dstQImageOffset);
+    /**
+     * The lazy rects copying is currently explicitly  disabled for Warp transform.
+     * To activate it we need:
+     *
+     * 1) A proper detection with GridIterationTools::canProcessRectsInRandomOrder()
+     * 2) A unittest to test this mode
+     */
+    polygonOp.setCanMergeRects(false);
     GridIterationTools::processGrid(polygonOp, functionOp, srcBounds.toAlignedRect(), pixelPrecision);
+    polygonOp.finalize();
 
     return dstImage;
 }

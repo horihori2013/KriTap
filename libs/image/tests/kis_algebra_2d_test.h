@@ -35,6 +35,26 @@ private Q_SLOTS:
 
     void testLinePolygonIntersectionsManual();
 
+    void testCalculateConvexHull();
+    void testGetPathsFromRectangleCutThrough();
+    void testGetParallelLines();
+    void testGetParallelLines2();
+
+
+    void testVectorPathReversed();
+    void testVectorPathIndexes_data();
+    void testVectorPathIndexes();
+
+
+    void testIsInsideShape_data();
+    void testIsInsideShape();
+
+
+    void testRemoveGutter_data();
+    void testRemoveGutter();
+    void testMergingPainterPaths();
+
+
 
     void testFindTrianglePoint();
     void testTriangularMotion();
@@ -51,6 +71,10 @@ private Q_SLOTS:
 
     void testMultiplyWrappedRectVertical_data();
     void testMultiplyWrappedRectVertical();
+
+    void testIsPolygonTrulyConvex_data();
+    void testIsPolygonTrulyConvex();
+
 };
 
 #endif /* __KIS_ALGEBRA_2D_TEST_H */

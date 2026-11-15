@@ -1,3 +1,4 @@
+
 /*
  *  SPDX-FileCopyrightText: 2021 the JPEG XL Project Authors
  *  SPDX-License-Identifier: BSD-3-Clause
@@ -28,6 +29,7 @@
 #include <KoAlwaysInline.h>
 #include <KoColorModelStandardIds.h>
 #include <KoColorProfile.h>
+#include <KoColorProfileQuery.h>
 #include <KoColorSpace.h>
 #include <KoColorTransferFunctions.h>
 #include <KoConfig.h>
@@ -114,7 +116,7 @@ KisImportExportErrorCode JPEGXLExport::convert(KisDocument *document, QIODevice 
 
     if (cs->hasHighDynamicRange() && convertToRec2020) {
         const KoColorProfile *linear =
-            KoColorSpaceRegistry::instance()->profileFor({}, PRIMARIES_ITU_R_BT_2020_2_AND_2100_0, TRC_LINEAR);
+            KoColorSpaceRegistry::instance()->profileFor(KoColorProfileQuery(PRIMARIES_ITU_R_BT_2020_2_AND_2100_0, TRC_LINEAR));
         KIS_ASSERT_RECOVER(linear)
         {
             errFile << "Unable to find a working profile for Rec. 2020";
@@ -131,8 +133,7 @@ KisImportExportErrorCode JPEGXLExport::convert(KisDocument *document, QIODevice 
     }
 
     const float hlgGamma = cfg->getFloat("HLGgamma", 1.2f);
-    const float hlgNominalPeak = cfg->getFloat("HLGnominalPeak", 1000.0f);
-    const bool removeHGLOOTF = cfg->getBool("removeHGLOOTF", true);
+    const bool removeHGLOOTF = false;
 
     const bool hasPrimaries = cs->profile()->hasColorants();
     const TransferCharacteristics gamma = cs->profile()->getTransferCharacteristics();
@@ -406,22 +407,22 @@ KisImportExportErrorCode JPEGXLExport::convert(KisDocument *document, QIODevice 
                     break;
                 default:
                     warnFile << "Writing possibly non-roundtrip primaries!";
-                    const QVector<qreal> colorants = cs->profile()->getColorantsxyY();
+                    const QVector<KoColorimetryUtils::xyY> colorants = cs->profile()->getColorantsxyY();
                     cicpDescription.primaries = JXL_PRIMARIES_CUSTOM;
-                    cicpDescription.primaries_red_xy[0] = colorants[0];
-                    cicpDescription.primaries_red_xy[1] = colorants[1];
-                    cicpDescription.primaries_green_xy[0] = colorants[3];
-                    cicpDescription.primaries_green_xy[1] = colorants[4];
-                    cicpDescription.primaries_blue_xy[0] = colorants[6];
-                    cicpDescription.primaries_blue_xy[1] = colorants[7];
+                    cicpDescription.primaries_red_xy[0] = colorants[0].x;
+                    cicpDescription.primaries_red_xy[1] = colorants[0].y;
+                    cicpDescription.primaries_green_xy[0] = colorants[1].x;
+                    cicpDescription.primaries_green_xy[1] = colorants[1].y;
+                    cicpDescription.primaries_blue_xy[0] = colorants[2].x;
+                    cicpDescription.primaries_blue_xy[1] = colorants[2].y;
                     break;
                 }
 
                 // Unfortunately, Wolthera never wrote an enum for white points...
-                const QVector<qreal> whitePoint = image->colorSpace()->profile()->getWhitePointxyY();
+                const KoColorimetryUtils::xyY whitePoint = image->colorSpace()->profile()->getWhitePointxyY();
                 cicpDescription.white_point = JXL_WHITE_POINT_CUSTOM;
-                cicpDescription.white_point_xy[0] = whitePoint[0];
-                cicpDescription.white_point_xy[1] = whitePoint[1];
+                cicpDescription.white_point_xy[0] = whitePoint.x;
+                cicpDescription.white_point_xy[1] = whitePoint.y;
             }
 
             if (JXL_ENC_SUCCESS != JxlEncoderSetColorEncoding(enc.get(), &cicpDescription)) {
@@ -741,7 +742,6 @@ KisImportExportErrorCode JPEGXLExport::convert(KisDocument *document, QIODevice 
                                                bounds.height(),
                                                it,
                                                hlgGamma,
-                                               hlgNominalPeak,
                                                cs);
                     }
                 }();
@@ -885,7 +885,6 @@ KisImportExportErrorCode JPEGXLExport::convert(KisDocument *document, QIODevice 
                                                layerBounds.height(),
                                                it,
                                                hlgGamma,
-                                               hlgNominalPeak,
                                                cs);
                     }
                 }();
@@ -1119,9 +1118,8 @@ KisPropertiesConfigurationSP JPEGXLExport::defaultConfiguration(const QByteArray
 
     cfg->setProperty("forceCicpLossless", false);
     cfg->setProperty("floatingPointConversionOption", "KeepSame");
-    cfg->setProperty("HLGnominalPeak", 1000.0);
     cfg->setProperty("HLGgamma", 1.2);
-    cfg->setProperty("removeHGLOOTF", true);
+    cfg->setProperty("removeHGLOOTF", false);
 
     cfg->setProperty("resampling", -1);
     cfg->setProperty("extraChannelResampling", -1);

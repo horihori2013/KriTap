@@ -52,6 +52,7 @@ class KisGuidesConfig;
 class KisMirrorAxisConfig;
 class QDomDocument;
 class KisReferenceImagesLayer;
+class KisUniqueColorSet;
 
 #define KIS_MIME_TYPE "application/x-krita"
 
@@ -542,7 +543,7 @@ private:
                                     const KritaUtils::ExportFileJob &job,
                                     KisPropertiesConfigurationSP exportConfiguration, bool isAdvancedExporting =false );
 
-    bool startExportInBackground(const QString &actionName, const QString &location,
+    KisImportExportErrorCode startExportInBackground(const QString &actionName, const QString &location,
                                  const QString &realLocation,
                                  const QByteArray &mimeType,
                                  bool showWarnings,
@@ -663,9 +664,30 @@ public:
     void setAssistantsGlobalColor(QColor color);
     QColor assistantsGlobalColor();
 
-    // Color history if per document (configuration dependent)
-    void setColorHistory(const QList<KoColor> &colors);
-    QList<KoColor> colorHistory();
+    /**
+     * Replaces the per-document history of the last-used colors,
+     * from the newest to oldest.
+     *
+     * The actual values are stored in the model returned by
+     * colorHistoryModel()
+     */
+    void setColorHistoryColors(const QList<KoColor> &colors);
+
+    /**
+     * Return the per-document history of the last-used colors,
+     * from the newest to oldest.
+     *
+     * The actual values are stored in the model returned by
+     * colorHistoryModel()
+     */
+    QList<KoColor> colorHistoryColors() const;
+
+    /**
+     * Return an internal model for managing the last used colors
+     * of the document. The model can be used to manipulate
+     * the colors and subscribe to updates.
+     */
+    KisUniqueColorSet *colorHistoryModel();
 
     /**
      * Get existing reference images layer or null if none exists.

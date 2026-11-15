@@ -27,6 +27,22 @@ struct KStandardActionInfo {
 };
 
 
+/**
+ * TODO: this file is wrong! QT_TRANSLATE_NOOP macro is **not** used by KDE macros,
+ * hence the strings defined in `g_rgActionInfo` are **never** translated!
+ *
+ * Some of them work by pure coincidence, because kritamenu.action defines the exact
+ * copies of them, which are extracted. Though these copies use "action" context, which
+ * is explicitly requested in KStandardAction::create().
+ *
+ * Some others, like KStandardShortcut::ConfigureToolbars, work because the action is
+ * explicitly created inside Krita in KisMainWindow::createActions() and propertized
+ * via the strings from kritamenu.action.
+ *
+ * Ideally we should switch back to the upstream version of KConfigWidgets and reuse
+ * the strings provided by KDE.
+ */
+
 // clang-format off
 
 static constexpr KStandardActionInfo g_rgActionInfo[] = {
@@ -45,8 +61,8 @@ static constexpr KStandardActionInfo g_rgActionInfo[] = {
     { Undo,          KStandardShortcut::Undo, "edit_undo", QT_TRANSLATE_NOOP("KStandardActions", "&Undo"), QT_TRANSLATE_NOOP("KStandardActions", "Undo last action"), "edit-undo" },
     { Redo,          KStandardShortcut::Redo, "edit_redo", QT_TRANSLATE_NOOP("KStandardActions", "Re&do"), QT_TRANSLATE_NOOP("KStandardActions", "Redo last undone action"), "edit-redo" },
     { Cut,           KStandardShortcut::Cut, "edit_cut", QT_TRANSLATE_NOOP("KStandardActions", "Cu&t"), QT_TRANSLATE_NOOP("KStandardActions", "Cut selection to clipboard"), "edit-cut" },
-    { Copy,          KStandardShortcut::Copy, "edit_copy", QT_TRANSLATE_NOOP("KStandardActions", "&Copy"), QT_TRANSLATE_NOOP("KStandardActions", "Copy selection to clipboard"), "edit-copy" },
-    { Paste,         KStandardShortcut::Paste, "edit_paste", QT_TRANSLATE_NOOP("KStandardActions", "&Paste"), QT_TRANSLATE_NOOP("KStandardActions", "Paste clipboard content"), "edit-paste" },
+    { Copy,          KStandardShortcut::Copy, "edit_copy", QT_TRANSLATE_NOOP("KStandardActions", "&Copy"), QT_TRANSLATE_NOOP("KStandardActions", "Copy selection to clipboard"), "edit-copy-16" },
+    { Paste,         KStandardShortcut::Paste, "edit_paste", QT_TRANSLATE_NOOP("KStandardActions", "&Paste"), QT_TRANSLATE_NOOP("KStandardActions", "Paste clipboard content"), "edit-paste-16" },
     { Clear,         KStandardShortcut::Clear, "edit_clear", QT_TRANSLATE_NOOP("KStandardActions", "C&lear"), {}, "edit-clear" },
     { SelectAll,     KStandardShortcut::SelectAll, "edit_select_all", QT_TRANSLATE_NOOP("KStandardActions", "Select &All"), {}, "edit-select-all" },
     { Deselect,      KStandardShortcut::Deselect, "edit_deselect", QT_TRANSLATE_NOOP("KStandardActions", "Dese&lect"), {}, "edit-select-none" },
@@ -89,17 +105,17 @@ static constexpr KStandardActionInfo g_rgActionInfo[] = {
     { ShowStatusbar, KStandardShortcut::ShowStatusbar, "options_show_statusbar", QT_TRANSLATE_NOOP("KStandardActions", "Show St&atusbar"), QT_TRANSLATE_NOOP("KStandardActions", "Show or hide statusbar"), {} },
     { FullScreen,    KStandardShortcut::FullScreen, "fullscreen", QT_TRANSLATE_NOOP("KStandardActions", "F&ull Screen Mode"), {}, "view-fullscreen" },
     { KeyBindings,   KStandardShortcut::KeyBindings, "options_configure_keybinding", QT_TRANSLATE_NOOP("KStandardActions", "Configure Keyboard S&hortcuts…"), {}, "configure-shortcuts" },
-    { Preferences,   KStandardShortcut::Preferences, "options_configure", QT_TRANSLATE_NOOP("KStandardActions", "&Configure %1…"), {}, "configure" },
+    { Preferences,   KStandardShortcut::Preferences, "options_configure", QT_TRANSLATE_NOOP("KStandardActions", "&Configure Krita..."), {}, "configure" },
     { ConfigureToolbars, KStandardShortcut::ConfigureToolbars, "options_configure_toolbars", QT_TRANSLATE_NOOP("KStandardActions", "Configure Tool&bars…"), {}, "configure-toolbars" },
     { ConfigureNotifications, KStandardShortcut::ConfigureNotifications, "options_configure_notifications", QT_TRANSLATE_NOOP("KStandardActions", "Configure &Notifications…"), {}, "preferences-desktop-notification" },
 
     // the idea here is that Contents is used in menus, and Help in dialogs, so both share the same
     // shortcut
-    { HelpContents,  KStandardShortcut::Help, "help_contents", QT_TRANSLATE_NOOP("KStandardActions", "%1 &Handbook"), {}, "help-contents" },
+    { HelpContents,  KStandardShortcut::Help, "help_contents", QT_TRANSLATE_NOOP("KStandardActions", "Krita &Handbook"), {}, "help-contents" },
     { WhatsThis,     KStandardShortcut::WhatsThis, "help_whats_this", QT_TRANSLATE_NOOP("KStandardActions", "What's &This?"), {}, "help-contextual" },
-    { ReportBug,     KStandardShortcut::ReportBug, "help_report_bug", QT_TRANSLATE_NOOP("KStandardActions", "&Report Bug…"), {}, "tools-report-bug" },
-    { SwitchApplicationLanguage, KStandardShortcut::SwitchApplicationLanguage, "switch_application_language", QT_TRANSLATE_NOOP("KStandardActions", "Configure &Language…"), {}, "preferences-desktop-locale" },
-    { AboutApp,      KStandardShortcut::AccelNone, "help_about_app", QT_TRANSLATE_NOOP("KStandardActions", "&About %1"), {}, nullptr },
+    { ReportBug,     KStandardShortcut::ReportBug, "help_report_bug", QT_TRANSLATE_NOOP("KStandardActions", "&Report Bug..."), {}, "tools-report-bug" },
+    { SwitchApplicationLanguage, KStandardShortcut::SwitchApplicationLanguage, "switch_application_language", QT_TRANSLATE_NOOP("KStandardActions", "Switch Application &Language..."), {}, "preferences-desktop-locale" },
+    { AboutApp,      KStandardShortcut::AccelNone, "help_about_app", QT_TRANSLATE_NOOP("KStandardActions", "&About Krita"), {}, nullptr },
     { AboutKDE,      KStandardShortcut::AccelNone, "help_about_kde", QT_TRANSLATE_NOOP("KStandardActions", "About &KDE"), {}, "kde" },
     { ActionNone,    KStandardShortcut::AccelNone, {}, {}, {}, {} },
     };

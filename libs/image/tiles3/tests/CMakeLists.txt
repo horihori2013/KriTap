@@ -1,6 +1,3 @@
-
-include(KritaAddBrokenUnitTest)
-
 kis_add_tests(
     kis_tiled_data_manager_test.cpp
     kis_low_memory_tests.cpp
@@ -11,8 +8,10 @@ kis_add_tests(
     kis_swapped_data_store_test.cpp
     kis_tile_data_store_test.cpp
     kis_tile_data_pooler_test.cpp
+    kis_compression_tests.cpp
+    kis_tile_compressors_test.cpp
+
     LINK_LIBRARIES kritaimage kritatestsdk
-    NAME_PREFIX "libs-image-tiles3-"
     )
 
 set_tests_properties(libs-image-tiles3-kis_low_memory_tests PROPERTIES TIMEOUT 180)

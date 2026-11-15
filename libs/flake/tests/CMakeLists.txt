@@ -1,6 +1,3 @@
-
-include(KritaAddBrokenUnitTest)
-
 kis_add_tests(
     TestPosition.cpp
     TestSelection.cpp
@@ -14,7 +11,6 @@ kis_add_tests(
     TestResourceManager.cpp
     TestShapeBackgroundCommand.cpp
     TestShapeStrokeCommand.cpp
-    TestShapeShadowCommand.cpp
     TestInputDevice.cpp
     TestSnapStrategy.cpp
     TestPathShape.cpp
@@ -29,29 +25,31 @@ kis_add_tests(
     TestSvgSavingContext.cpp
     TestXsimdPainting.cpp
     TestFontLibraryResourceUtils.cpp
+    TestSvgTextShape.cpp
+    TestDependentShapes.cpp
+    TestKoUnit.cpp
 
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-"
     )
 
 kis_add_test(
     TestSvgParser.cpp
     TEST_NAME TestSvgParser
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 
 kis_add_test(
     TestSvgParser.cpp
     TEST_NAME TestSvgParserCloned
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 target_compile_definitions(TestSvgParserCloned PRIVATE USE_CLONED_SHAPES)
 
 kis_add_test(
     TestSvgParser.cpp
     TEST_NAME TestSvgParserRoundTrip
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 target_compile_definitions(TestSvgParserRoundTrip PRIVATE USE_ROUND_TRIP)
 
 ############## broken tests ###############
@@ -59,23 +57,23 @@ target_compile_definitions(TestSvgParserRoundTrip PRIVATE USE_ROUND_TRIP)
 kis_add_test(TestPointMergeCommand.cpp
     TEST_NAME TestPointMergeCommand
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 
 krita_add_broken_unit_test( TestSvgText.cpp
     TEST_NAME TestSvgText
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 
 krita_add_broken_unit_test( TestSvgText.cpp
     TEST_NAME TestSvgTextCloned
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 target_compile_definitions(TestSvgTextCloned PRIVATE USE_CLONED_SHAPES)
 
 krita_add_broken_unit_test( TestSvgText.cpp
     TEST_NAME TestSvgTextRoundTrip
     LINK_LIBRARIES kritaflake kritatestsdk
-    NAME_PREFIX "libs-flake-")
+    )
 target_compile_definitions(TestSvgTextRoundTrip PRIVATE USE_ROUND_TRIP)
 
 if (APPLE)

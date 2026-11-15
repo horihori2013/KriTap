@@ -43,6 +43,7 @@
 #include <kis_external_layer_iface.h>
 #include <kis_filter_mask.h>
 #include <kis_transform_mask.h>
+#include "kis_hdr_metadata.h"
 #include "lazybrush/kis_colorize_mask.h"
 #include <kis_group_layer.h>
 #include <kis_image.h>
@@ -272,24 +273,25 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
                 return KisImageSP(0);
             }
         }
-        KisProofingConfigurationSP proofingConfig = KisImageConfig(true).defaultProofingconfiguration();
+        KisProofingConfigurationSP proofingConfig;
         if (!(attr = imageElement.attribute(PROOFINGPROFILENAME)).isNull()) {
+            // initialize config only if ptofile name is present
+            proofingConfig = KisImageConfig(true).defaultProofingconfiguration();
             proofingConfig->proofingProfile = attr;
-            proofingConfig->storeSoftproofingInsideImage = true;
         }
-        if (!(attr = imageElement.attribute(PROOFINGMODEL)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGMODEL)).isNull()) {
             proofingConfig->proofingModel = attr;
         }
-        if (!(attr = imageElement.attribute(PROOFINGDEPTH)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGDEPTH)).isNull()) {
             proofingConfig->proofingDepth = attr;
         }
-        if (!(attr = imageElement.attribute(PROOFINGINTENT)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGINTENT)).isNull()) {
             proofingConfig->conversionIntent = (KoColorConversionTransformation::Intent) KisDomUtils::toInt(attr);
         }
-        if (!(attr = imageElement.attribute(PROOFINGDISPLAYINTENT)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGDISPLAYINTENT)).isNull()) {
             proofingConfig->displayIntent = (KoColorConversionTransformation::Intent) KisDomUtils::toInt(attr);
         }
-        if (!(attr = imageElement.attribute(PROOFINGDISPLAYMODE)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGDISPLAYMODE)).isNull()) {
             if (attr == "monitor") {
                 proofingConfig->displayMode = KisProofingConfiguration::Monitor;
             } else if (attr == "paper") {
@@ -298,16 +300,17 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
                 proofingConfig->displayMode = KisProofingConfiguration::Custom;
             }
         }
-        if (!(attr = imageElement.attribute(PROOFINGBLACKPOINTCOMPENSATION)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGBLACKPOINTCOMPENSATION)).isNull()) {
             proofingConfig->useBlackPointCompensationFirstTransform = (attr == "true");
         }
 
-        if (!(attr = imageElement.attribute(PROOFINGDISPLAYBLACKPOINTCOMPENSATION)).isNull()) {
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGDISPLAYBLACKPOINTCOMPENSATION)).isNull()) {
             proofingConfig->displayFlags.setFlag(KoColorConversionTransformation::BlackpointCompensation, attr == "true");
         }
 
-        if (!(attr = imageElement.attribute(PROOFINGADAPTATIONSTATE)).isNull()) {
-            proofingConfig->adaptationState = KisDomUtils::toDouble(attr);
+        if (proofingConfig && !(attr = imageElement.attribute(PROOFINGADAPTATIONSTATE)).isNull()) {
+            const qreal legacyAdaptationState = KisDomUtils::toDouble(attr);
+            proofingConfig->setLegacyAdaptationState(legacyAdaptationState);
         }
 
         if (m_d->document) {
@@ -334,7 +337,11 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
 
             if(e.tagName() == COLORHISTORY) {
                 QList<KoColor> colors = loadKoColors(e);
-                m_d->document->setColorHistory(colors);
+                m_d->document->setColorHistoryColors(colors);
+            }
+
+            if (e.tagName() == HDRMETADATA) {
+                loadHDRMetadata(e, image);
             }
 
             if(e.tagName() == GLOBALASSISTANTSCOLOR) {
@@ -344,7 +351,7 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
                 }
             }
 
-            if(e.tagName()== PROOFINGWARNINGCOLOR) {
+            if (proofingConfig && e.tagName()== PROOFINGWARNINGCOLOR) {
                 QDomDocument dom;
                 QDomNode node = e;
                 dom.appendChild(dom.importNode(node, true));
@@ -358,7 +365,9 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
             }
         }
 
-        image->setProofingConfiguration(proofingConfig);
+        if (proofingConfig) {
+            image->setProofingConfiguration(proofingConfig);
+        }
 
         for (child = imageElement.lastChild(); !child.isNull(); child = child.previousSibling()) {
             QDomElement e = child.toElement();
@@ -380,7 +389,7 @@ KisImageSP KisKraLoader::loadXML(const QDomElement& imageElement)
         } else if (e.tagName() == "assistants") {
             loadAssistantsList(e);
         } else if (e.tagName() == "audio") {
-            backCompat_loadAudio(e, image, m_d->document);
+            backCompat_loadAudio(e, m_d->document);
         }
     }
 
@@ -450,7 +459,7 @@ void KisKraLoader::loadBinaryData(KoStore * store, KisImageSP image, const QStri
             if (res) {
                 QString colorspaceModel = image->colorSpace()->colorModelId().id();
                 QString colorspaceDepth = image->colorSpace()->colorDepthId().id();
-                const KoColorProfile *profile = KoColorSpaceRegistry::instance()->createColorProfile(colorspaceModel, image->colorSpace()->colorDepthId().id(), data);
+                const KoColorProfile *profile = KoColorSpaceRegistry::instance()->createColorProfile(colorspaceModel, image->colorSpace()->colorDepthId().id(), data, KisKraLoadVisitor::customProfileNameAliasForKra());
                 if (profile && profile->valid()) {
                     const KoColorSpace *colorSpace = KoColorSpaceRegistry::instance()->colorSpace(colorspaceModel, colorspaceDepth, profile);
                     image->convertImageProjectionColorSpace(colorSpace);
@@ -474,9 +483,9 @@ void KisKraLoader::loadBinaryData(KoStore * store, KisImageSP image, const QStri
             }
 
             if (proofingProfileRes) {
-                const KoColorProfile *proofingProfile = KoColorSpaceRegistry::instance()->createColorProfile(proofingConfig->proofingModel, proofingConfig->proofingDepth, proofingData);
-                if (proofingProfile->valid()){
-                    KoColorSpaceRegistry::instance()->addProfile(proofingProfile);
+                const KoColorProfile *proofingProfile = KoColorSpaceRegistry::instance()->createColorProfile(proofingConfig->proofingModel, proofingConfig->proofingDepth, proofingData, KisKraLoadVisitor::customProfileNameAliasForKra());
+                if (!proofingProfile || proofingProfile->valid()){
+                    warnKrita << "Failed to load a proofing profile!";
                 }
             }
         }
@@ -665,7 +674,7 @@ void KisKraLoader::loadAudio(KoStore *store, KisDocument *kisDoc)
     }
 }
 
-void KisKraLoader::backCompat_loadAudio(const QDomElement& elem, KisImageSP image, KisDocument *document)
+void KisKraLoader::backCompat_loadAudio(const QDomElement& elem, KisDocument *document)
 {
     QDomDocument dom;
     dom.appendChild(dom.importNode(elem, true));
@@ -1436,14 +1445,11 @@ void KisKraLoader::loadCompositions(const QDomElement& elem, KisImageSP image)
 void KisKraLoader::loadAssistantsList(const QDomElement &elem)
 {
     QDomNode child;
-    int count = 0;
     for (child = elem.firstChild(); !child.isNull(); child = child.nextSibling()) {
         QDomElement e = child.toElement();
         QString type = e.attribute("type");
         QString file_name = e.attribute("filename");
         m_d->assistantsFilenames.insert(file_name,type);
-        count++;
-
     }
 }
 
@@ -1484,13 +1490,11 @@ void KisKraLoader::loadMirrorAxis(const QDomElement &elem)
 void KisKraLoader::loadStoryboardItemList(const QDomElement& elem)
 {
     QDomNode child;
-    int count = 0;
     for (child = elem.firstChild(); !child.isNull(); child = child.nextSibling()) {
         QDomElement e = child.toElement();
         if (e.tagName() == "storyboarditem") {
             StoryboardItemSP item = toQShared( new StoryboardItem() );
             item->loadXML(e);
-            count++;
             m_d->storyboardItemList.append(item);
         }
     }
@@ -1499,7 +1503,6 @@ void KisKraLoader::loadStoryboardItemList(const QDomElement& elem)
 void KisKraLoader::loadStoryboardCommentList(const QDomElement& elem)
 {
     QDomNode child;
-    int count = 0;
     for (child = elem.firstChild(); !child.isNull(); child = child.nextSibling()) {
         QDomElement e = child.toElement();
         if (e.tagName() == "storyboardcomment") {
@@ -1510,7 +1513,6 @@ void KisKraLoader::loadStoryboardCommentList(const QDomElement& elem)
             if (e.hasAttribute("name")) {
                 comment.name = e.attribute("name");
             }
-            count++;
             m_d->storyboardCommentList.append(comment);
         }
     }
@@ -1542,6 +1544,62 @@ void KisKraLoader::loadAudioXML(QDomDocument &xmlDoc, QDomElement &xmlElement, K
 
         kisDoc->setAudioTracks(clipFiles);
         kisDoc->setAudioVolume(volume);
+    }
+}
+
+void KisKraLoader::loadHDRMetadata(const QDomElement &elem, KisImageSP image)
+{
+    QDomElement child;
+    for (child = elem.firstChildElement(); !child.isNull(); child = child.nextSiblingElement()) {
+        if (child.tagName() == HDRREFERENCEWHITE) {
+            double diffWhite = 0.0;
+            KisDomUtils::loadValue(child, &diffWhite);
+            image->setHdrReferenceWhiteLightLevel(diffWhite);
+        }
+        if (child.tagName() == CONTENTLIGHTLEVEL) {
+            KisRelativeContentLightLevelInformation clli;
+            clli.maxContentLightLevel = KisDomUtils::toDouble(child.attribute(MAXCLL, "0.0"));
+            clli.maxFrameAverageLightLevel = KisDomUtils::toDouble(child.attribute(MAXFALL, "0.0"));
+            const QString type = child.attribute(CLLI_CALCTYPE);
+            if (type == CLLI_CALC_RGB_XYZ_FALLBACK) {
+                clli.type = KisRelativeContentLightLevelInformation::RGBComponent;
+            } else if (type == CLLI_CALC_Rec2020) {
+                clli.type = KisRelativeContentLightLevelInformation::Rec2020Component;
+            } else {
+                clli.type = KisRelativeContentLightLevelInformation::XYZLuminance;
+            }
+            image->setRelativeContentLightLevelInformation(clli);
+        }
+        if (child.tagName() == COLORVOLUME) {
+            KisColorVolumeInformation cv;
+            //TODO: Kisdomutils!!!
+            cv.maxLuminance = KisDomUtils::toDouble(child.attribute(COLORVOLUMEMAXLUMINANCE, "0.0"));
+            cv.minLuminance = KisDomUtils::toDouble(child.attribute(COLORVOLUMEMINLUMINANCE, "0.0"));
+
+            QDomElement red = child.firstChildElement(COLORVOLUMERED);
+            QDomElement green = child.firstChildElement(COLORVOLUMEGREEN);
+            QDomElement blue = child.firstChildElement(COLORVOLUMEBLUE);
+            QDomElement white = child.firstChildElement(COLORVOLUMEWHITE);
+
+            QPointF temp;
+            if (KisDomUtils::loadValue(red, &temp)) {
+                cv.red.x = temp.x();
+                cv.red.y = temp.y();
+            }
+            if (KisDomUtils::loadValue(green, &temp)) {
+                cv.green.x = temp.x();
+                cv.green.y = temp.y();
+            }
+            if (KisDomUtils::loadValue(blue, &temp)) {
+                cv.blue.x = temp.x();
+                cv.blue.y = temp.y();
+            }
+            if (KisDomUtils::loadValue(white, &temp)) {
+                cv.white.x = temp.x();
+                cv.white.y = temp.y();
+            }
+            image->setColorVolumeInformation(cv);
+        }
     }
 }
 

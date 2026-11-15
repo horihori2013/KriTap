@@ -31,8 +31,10 @@ KoToolBase * KoPathToolFactory::createTool(KoCanvasBase *canvas)
     return new KoPathTool(canvas);
 }
 
-QList<QAction *> KoPathToolFactory::createActionsImpl()
+QList<QAction *> KoPathToolFactory::createActionsImpl(KoToolManager *toolManager)
 {
+    Q_UNUSED(toolManager);
+
     KisActionRegistry *actionRegistry = KisActionRegistry::instance();
     QList<QAction *> actions;
     actions << actionRegistry->makeQAction("pathpoint-corner", this);
@@ -44,7 +46,6 @@ QList<QAction *> KoPathToolFactory::createActionsImpl()
     actions << actionRegistry->makeQAction("pathsegment-curve", this);
     actions << actionRegistry->makeQAction("pathpoint-insert", this);
     actions << actionRegistry->makeQAction("pathpoint-remove", this);
-    actions << actionRegistry->makeQAction("path-break-at-selection", this);
     actions << actionRegistry->makeQAction("path-break-point", this);
     actions << actionRegistry->makeQAction("path-break-segment", this);
     actions << actionRegistry->makeQAction("path-break-selection", this);

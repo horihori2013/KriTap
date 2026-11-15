@@ -14,6 +14,7 @@
 #include <KoShapeContainer.h>
 #include <KoPathShape.h>
 
+#include <KoColorProfileQuery.h>
 #include "filter/kis_filter_registry.h"
 #include "filter/kis_filter_configuration.h"
 #include "filter/kis_filter.h"
@@ -569,6 +570,71 @@ void KisKraSaverTest::testRoundTripStoryboard()
 void KisKraSaverTest::testExportToReadonly()
 {
     TestUtil::testExportToReadonly(KraMimetype);
+}
+
+Q_DECLARE_METATYPE(ColorPrimaries)
+Q_DECLARE_METATYPE(TransferCharacteristics)
+
+void KisKraSaverTest::testRoundTripCicp_data()
+{
+    QTest::addColumn<ColorPrimaries>("primaries");
+    QTest::addColumn<TransferCharacteristics>("transfer");
+    QTest::addColumn<qreal>("hdrReferenceWhite");
+
+    QTest::addRow("rec2020") << PRIMARIES_ITU_R_BT_2020_2_AND_2100_0 << TRC_ITU_R_BT_2020_2_12bit << -1.0;
+    QTest::addRow("rec2100 PQ 80 nits") << PRIMARIES_ITU_R_BT_2020_2_AND_2100_0 << TRC_ITU_R_BT_2100_0_PQ << 80.0;
+    QTest::addRow("rec2100 PQ 203 nits") << PRIMARIES_ITU_R_BT_2020_2_AND_2100_0 << TRC_ITU_R_BT_2100_0_PQ << 203.0;
+    QTest::addRow("rec709") << PRIMARIES_ITU_R_BT_709_5 << TRC_ITU_R_BT_709_5 << -1.0;
+}
+
+void KisKraSaverTest::testRoundTripCicp()
+{
+    QFETCH(ColorPrimaries, primaries);
+    QFETCH(TransferCharacteristics, transfer);
+    QFETCH(qreal, hdrReferenceWhite);
+    QVector<double> colorants;
+
+    std::optional<qreal> hdrReferenceWhiteOpt;
+    if (hdrReferenceWhite > 0) {
+        hdrReferenceWhiteOpt = hdrReferenceWhite;
+    }
+
+    const KoColorProfile *profile =
+        KoColorSpaceRegistry::instance()->profileFor(KoColorProfileQuery(primaries, transfer, hdrReferenceWhiteOpt));
+    QVERIFY(profile);
+
+    QRect imageRect(0,0,512,512);
+    const KoColorSpace * cs = KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(), Integer8BitsColorDepthID.id(), profile);
+
+    QScopedPointer<KisDocument> doc(KisPart::instance()->createDocument());
+    KisImageSP image = new KisImage(new KisSurrogateUndoStore(), imageRect.width(), imageRect.height(), cs, "test image");
+    doc->setCurrentImage(image);
+    const QString name = "roundtrip_cicp_test_"+QString::number(primaries)+"_"+QString::number(transfer)+".kra";
+    doc->exportDocumentSync(name, doc->mimeType());
+
+    QScopedPointer<KisDocument> doc2(KisPart::instance()->createDocument());
+    bool result = doc2->loadNativeFormat(name);
+    QVERIFY(result);
+    doc2->image()->waitForDone();
+
+    {
+        const KoColorProfile *profile = doc2->image()->colorSpace()->profile();
+        QCOMPARE(profile->getColorPrimaries(), primaries);
+        QCOMPARE(profile->getTransferCharacteristics(), transfer);
+        if (hdrReferenceWhite > 0.0) {
+            QCOMPARE(*profile->hdrReferenceWhite(), hdrReferenceWhite);
+        } else {
+            QVERIFY(!profile->hdrReferenceWhite().has_value());
+        }
+    }
+
+    // De-Duplication test.
+    QList<const KoColorProfile*> profiles = KoColorSpaceRegistry::instance()->profilesFor(cs->id());
+    QStringList tested;
+    Q_FOREACH(const KoColorProfile *profile, profiles) {
+        QVERIFY(!tested.contains(profile->name()));
+        tested.append(profile->name());
+    }
 }
 
 KISTEST_MAIN(KisKraSaverTest)

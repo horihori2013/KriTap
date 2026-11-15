@@ -13,6 +13,17 @@
 #include <QOpenGLFunctions>
 #include <QWindow>
 #include <QColorSpace>
+#include <QScopeGuard>
+#include <KoConfig.h>
+
+#ifdef HAVE_HDR
+// for fetching the legacy 80-nits PQ space
+#include <KoColorProfileQuery.h>
+#endif
+
+#ifdef HAVE_X11
+#include <qpa/qplatformnativeinterface.h>
+#endif
 
 #include <QGlobalStatic>
 #include <KisSurfaceColorSpaceWrapper.h>
@@ -51,16 +62,20 @@ const KoColorProfile *KisOpenGLModeProber::rootSurfaceColorProfile() const
 {
     const KoColorProfile *profile = KoColorSpaceRegistry::instance()->p709SRGBProfile();
 
-    const auto surfaceColorSpace = 
+    const auto surfaceColorSpace =
         KisSurfaceColorSpaceWrapper::fromQtColorSpace(surfaceformatInUse().colorSpace());
-    
+
     if (surfaceColorSpace == KisSurfaceColorSpaceWrapper::sRGBColorSpace) {
         // use the default one!
 #ifdef HAVE_HDR
     } else if (surfaceColorSpace == KisSurfaceColorSpaceWrapper::scRGBColorSpace) {
         profile = KoColorSpaceRegistry::instance()->p709G10Profile();
     } else if (surfaceColorSpace == KisSurfaceColorSpaceWrapper::bt2020PQColorSpace) {
-        profile = KoColorSpaceRegistry::instance()->p2020PQProfile();
+        // On Windows we use the legacy PQ profile, explicitly pinned to
+        // 80 nits. It is baked in the Qt's source code
+        KoColorProfileQuery query(PRIMARIES_ITU_R_BT_2020_2_AND_2100_0, TRC_ITU_R_BT_2100_0_PQ);
+        query.hdrReferenceWhite = 80.0;
+        profile = KoColorSpaceRegistry::instance()->profileFor(query);
 #endif
     }
 
@@ -85,6 +100,24 @@ private:
     Qt::ApplicationAttribute m_attribute;
     bool m_oldValue = false;
 };
+
+#ifdef HAVE_DBUS
+struct DisableDesktopAwareSetter
+{
+    DisableDesktopAwareSetter()
+        : m_oldValue(QGuiApplication::desktopSettingsAware())
+    {
+        QGuiApplication::setDesktopSettingsAware(false);
+    }
+
+    ~DisableDesktopAwareSetter() {
+        QGuiApplication::setDesktopSettingsAware(m_oldValue);
+    }
+
+private:
+    bool m_oldValue = false;
+};
+#endif
 
 struct SurfaceFormatSetter
 {
@@ -148,6 +181,9 @@ KisOpenGLModeProber::probeFormat(const KisOpenGL::RendererConfig &rendererConfig
     QScopedPointer<SurfaceFormatSetter> formatSetter;
     QScopedPointer<EnvironmentSetter> rendererSetter;
     QScopedPointer<EnvironmentSetter> portalSetter;
+#ifdef HAVE_DBUS
+    QScopedPointer<DisableDesktopAwareSetter> desktopAwareSetter;
+#endif
     QScopedPointer<QGuiApplication> application;
 
     int argc = 1;
@@ -169,22 +205,42 @@ KisOpenGLModeProber::probeFormat(const KisOpenGL::RendererConfig &rendererConfig
         portalSetter.reset(new EnvironmentSetter(QLatin1String("QT_NO_XDG_DESKTOP_PORTAL"), QLatin1String("1")));
         formatSetter.reset(new SurfaceFormatSetter(format));
 
-        // Disable this workaround for plasma (BUG:408015), because it causes 
-        // a crash on Windows with Qt 5.15.7
-        const bool runningInKDE =  qEnvironmentVariableIsSet("KDE_FULL_SESSION");
-        const bool isInAppimage = qEnvironmentVariableIsSet("APPIMAGE");
-
-        if (runningInKDE && !isInAppimage) {
-            QGuiApplication::setDesktopSettingsAware(false);
+#ifdef HAVE_DBUS
+        if (!qEnvironmentVariableIsSet("KRITA_DISABLE_DESKTOP_UNAWARE_PROBING_WORKAROUND")) {
+            // When QGuiApplication is created, it also creates platform-specific GUI
+            // elements, like QPlatformMenu and QPlatformSystemTrayIcon. These classes
+            // can utilize DBus for communicating the platform. If we create a DBus
+            // connection, but do not start an event loop, then the connection will
+            // stuck in a "suspended delivery" state and will not be able to process
+            // anything. See bug 408015 and bug 515889
+            desktopAwareSetter.reset(new DisableDesktopAwareSetter());
         }
+#endif /* HAVE_DBUS */
 
         application.reset(new QGuiApplication(argc, &argv));
-
-        if (runningInKDE && !isInAppimage) {
-            QGuiApplication::setDesktopSettingsAware(true);
-        }
-
     }
+
+#ifdef HAVE_DBUS
+    if (!qEnvironmentVariableIsSet("KRITA_DISABLE_TEMPORARY_APP_EVENTS_PROCESSING_WORKAROUND")) {
+        // If an application has been created, force it to process
+        // all the queued events and exit. Some internal
+        // Qt systems' initialization process rely on the queued
+        // events to be processed. See bug 515889.
+        QScopeGuard forceEventProcessingGuard([&]() {
+            if (!application)
+                return;
+
+            QMetaObject::invokeMethod(
+                application.data(),
+                [app = application.data()]() {
+                    app->quit();
+                },
+                Qt::QueuedConnection);
+
+            application->exec();
+        });
+    }
+#endif /* HAVE_DBUS */
 
     QWindow surface;
     surface.setFormat(format);
@@ -215,6 +271,16 @@ KisOpenGLModeProber::probeFormat(const KisOpenGL::RendererConfig &rendererConfig
         return boost::none;
     }
 
+    if (format.redBufferSize() > 0 && format.greenBufferSize() > 0 && format.blueBufferSize() > 0
+        && (context.format().redBufferSize() != format.redBufferSize()
+            || context.format().greenBufferSize() != format.greenBufferSize()
+            || context.format().blueBufferSize() != format.blueBufferSize())) {
+
+        dbgOpenGL << "Failed to create an OpenGL context with requested bit depth. Requested:" << format.redBufferSize()
+                  << "Actual:" << context.format().redBufferSize();
+        return boost::none;
+    }
+
     Result result(context);
 
     dbgOpenGL << "Probe returned" << result.rendererString() << result.driverVersionString() << result.isOpenGLES();
@@ -231,33 +297,29 @@ bool KisOpenGLModeProber::fuzzyCompareColorSpaces(const KisSurfaceColorSpaceWrap
           rhs == KisSurfaceColorSpaceWrapper::sRGBColorSpace));
 }
 
-void KisOpenGLModeProber::initSurfaceFormatFromConfig(KisConfig::RootSurfaceFormat config,
+void KisOpenGLModeProber::initSurfaceFormatFromConfig(std::pair<KisSurfaceColorSpaceWrapper, int> rootSurfaceFormat,
                                                       QSurfaceFormat *format)
 {
 #ifdef HAVE_HDR
-    if (config == KisConfig::BT2020_PQ) {
-
+    /**
+     * In Windows' HDR we have three fixed modes only.
+     */
+    if (rootSurfaceFormat.first == KisSurfaceColorSpaceWrapper::bt2020PQColorSpace) {
+        KIS_SAFE_ASSERT_RECOVER_NOOP(rootSurfaceFormat.second == 10);
         format->setRedBufferSize(10);
         format->setGreenBufferSize(10);
         format->setBlueBufferSize(10);
         format->setAlphaBufferSize(2);
         format->setColorSpace(KisSurfaceColorSpaceWrapper(KisSurfaceColorSpaceWrapper::bt2020PQColorSpace));
-    } else if (config == KisConfig::BT709_G10) {
+    } else if (rootSurfaceFormat.first == KisSurfaceColorSpaceWrapper::scRGBColorSpace) {
+        KIS_SAFE_ASSERT_RECOVER_NOOP(rootSurfaceFormat.second == 16);
         format->setRedBufferSize(16);
         format->setGreenBufferSize(16);
         format->setBlueBufferSize(16);
         format->setAlphaBufferSize(16);
         format->setColorSpace(KisSurfaceColorSpaceWrapper(KisSurfaceColorSpaceWrapper::scRGBColorSpace));
-    } else
-#else
-    if (config == KisConfig::BT2020_PQ) {
-        qWarning() << "WARNING: Bt.2020 PQ surface type is not supported by this build of Krita";
-    } else if (config == KisConfig::BT709_G10) {
-        qWarning() << "WARNING: scRGB surface type is not supported by this build of Krita";
-    }
-#endif
-
-    {
+    } else {
+        KIS_SAFE_ASSERT_RECOVER_NOOP(rootSurfaceFormat.second == 8);
         format->setRedBufferSize(8);
         format->setGreenBufferSize(8);
         format->setBlueBufferSize(8);
@@ -265,6 +327,38 @@ void KisOpenGLModeProber::initSurfaceFormatFromConfig(KisConfig::RootSurfaceForm
         // TODO: check if we can use real sRGB space here
         format->setColorSpace(KisSurfaceColorSpaceWrapper());
     }
+#else
+    /**
+     * In Wayland's HDR we don't set the mode on the root surface, we should only select
+     * bit-width.
+     */
+    if (rootSurfaceFormat.first == KisSurfaceColorSpaceWrapper::bt2020PQColorSpace) {
+        qWarning() << "WARNING: Bt.2020 PQ surface type is not supported by this build of Krita";
+        rootSurfaceFormat.first = KisSurfaceColorSpaceWrapper::DefaultColorSpace;
+    } else if (rootSurfaceFormat.first == KisSurfaceColorSpaceWrapper::scRGBColorSpace) {
+        qWarning() << "WARNING: scRGB surface type is not supported by this build of Krita";
+        rootSurfaceFormat.first = KisSurfaceColorSpaceWrapper::DefaultColorSpace;
+    } else {
+        KIS_SAFE_ASSERT_RECOVER_NOOP(rootSurfaceFormat.first == KisSurfaceColorSpaceWrapper::DefaultColorSpace);
+        KIS_SAFE_ASSERT_RECOVER_NOOP(rootSurfaceFormat.second == 8 || rootSurfaceFormat.second == 10);
+
+        if (rootSurfaceFormat.second == 10) {
+            format->setRedBufferSize(10);
+            format->setGreenBufferSize(10);
+            format->setBlueBufferSize(10);
+            format->setAlphaBufferSize(2);
+            // TODO: check if we can use real sRGB space here
+            format->setColorSpace(KisSurfaceColorSpaceWrapper());
+        } else {
+            format->setRedBufferSize(8);
+            format->setGreenBufferSize(8);
+            format->setBlueBufferSize(8);
+            format->setAlphaBufferSize(8);
+            // TODO: check if we can use real sRGB space here
+            format->setColorSpace(KisSurfaceColorSpaceWrapper());
+        }
+    }
+#endif
 }
 
 bool KisOpenGLModeProber::isFormatHDR(const QSurfaceFormat &format)
@@ -341,6 +435,19 @@ KisOpenGLModeProber::Result::Result(QOpenGLContext &context) {
             ((m_glMajorVersion >= 4 && m_glMinorVersion >= 3) ||
              context.hasExtension("GL_ARB_invalidate_subdata"));
     m_supportsLod = context.format().majorVersion() >= 3 || (m_isOpenGLES && context.hasExtension("GL_EXT_shader_texture_lod"));
+
+#ifdef HAVE_X11
+    if (QApplication::platformName() == "xcb") {
+        QPlatformNativeInterface *native = qApp->platformNativeInterface();
+        if (native->nativeResourceFunctionForContext("eglcontext")) {
+            m_xcbGlProviderProtocol = KisOpenGL::XCB_EGL;
+        } else if (native->nativeResourceFunctionForContext("glxcontext")) {
+            m_xcbGlProviderProtocol = KisOpenGL::XCB_GLX;
+        } else {
+            qWarning() << "WARNING: Failed to detect QXcbGlIntegration type!";
+        }
+    }
+#endif /* HAVE_X11 */
 
     m_extensions = context.extensions();
     // Remove empty name extension that sometimes appears on NVIDIA output

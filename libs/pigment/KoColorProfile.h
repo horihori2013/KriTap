@@ -14,6 +14,8 @@
 
 #include "KoColorProfileConstants.h"
 #include "kritapigment_export.h"
+#include <KoColorimetryUtils.h>
+#include <optional>
 
 /**
  * Contains information needed for color transformation.
@@ -102,10 +104,17 @@ public:
         return QString();
     };
     /**
-     * @return true if you can use this profile can be used to convert color from a different
-     * profile to this one
+     * @return true if this profile can be used to convert color from a different profile to this one
      */
     virtual bool isSuitableForOutput() const = 0;
+    /**
+     * @return true if this profile can be used to convert color from this one to a different one
+     */
+    virtual bool isSuitableForInput() const = 0;
+    /**
+     * @return true if you can use this profile can be used in Krita
+     */
+    virtual bool isSuitableForWorkspace() const = 0;
     /**
      * @return true if this profile is suitable to use for printing
      */
@@ -127,21 +136,30 @@ public:
      */
     virtual bool hasColorants() const = 0;
     /**
-     * @return a qvector <double>(9) with the RGB colorants in XYZ
+     * @return a qvector <KoColorimetryUtils::XYZ> with the RGB colorants in XYZ
      */
-    virtual QVector <qreal> getColorantsXYZ() const = 0;
+    virtual QVector <KoColorimetryUtils::XYZ> getColorantsXYZ() const = 0;
     /**
-     * @return a qvector <double>(9) with the RGB colorants in xyY
+     * @return a qvector <KoColorimetryUtils::xyY> with the colorants in xyY
      */
-    virtual QVector <qreal> getColorantsxyY() const = 0;
+    virtual QVector <KoColorimetryUtils::xyY> getColorantsxyY() const = 0;
     /**
-     * @return a qvector <double>(3) with the whitepoint in XYZ
+     * @return a KoColorimetryUtils::XYZ with the whitepoint in XYZ
      */
-    virtual QVector <qreal> getWhitePointXYZ() const = 0;
+    virtual KoColorimetryUtils::XYZ getWhitePointXYZ() const = 0;
     /**
-     * @return a qvector <double>(3) with the whitepoint in xyY
+     * @return a KoColorimetryUtils::xyY with the whitepoint in xyY
      */
-    virtual QVector <qreal> getWhitePointxyY() const = 0;
+    virtual KoColorimetryUtils::xyY getWhitePointxyY() const = 0;
+
+    /**
+     * @brief hdrReferenceWhite
+     * HDR reference white is only available for Perceptual Quantizer profiles that
+     * save this value in their dictionary. It is used to scale the value encoded
+     * by the perceptual quantizer curve. When missing, assume a value of 203.
+     * @return the HDR reference white in cd/m²
+     */
+    virtual std::optional<double> hdrReferenceWhite() const = 0;
     
     /**
      * @return estimated gamma for RGB and Grayscale profiles
@@ -208,9 +226,11 @@ public:
      * fills a QVector<float> with the xy values of the whitepoint and red, green, blue colorants for
      * a given predefined value. Will not change the vector when the primaries are set to 'undefined'.
      * @param primaries predefined value.
+     * @param whitePoint the white point to fill.
      * @param colorants the vector to fill.
+     * @param prequantized whether to get the prequantized values, these are used for precision when encoding to icc only.
      */
-    static void colorantsForType(ColorPrimaries primaries, QVector<double> &colorants);
+    static void colorantsForType(ColorPrimaries primaries, KoColorimetryUtils::xy &whitePoint, QList<KoColorimetryUtils::xy> &colorants, const bool prequantized = false);
 
     /**
      * @brief getTransferCharacteristics

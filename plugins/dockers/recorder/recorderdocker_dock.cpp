@@ -16,6 +16,9 @@
 #include "recorder_export_config.h"
 
 #include <klocalizedstring.h>
+#include <kactioncollection.h>
+#include "kcolorscheme.h"
+
 #include <kis_action_registry.h>
 #include <kis_canvas2.h>
 #include <kis_icon_utils.h>
@@ -23,7 +26,6 @@
 #include <KisDocument.h>
 #include <KisViewManager.h>
 #include <KoDocumentInfo.h>
-#include <kactioncollection.h>
 #include <KisPart.h>
 #include <KisKineticScroller.h>
 #include "KisMainWindow.h"
@@ -35,23 +37,44 @@
 #include <QTimer>
 #include <QRegularExpression>
 
+#ifdef Q_OS_ANDROID
+#include <QDir>
+#include <QFile>
+#include <QThreadPool>
+#endif
+
 namespace
 {
 const QString keyActionRecordToggle = "recorder_record_toggle";
 const QString keyActionExport = "recorder_export";
 
-const QString activeColorGreen(" color='#5cab25'");
-const QString inactiveColorGreen(" color='#b4e196'");
-const QString activeColorOrange(" color='#ca8f14'");
-const QString inactiveColorOrange(" color='#ffe5af'");
-const QString activeColorRed(" color='#da4453'");
-const QString inactiveColorRed(" color='#f2c4c9'");
-const QString inactiveColorGray(" color='#3e3e3e'");
+#if QT_VERSION > QT_VERSION_CHECK(6, 0, 0)
+QString activeColorPositive;
+QString activeColorNeutral;
+QString activeColorNegative;
+QString colorNormal;
+QString inactiveColorPositive;
+QString inactiveColorNeutral;
+QString inactiveColorNegative;
 
-const QColor textColorOrange(0xff, 0xe5, 0xaf);
-const QColor buttonColorOrange(0xca, 0x8f, 0x14);
-const QColor textColorRed(0xf2, 0xc4, 0xc9);
-const QColor buttonColorRed(0xda, 0x44, 0x53);
+QColor textColorNeutral;
+QColor buttonColorNeutral;
+QColor textColorNegative;
+QColor buttonColorNegative;
+#else
+const QString activeColorPositive("#5cab25");
+const QString activeColorNeutral("#ca8f14");
+const QString activeColorNegative("#da4453");
+const QString colorNormal("#3e3e3e");
+const QString inactiveColorPositive("#b4e196");
+const QString inactiveColorNeutral("#ffe5af");
+const QString inactiveColorNegative("#f2c4c9");
+
+const QColor textColorNeutral(0xff, 0xe5, 0xaf);
+const QColor buttonColorNeutral(0xca, 0x8f, 0x14);
+const QColor textColorNegative(0xf2, 0xc4, 0xc9);
+const QColor buttonColorNegative(0xda, 0x44, 0x53);
+#endif
 
 }
 
@@ -80,7 +103,12 @@ public:
     bool realTimeCaptureMode = false;
     bool recordIsolateLayerMode = false;
     bool recordAutomatically = false;
+    bool focusedRecord = false;
+
     bool paused = true;
+#ifdef Q_OS_ANDROID
+    bool internalMoveInProgress{false};
+#endif
     QTimer pausedTimer;
     QTimer warningTimer;
 
@@ -106,10 +134,25 @@ public:
         connect(&pausedTimer, SIGNAL(timeout()), q, SLOT(onPausedTimeout()));
     }
 
+    // For technical reasons recorder can not capture an image that is larger than 2^31 - 1 bytes in size, It is also
+    // kinda absurd that you'd even want to do it, so we just shouldn't support it
+    bool canRecord()
+    {
+        QSize imageSize = canvas->image()->size();
+
+        // We always convert to RGBA8, so can assume 4 bytes/pixel
+        quint64 totalSize = (quint64)imageSize.width() * (quint64)imageSize.height() * 4;
+
+        return totalSize <= 2147483647;
+    }
+
     void loadSettings()
     {
         RecorderConfig config(true);
         snapshotDirectory = config.snapshotDirectory();
+#ifdef Q_OS_ANDROID
+        fixInternalSnapshotDirectory();
+#endif
         captureInterval = config.captureInterval();
         format = config.format();
         quality = config.quality();
@@ -123,6 +166,7 @@ public:
         }
         recordIsolateLayerMode = config.recordIsolateLayerMode();
         recordAutomatically = config.recordAutomatically();
+        focusedRecord = config.focusedRecord();
 
         updateUiFormat();
     }
@@ -220,7 +264,8 @@ public:
             resolution,
             captureInterval,
             recordIsolateLayerMode,
-            realTimeCaptureMode});
+            realTimeCaptureMode,
+            focusedRecord});
     }
 
     QString getPrefix()
@@ -253,16 +298,22 @@ public:
 
     void updateRecordStatus(bool isRecording)
     {
+        QSignalBlocker blocker(ui->buttonRecordToggle);
         recordToggleAction->setChecked(isRecording);
         recordToggleAction->setEnabled(true);
 
-        QSignalBlocker blocker(ui->buttonRecordToggle);
         ui->buttonRecordToggle->setChecked(isRecording);
         ui->buttonRecordToggle->setIcon(KisIconUtils::loadIcon(isRecording ? "media-playback-stop" : "media-record"));
         ui->buttonRecordToggle->setText(isRecording ? i18nc("Stop recording the canvas", "Stop")
                                         : i18nc("Start recording the canvas", "Record"));
-        ui->buttonRecordToggle->setEnabled(true);
 
+        if (canRecord()) {
+            ui->buttonRecordToggle->setEnabled(true);
+            ui->buttonRecordToggle->setToolTip("");
+        } else {
+            ui->buttonRecordToggle->setEnabled(false);
+            ui->buttonRecordToggle->setToolTip(i18n("Image too large to be recorded"));
+        }
         ui->widgetSettings->setEnabled(!isRecording);
 
         statusBarLabel->setVisible(isRecording);
@@ -283,33 +334,27 @@ public:
 
     void updateRecIndicator()
     {
-        auto threads = writer.recorderThreads.get();
-        auto threadsInUse = writer.recorderThreads.getUsed();
+        uint threads = writer.recorderThreads.get();
+        uint threadsInUse = writer.recorderThreads.getUsed();
         QString label("<font style='letter-spacing:-4px'>");
-        QString activeColor;
-        QString inactiveColor;
+        QString threadColor;
         for (unsigned int threadNr = 1; threadNr <= ThreadSystemValue::MaxThreadCount ; threadNr++)
         {
             if (threadNr > threads) {
-                activeColor = inactiveColorGray;
-                inactiveColor = inactiveColorGray;
+                threadColor = colorNormal;
             } else if (threadNr > ThreadSystemValue::MaxRecordThreadCount) {
-                activeColor = activeColorRed;
-                inactiveColor = inactiveColorRed;
+                threadColor = threadNr <= threadsInUse ? activeColorNegative : inactiveColorNegative;
             } else if (threadNr > ThreadSystemValue::IdealRecordThreadCount) {
-                activeColor = activeColorOrange;
-                inactiveColor = inactiveColorOrange;
+                threadColor = threadNr <= threadsInUse ? activeColorNeutral : inactiveColorNeutral;
             } else {
-                activeColor = activeColorGreen;
-                inactiveColor = inactiveColorGreen;
+                threadColor = threadNr <= threadsInUse ? activeColorPositive : inactiveColorPositive;
             }
-            label.append(QString("<font%1>▍</font>")
-                             .arg(threadNr <= threadsInUse ? activeColor : inactiveColor));
+            label.append(QString("<font color='%1'>▍</font>").arg(threadColor));
         }
         // don't remove empty <font></font> tag else label will jump a few pixels around
-        label.append(QString("</font><font> %1 </font><font%2>●</font>")
+        label.append(QString("</font><font> %1 </font><font color='%2'>●</font>")
                          .arg(i18nc("Recording symbol", "REC"))
-                         .arg(paused ? "" : activeColorRed));
+                         .arg(paused ? "" : activeColorNegative));
         statusBarLabel->setText(label);
         statusBarLabel->setToolTip(paused ? i18n("Recorder is paused") : QString(i18n("Active recording with %1 of %2 available threads")).arg(threadsInUse).arg(threads));
     }
@@ -330,8 +375,8 @@ public:
             // Number of threads exceeds ideal thread count
             // -> switch color of threads slider and spin wheel to red
             QPalette pal;
-            pal.setColor(QPalette::Text, textColorRed);
-            pal.setColor(QPalette::Button, buttonColorRed);
+            pal.setColor(QPalette::Text, textColorNegative);
+            pal.setColor(QPalette::Button, buttonColorNegative);
             ui->spinThreads->setPalette(pal);
             ui->sliderThreads->setPalette(pal);
             toolTipText = QString(
@@ -341,8 +386,8 @@ public:
             // Number of threads exceeds ideal recorder thread count
             // -> switch color of threads slider and spin wheel to orange
             QPalette pal;
-            pal.setColor(QPalette::Text, textColorOrange);
-            pal.setColor(QPalette::Button, buttonColorOrange);
+            pal.setColor(QPalette::Text, textColorNeutral);
+            pal.setColor(QPalette::Button, buttonColorNeutral);
             ui->spinThreads->setPalette(pal);
             ui->sliderThreads->setPalette(pal);
             toolTipText = QString(
@@ -356,6 +401,24 @@ public:
         ui->spinThreads->setToolTip(toolTipText);
         ui->sliderThreads->setToolTip(toolTipText);
     }
+
+#ifdef Q_OS_ANDROID
+    void fixInternalSnapshotDirectory()
+    {
+        // Older versions of Krita used an internal directory as the snapshots
+        // directory by default, which is a bogus place to save stuff to because
+        // the user can't access it. That means the files stored there are stuck
+        // inaccessible and once the user picks a "real" directory, they can no
+        // longer even delete the files. So here we're rectifying the situation.
+        if (snapshotDirectory == RecorderConfig::defaultInternalSnapshotDirectory()) {
+            // Internal path got persisted to settings. Clear that out, replace
+            // it with the default of nothing.
+            snapshotDirectory = QString();
+        } else {
+            q->moveFilesFromInternalSnapshotDirectory();
+        }
+    }
+#endif
 };
 
 RecorderDockerDock::RecorderDockerDock()
@@ -369,7 +432,7 @@ RecorderDockerDock::RecorderDockerDock()
     d->ui->buttonManageRecordings->setIcon(KisIconUtils::loadIcon("configure-thicker"));
     d->ui->buttonBrowse->setIcon(KisIconUtils::loadIcon("folder"));
     d->ui->buttonRecordToggle->setIcon(KisIconUtils::loadIcon("media-record"));
-    d->ui->buttonExport->setIcon(KisIconUtils::loadIcon("document-export-16"));
+    d->ui->buttonExport->setIcon(KisIconUtils::loadIcon("export-timelapse"));
     d->ui->sliderThreads->setTickPosition(QSlider::TickPosition::TicksBelow);
     d->ui->sliderThreads->setMinimum(1);
     d->ui->sliderThreads->setMaximum(ThreadSystemValue::MaxThreadCount);
@@ -389,6 +452,7 @@ RecorderDockerDock::RecorderDockerDock()
     d->ui->checkBoxRealTimeCaptureMode->setChecked(d->realTimeCaptureMode);
     d->ui->checkBoxRecordIsolateMode->setChecked(d->recordIsolateLayerMode);
     d->ui->checkBoxAutoRecord->setChecked(d->recordAutomatically);
+    d->ui->checkBoxFocusedRecord->setChecked(d->focusedRecord);
 
     KisActionRegistry *actionRegistry = KisActionRegistry::instance();
     d->recordToggleAction = actionRegistry->makeQAction(keyActionRecordToggle, this);
@@ -406,7 +470,7 @@ RecorderDockerDock::RecorderDockerDock()
             this, SLOT(onMainWindowIsBeingCreated(KisMainWindow *)));
 
     connect(d->ui->buttonManageRecordings, SIGNAL(clicked()), this, SLOT(onManageRecordingsButtonClicked()));
-    connect(d->ui->buttonBrowse, SIGNAL(clicked()), this, SLOT(onSelectRecordFolderButtonClicked()));
+    connect(d->ui->buttonBrowse, SIGNAL(clicked()), this, SLOT(slotSelectSnapshotDirectory()));
     connect(d->ui->comboFormat, SIGNAL(currentIndexChanged(int)), this, SLOT(onFormatChanged(int)));
     connect(d->ui->spinQuality, SIGNAL(valueChanged(int)), this, SLOT(onQualityChanged(int)));
     connect(d->ui->spinThreads, SIGNAL(valueChanged(int)), this, SLOT(onThreadsChanged(int)));
@@ -416,6 +480,8 @@ RecorderDockerDock::RecorderDockerDock()
     connect(d->ui->checkBoxAutoRecord, SIGNAL(toggled(bool)), this, SLOT(onAutoRecordToggled(bool)));
     connect(d->ui->buttonRecordToggle, SIGNAL(toggled(bool)), this, SLOT(onRecordButtonToggled(bool)));
     connect(d->ui->buttonExport, SIGNAL(clicked()), this, SLOT(onExportButtonClicked()));
+
+    connect(d->ui->checkBoxFocusedRecord, SIGNAL(toggled(bool)), this, SLOT(onFocusedCaptureToggled(bool)));
 
     connect(&d->writer.recorderThreads, SIGNAL(notifyInUseChange(bool)), this, SLOT(onActiveRecording(bool)));
     connect(&d->writer.recorderThreads, SIGNAL(notifyInUseChange(bool)), this, SLOT(onUpdateRecIndicator()));
@@ -450,7 +516,30 @@ RecorderDockerDock::~RecorderDockerDock()
     delete exportSettings;
 }
 
-void RecorderDockerDock::setCanvas(KoCanvasBase* canvas)
+// This signal is called when the last view of a document is closed. We can use it to properly stop recording for that
+// document and create tail frame(s), knowing that it won't be called too often. Creating tail frames can be very
+// expensive, depending on how zoomed in the user is, so doing that overzealously is unviable.
+void RecorderDockerDock::onDocumentAboutToClose(KoCanvasBase *canvas)
+{
+    KisCanvas2 *cptr = dynamic_cast<KisCanvas2 *>(canvas);
+
+    KisCanvas2 *oldCanvas = nullptr;
+    if (d->canvas != cptr) {
+        oldCanvas = d->canvas;
+        setCanvas(canvas);
+    }
+
+    d->writer.stop(false, true);
+
+    if (oldCanvas) {
+        setCanvas((KoCanvasBase *)oldCanvas);
+        d->writer.start(false, false);
+    }
+}
+
+// This is called whenever a tab is switched, be that when a user clicks on a tab, or another tab closing, so we only do
+// basic recorder state save. We can not rely on this function to create tail frames, as it's called too often
+void RecorderDockerDock::setCanvas(KoCanvasBase *canvas)
 {
     setEnabled(canvas != nullptr);
 
@@ -463,12 +552,19 @@ void RecorderDockerDock::setCanvas(KoCanvasBase* canvas)
     if (!d->canvas)
         return;
 
+    connect(d->canvas->imageView(),
+            SIGNAL(sigDocumentAboutToClose(KoCanvasBase *)),
+            this,
+            SLOT(onDocumentAboutToClose(KoCanvasBase *)),
+            Qt::UniqueConnection);
+
     KisDocument *document = d->canvas->imageView()->document();
     d->updateComboResolution(document->image()->width(), document->image()->height());
 
     d->prefix = d->getPrefix();
     bool wasToggled = false;
-    if (d->recordAutomatically && !d->enabledIds.contains(document->linkedResourcesStorageId())) {
+    if (d->recordAutomatically && !d->snapshotDirectory.isEmpty()
+        && !d->enabledIds.contains(document->linkedResourcesStorageId()) && d->canRecord()) {
         wasToggled = onRecordButtonToggled(true);
     }
     if (!wasToggled) { // onRecordButtonToggled(true) may call these, don't call them twice.
@@ -482,12 +578,13 @@ void RecorderDockerDock::setCanvas(KoCanvasBase* canvas)
     d->updateRecordStatus(enabled);
 }
 
+// This function is only called when the last document/canvas is closed, in all other cases setCanvas is called instead.
 void RecorderDockerDock::unsetCanvas()
 {
     d->updateRecordStatus(false);
     d->recordToggleAction->setChecked(false);
     setEnabled(false);
-    d->writer.stop();
+    d->writer.stop(true, false);
     d->writer.setCanvas(nullptr);
     d->canvas = nullptr;
     d->enabledIds.clear();
@@ -498,15 +595,58 @@ void RecorderDockerDock::onMainWindowIsBeingCreated(KisMainWindow *window)
     KisKActionCollection *actionCollection = window->viewManager()->actionCollection();
     actionCollection->addAction(keyActionRecordToggle, d->recordToggleAction);
     actionCollection->addAction(keyActionExport, d->exportAction);
+
+#if QT_VERSION > QT_VERSION_CHECK(6, 0, 0)
+    connect(window, SIGNAL(themeChanged()), this, SLOT(onThemeChanged()));
+    onThemeChanged();
+#endif
+}
+
+void RecorderDockerDock::onThemeChanged()
+{
+#if QT_VERSION > QT_VERSION_CHECK(6, 0, 0)
+    KColorScheme activeScheme(QPalette::Active, KColorScheme::Window);
+    activeColorPositive = activeScheme.foreground(KColorScheme::PositiveText).color().name();
+    activeColorNeutral = activeScheme.foreground(KColorScheme::NeutralText).color().name();
+    activeColorNegative = activeScheme.foreground(KColorScheme::NegativeText).color().name();
+
+    KColorScheme disabledScheme(QPalette::Disabled, KColorScheme::Window);
+    inactiveColorPositive = disabledScheme.foreground(KColorScheme::PositiveText).color().name();
+    inactiveColorNeutral = disabledScheme.foreground(KColorScheme::NeutralText).color().name();
+    inactiveColorNegative = disabledScheme.foreground(KColorScheme::NegativeText).color().name();
+    colorNormal = disabledScheme.foreground(KColorScheme::NormalText).color().name();
+
+    textColorNeutral = activeScheme.foreground(KColorScheme::NeutralText).color();
+    buttonColorNeutral = activeScheme.background(KColorScheme::NeutralBackground).color();
+    textColorNegative = activeScheme.foreground(KColorScheme::NegativeText).color();
+    buttonColorNegative = activeScheme.background(KColorScheme::NegativeBackground).color();
+
+    d->updateThreadUi();
+    d->updateRecIndicator();
+#endif
 }
 
 bool RecorderDockerDock::onRecordButtonToggled(bool checked)
 {
     QSignalBlocker blocker(d->ui->buttonRecordToggle);
+
+    // Ask the user to pick a directory if we don't have one. This should only
+    // happen on Android, other operating systems have a non-empty default that
+    // the user is not able to clear out via the user interface.
+    if (checked && d->snapshotDirectory.isEmpty()) {
+        slotSelectSnapshotDirectory();
+        if (d->snapshotDirectory.isEmpty()) {
+            d->ui->buttonRecordToggle->setChecked(false);
+            d->recordToggleAction->setChecked(false);
+            return false;
+        }
+    }
+
     d->recordToggleAction->setChecked(checked);
 
-    if (!d->canvas)
+    if (!d->canvas) {
         return false;
+    }
 
     const QString &id = d->canvas->imageView()->document()->linkedResourcesStorageId();
 
@@ -520,16 +660,21 @@ bool RecorderDockerDock::onRecordButtonToggled(bool checked)
 
     if (isEmpty == wasEmpty) {
         d->updateRecordStatus(checked);
+        if (checked) {
+            d->updateWriterSettings();
+            d->writer.restoreState();
+        } else {
+            d->writer.saveState();
+        }
         return false;
     }
-
 
     d->ui->buttonRecordToggle->setEnabled(false);
 
     if (checked) {
         d->updateWriterSettings();
         d->updateUiFormat();
-        d->writer.start();
+        d->writer.start(true, true);
 
         // Calculate Rec symbol activity timeout depending on the capture interval
         // The pausedTimer interval is set to a slightly greater value than the capture interval
@@ -541,7 +686,7 @@ bool RecorderDockerDock::onRecordButtonToggled(bool checked)
             d->pausedTimer.setInterval(qBound(305, static_cast<int>(qMax(d->captureInterval, .1) * 1000.0) + 5, 2005));
         }
     } else {
-        d->writer.stop();
+        d->writer.stop(true, true);
         d->warningTimer.stop();
         d->pausedTimer.stop();
         d->statusBarWarningLabel->hide();
@@ -558,7 +703,9 @@ void RecorderDockerDock::onExportButtonClicked()
 
     KisDocument *document = d->canvas->imageView()->document();
 
+#ifndef Q_OS_ANDROID
     exportSettings->videoFileName = QFileInfo(document->caption().trimmed()).completeBaseName();
+#endif
     exportSettings->inputDirectory = d->outputDirectory;
     exportSettings->format = d->format;
     exportSettings->realTimeCaptureMode = d->realTimeCaptureMode;
@@ -577,8 +724,7 @@ void RecorderDockerDock::onManageRecordingsButtonClicked()
     snapshotsManager.execFor(d->snapshotDirectory);
 }
 
-
-void RecorderDockerDock::onSelectRecordFolderButtonClicked()
+void RecorderDockerDock::slotSelectSnapshotDirectory()
 {
     KoFileDialog dialog(this, KoFileDialog::OpenDirectory, "SelectRecordingsDirectory");
     dialog.setCaption(i18n("Select a Directory for Recordings"));
@@ -589,6 +735,13 @@ void RecorderDockerDock::onSelectRecordFolderButtonClicked()
         RecorderConfig(false).setSnapshotDirectory(directory);
         d->loadSettings();
     }
+}
+
+void RecorderDockerDock::onFocusedCaptureToggled(bool checked)
+{
+    d->focusedRecord = checked;
+    RecorderConfig(false).setFocusedRecord(checked);
+    d->loadSettings();
 }
 
 void RecorderDockerDock::onRecordIsolateLayerModeToggled(bool checked)
@@ -729,3 +882,92 @@ void RecorderDockerDock::slotScrollerStateChanged(QScroller::State state)
 {
     KisKineticScroller::updateCursor(this, state);
 }
+
+#ifdef Q_OS_ANDROID
+void RecorderDockerDock::moveFilesFromInternalSnapshotDirectory()
+{
+    if (!d->internalMoveInProgress) {
+        const QString &internalPath = RecorderConfig::defaultInternalSnapshotDirectory();
+        if (!d->snapshotDirectory.isEmpty() && QFileInfo::exists(internalPath)) {
+            // The user has picked a directory to record to, but the nonsense
+            // internal directory is present and may have stuff inside that
+            // would become effectively inaccessible. To fix that, we move the
+            // files over to the selected directory. Of course moving files on
+            // Android is gobsmackingly slow, so we'll have to do it in the
+            // background to not lock the UI for ages. The moving should be
+            // re-entrant, so getting interrupted and continuing later is fine.
+            qWarning().nospace() << "Moving recordings stuck in internal directory '" << internalPath
+                                 << "' to selected directory '" << d->snapshotDirectory << "'";
+            RecorderDockerInternalSnapshotsMover *mover =
+                new RecorderDockerInternalSnapshotsMover(internalPath, d->snapshotDirectory);
+            connect(mover,
+                    &RecorderDockerInternalSnapshotsMover::sigMoveFinished,
+                    this,
+                    &RecorderDockerDock::slotInternalSnapshotMoveFinished,
+                    Qt::QueuedConnection);
+            d->internalMoveInProgress = true;
+            QThreadPool::globalInstance()->start(mover);
+        }
+    }
+}
+
+void RecorderDockerDock::slotInternalSnapshotMoveFinished(const QString &srcRoot)
+{
+    d->internalMoveInProgress = false;
+    if (srcRoot != d->snapshotDirectory) {
+        // Directory changed meanwhile, trigger another move.
+        moveFilesFromInternalSnapshotDirectory();
+    }
+}
+
+RecorderDockerInternalSnapshotsMover::RecorderDockerInternalSnapshotsMover(const QString &srcRoot,
+                                                                           const QString &dstRoot)
+    : m_srcRoot(srcRoot)
+    , m_dstRoot(dstRoot)
+{
+}
+
+void RecorderDockerInternalSnapshotsMover::run()
+{
+    moveFromInternalSnapshotDirectory(QDir(m_srcRoot), QDir(m_dstRoot));
+    if (!QDir().rmdir(m_srcRoot)) {
+        qWarning().nospace() << "Failed to remove root directory '" << m_srcRoot << "'";
+    }
+    Q_EMIT sigMoveFinished(m_srcRoot);
+}
+
+void RecorderDockerInternalSnapshotsMover::moveFromInternalSnapshotDirectory(const QDir &src, const QDir &dst)
+{
+    for (const QFileInfo &srcInfo : src.entryInfoList(FILTERS)) {
+        QString srcName = srcInfo.fileName();
+        QString dstPath = dst.filePath(srcName);
+
+        if (srcInfo.isDir()) {
+            // Move the directory over recursively.
+            if (dst.mkpath(dstPath)) {
+                moveFromInternalSnapshotDirectory(QDir(srcInfo.filePath()), QDir(dstPath));
+            } else {
+                qWarning().nospace() << "Failed to create directory '" << dstPath << "' in '" << dst.path() << "'";
+            }
+
+            // Removal will fail if the directory is non-empty, so we
+            // can just attempt it unconditionally.
+            if (!src.rmdir(srcName)) {
+                qWarning().nospace() << "Failed to remove directory '" << srcName << "' in '" << src.path() << "'";
+            }
+
+        } else {
+            QFile srcFile(srcInfo.filePath());
+            // Rename refuses to replace files in the destination, so
+            // try to remove that first. The only reason it should
+            // already exist is if a previous attempt to move the file
+            // partially copied it and then got interrupted.
+            QFile::remove(dstPath);
+            if (!srcFile.rename(dstPath)) {
+                qWarning().nospace() << "Error " << srcFile.error() << " moving '" << srcFile.fileName() << "' to '"
+                                     << dstPath << "': " << srcFile.errorString();
+            }
+        }
+    }
+}
+#endif

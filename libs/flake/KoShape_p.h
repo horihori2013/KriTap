@@ -43,18 +43,15 @@ public:
     QSharedPointer<KoShapeBackground> fill; ///< Stands for the background color / fill etc.
     bool inheritBackground = false;
     bool inheritStroke = false;
-    KoShapeShadow * shadow; ///< the current shape shadow
     // XXX: change this to instance instead of pointer
     QScopedPointer<KoClipPath> clipPath; ///< the current clip path
     QScopedPointer<KoClipMask> clipMask; ///< the current clip mask
     QMap<QString, QString> additionalAttributes;
     QMap<QByteArray, QString> additionalStyleAttributes;
-    KoFilterEffectStack *filterEffectStack; ///< stack of filter effects applied to the shape
     qreal transparency; ///< the shapes transparency
     QString hyperLink; //hyperlink for this shape
 
     int zIndex : 16; // keep maxZIndex in sync!
-    int runThrough : 16;
     int visible : 1;
     int printable : 1;
     int geometryProtected : 1;
@@ -62,26 +59,45 @@ public:
     int selectable : 1;
     int protectContent : 1;
 
-    KoShape::TextRunAroundSide textRunAroundSide;
-    qreal textRunAroundDistanceLeft;
-    qreal textRunAroundDistanceTop;
-    qreal textRunAroundDistanceRight;
-    qreal textRunAroundDistanceBottom;
-    qreal textRunAroundThreshold;
-    KoShape::TextRunAroundContour textRunAroundContour;
-
     QVector<PaintOrder> paintOrder {Fill, Stroke, Markers};
     bool inheritPaintOrder = true;
 };
 
 class KoShape::Private
 {
+private:
+    /**
+     * A special listener class to track the lifetime of the dependees
+     * and remove them from the notification list when they are deleted
+     */
+    struct DependeesLifetimeListener : KoShape::ShapeChangeListener
+    {
+        DependeesLifetimeListener(QList<KoShape*> &dependees)
+            : m_dependees(dependees)
+        {
+        }
+
+        void notifyShapeChanged(KoShape::ChangeType type, KoShape *shape) override {
+            if (type == KoShape::Deleted && m_dependees.contains(shape)) {
+                m_dependees.removeOne(shape);
+                // the listener will be unlinked on destruction automatically
+            }
+        }
+
+    private:
+        QList<KoShape*> &m_dependees;
+    };
+
 public:
-    KoShapeContainer *parent;
+    Private() : dependeesLifetimeListener(dependees) {}
+    Private(const Private &rhs) = delete;
+
+    KoShapeContainer *parent = nullptr;
     QSet<KoShapeManager *> shapeManagers;
     QSet<KoShape *> toolDelegates;
     QList<KoShape*> dependees; ///< list of shape dependent on this shape
     QList<KoShape::ShapeChangeListener*> listeners;
+    DependeesLifetimeListener dependeesLifetimeListener;
 };
 
 #endif

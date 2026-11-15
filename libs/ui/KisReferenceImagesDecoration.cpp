@@ -6,12 +6,15 @@
 
 #include "KisReferenceImagesDecoration.h"
 
+#include "KisDisplayConfig.h"
 #include "KoShapeManager.h"
 
 #include "kis_algebra_2d.h"
 #include "KisDocument.h"
 #include "KisReferenceImagesLayer.h"
 #include "kis_layer_utils.h"
+#include <kis_display_color_converter.h>
+#include <qcolorspace.h>
 
 struct KisReferenceImagesDecoration::Private {
     struct Buffer
@@ -66,7 +69,9 @@ private:
             buffer.position = widgetRect.topLeft();
             // to ensure that buffer is big enough for all the pixels on high dpi displays
             // BUG 411118
+            QColorSpace space = buffer.image.colorSpace();
             buffer.image = QImage((widgetRect.size()*devicePixelRatioF).toSize(), QImage::Format_ARGB32);
+            buffer.image.setColorSpace(space);
             buffer.image.setDevicePixelRatio(devicePixelRatioF);
 
             imageRect = q->view()->viewConverter()->widgetToImage(widgetRect);
@@ -119,25 +124,35 @@ bool KisReferenceImagesDecoration::documentHasReferenceImages() const
     return view()->document()->referenceImagesLayer() != nullptr;
 }
 
-void KisReferenceImagesDecoration::drawDecoration(QPainter &gc, const QRectF &/*updateRect*/, const KisCoordinatesConverter *converter, KisCanvas2 */*canvas*/)
+void KisReferenceImagesDecoration::drawDecoration(QPainter &gc, const QRectF &/*updateRect*/, const KisCoordinatesConverter *converter, KisCanvas2 *canvas)
 {
     // TODO: can we use partial updates here?
 
     KisSharedPtr<KisReferenceImagesLayer> layer = d->layer.toStrongRef();
+    const QColorSpace canvasSpace = KoColorSpaceRegistry::instance()->QColorSpaceForProfile(canvas->displayColorConverter()->multiSurfaceDisplayConfig().canvasProfile);
 
     if (!layer.isNull()) {
         QSizeF viewSize = view()->size();
 
         QTransform transform = converter->imageToWidgetTransform();
-        if (d->previousViewSize != viewSize || !KisAlgebra2D::fuzzyMatrixCompare(transform, d->previousTransform, 1e-4)) {
+        if (d->previousViewSize != viewSize || !KisAlgebra2D::fuzzyMatrixCompare(transform, d->previousTransform, 1e-4)
+            || d->buffer.image.colorSpace() != canvasSpace) {
             d->previousViewSize = viewSize;
             d->previousTransform = transform;
-            d->buffer.image = QImage();
+
+            d->buffer.image = QImage(QSize(1, 1), QImage::Format_ARGB32);
+            d->buffer.image.setColorSpace(canvasSpace);
+
             d->updateBufferByWidgetCoordinates(QRectF(QPointF(0,0), viewSize));
         }
 
         if (!d->buffer.image.isNull()) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
             gc.drawImage(d->buffer.position, d->buffer.image);
+#else
+            // In qt5, don't bother trying to fix the buffer cs, as this slows things down too much.
+            gc.drawImage(d->buffer.position, d->buffer.image);
+#endif
         }
     }
 }

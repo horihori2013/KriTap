@@ -90,6 +90,9 @@ public:
     {
         return "sRGB-elle-V2-g10.icc";//this is a linear space, because 16bit is enough to only enjoy advantages of linear space
     }
+
+    QList<KoColorProfileQuery> requiredConnectionProfiles(const KoColorProfile *profile) const override;
+    QList<KoColorConversionTransformationFactory*> colorConversionLinksFromProfile(const KoColorProfile *profile) const override;
 };
 
 #endif

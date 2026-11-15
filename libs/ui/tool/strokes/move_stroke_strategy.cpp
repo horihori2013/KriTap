@@ -27,7 +27,6 @@
 #include "kis_transform_mask_params_interface.h"
 #include "kis_keyframe_channel.h"
 #include "kis_scalar_keyframe_channel.h"
-#include "kis_image_animation_interface.h"
 #include "commands_new/KisSimpleModifyTransformMaskCommand.h"
 #include "commands_new/KisLazyCreateTransformMaskKeyframesCommand.h"
 
@@ -108,7 +107,7 @@ struct MoveTransformMaskStrategy : public MoveNodeStrategyBase
     }
 
     QRect moveNode(const QPoint &offset) override {
-        QScopedPointer<KUndo2Command> cmd;
+        std::unique_ptr<KUndo2Command> cmd;
         QRect dirtyRect = m_node->projectionPlane()->tightUserVisibleBounds();
 
         KisTransformMask *mask = dynamic_cast<KisTransformMask*>(m_node.data());
@@ -138,7 +137,7 @@ struct MoveTransformMaskStrategy : public MoveNodeStrategyBase
 
     void finishMove(KUndo2Command *parentCommand) override {
         KisCommandUtils::CompositeCommand *cmd = new KisCommandUtils::CompositeCommand(parentCommand);
-        cmd->addCommand(m_undoCommand.take());
+        cmd->addCommand(m_undoCommand.release());
     }
 
     QRect cancelMove() override {
@@ -147,7 +146,7 @@ struct MoveTransformMaskStrategy : public MoveNodeStrategyBase
 
 private:
     QPoint m_currentOffset;
-    QScopedPointer<KUndo2Command> m_undoCommand;
+    std::unique_ptr<KUndo2Command> m_undoCommand;
 };
 
 struct MovePaintableNodeStrategy : public MoveNodeStrategyBase
@@ -194,7 +193,7 @@ struct MoveStrokeStrategy::Private {
 };
 
 template <typename Functor>
-void MoveStrokeStrategy::recursiveApplyNodes(KisNodeList nodes, Functor &&func) {
+void MoveStrokeStrategy::recursiveApplyNodes(const KisNodeList &nodes, Functor &&func) {
     Q_FOREACH(KisNodeSP subtree, nodes) {
         KisLayerUtils::recursiveApplyNodes(subtree,
             [&] (KisNodeSP node) {
@@ -269,7 +268,6 @@ void MoveStrokeStrategy::initStrokeCallback()
             const bool isEmptyFilterMask = node->inherits("KisFilterMask") && node->paintDevice()
                 && node->paintDevice()->nonDefaultPixelArea().isEmpty();
 
-            // TODO: check isolation
             return !isEmptyFilterMask &&
                 !KisLayerUtils::checkIsCloneOf(node, m_nodes) &&
                 node->isEditable(true);
@@ -364,7 +362,7 @@ void MoveStrokeStrategy::initStrokeCallback()
             [this] (KisNodeSP node) {
                 if (dynamic_cast<KisTransformMask*>(node.data())) {
                     m_d->strategy.emplace(node, new MoveTransformMaskStrategy(node));
-                } else if (node->paintDevice()) {
+                } else if (node->paintDevice() && node->paintDevice()->supportsWraproundMode() && node->paintDevice()->defaultBounds()->wrapAroundMode()) {
                     m_d->strategy.emplace(node, new MovePaintableNodeStrategy(node));
                 } else {
                     m_d->strategy.emplace(node, new MoveNormalNodeStrategy(node));

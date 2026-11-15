@@ -64,6 +64,9 @@ KisCurveWidget::KisCurveWidget(QWidget *parent, Qt::WindowFlags f)
     setMinimumSize(150, 50);
     setMaximumSize(250, 250);
 
+    // Curves widgets don't have context menus. Setting this prevents any
+    // long-presses from delaying inputs, see KisLongPressEventFilter.cpp.
+    setContextMenuPolicy(Qt::PreventContextMenu);
 
     setFocusPolicy(Qt::StrongFocus);
 }
@@ -192,7 +195,7 @@ QPixmap KisCurveWidget::getPixmap()
 
 bool KisCurveWidget::pointSelected() const
 {
-    return d->m_grab_point_index > 0 && d->m_grab_point_index < d->m_curve.curvePoints().count();
+    return d->m_grab_point_index >= 0 && d->m_grab_point_index < d->m_curve.curvePoints().count();
 }
 
 void KisCurveWidget::keyPressEvent(QKeyEvent *e)
@@ -349,7 +352,7 @@ void KisCurveWidget::paintEvent(QPaintEvent *)
         const qreal halfHandleSize = d->m_handleSize * 0.5;
 
         for (int i = 0; i < d->m_curve.curvePoints().count(); ++i) {
-            const KisCubicCurvePoint &point = d->m_curve.points().at(i);
+            const KisCubicCurvePoint &point = d->m_curve.curvePoints().at(i);
 
             if (i == d->m_grab_point_index) {
                 // active point is slightly more "bold"

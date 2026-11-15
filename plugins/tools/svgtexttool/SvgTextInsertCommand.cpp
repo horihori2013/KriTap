@@ -6,8 +6,9 @@
 #include "SvgTextInsertCommand.h"
 #include "KoSvgTextShape.h"
 #include "KoSvgTextShapeMarkupConverter.h"
+#include <KoShapeBulkActionLock.h>
 
-#include <QRegExp>
+#include <QRegularExpression>
 
 #include "kis_command_ids.h"
 SvgTextInsertCommand::SvgTextInsertCommand(KoSvgTextShape *shape, int pos, int anchor, QString text, KUndo2Command *parent)
@@ -19,35 +20,36 @@ SvgTextInsertCommand::SvgTextInsertCommand(KoSvgTextShape *shape, int pos, int a
 {
     setText(kundo2_i18n("Insert Text"));
 
-    QRegExp exp;
+    m_text = filterInputUnicodeString(text);
+}
+
+QString SvgTextInsertCommand::filterInputUnicodeString(QString text)
+{
+    QRegularExpression exp;
     // This replaces...
     // - carriage return
-    // - linefeed-carriage return
     // - carriage return-linefeed
     // - line separator
     // - paragraph separator
     // - vertical tab/line tab
     // with a single linefeed to avoid them from being added to the textShape.
-    exp.setPattern("[\\r|\\r\\n|\\x2029|\\x2028\\x000b]");
-
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    // NOTE: \r\n comes **before** \r to ensure that full match
+    //       is preferred to the partial match!
+    exp.setPattern("(\\r\\n|\\r|\\x{2029}|\\x{2028}|\\x{000b})");
     text.replace(exp, "\n");
-#else
-    exp.replaceIn(text, "\n");
-#endif
-    m_text = text;
+    return text;
 }
 
 void SvgTextInsertCommand::redo()
 {
-    QRectF updateRect = m_shape->boundingRect();
+    KoShapeBulkActionLock lock(m_shape);
     // Index defaults to -1 when there's no text in the shape.
     int oldIndex = qMax(0, m_shape->indexForPos(m_pos));
 
     m_textData = m_shape->getMemento();
     m_shape->insertText(m_pos, m_text);
     m_shape->cleanUp();
-    m_shape->updateAbsolute( updateRect| m_shape->boundingRect());
+    KoShapeBulkActionLock::bulkShapesUpdate(lock.unlock());
 
     int pos = m_shape->posForIndex(oldIndex + m_text.size(), false, false);
     m_shape->notifyCursorPosChanged(pos, pos);
@@ -56,9 +58,9 @@ void SvgTextInsertCommand::redo()
 
 void SvgTextInsertCommand::undo()
 {
-    QRectF updateRect = m_shape->boundingRect();
+    KoShapeBulkActionLock lock(m_shape);
     m_shape->setMemento(m_textData, m_pos, m_anchor);
-    m_shape->updateAbsolute( updateRect| m_shape->boundingRect());
+    KoShapeBulkActionLock::bulkShapesUpdate(lock.unlock());
 }
 
 int SvgTextInsertCommand::id() const

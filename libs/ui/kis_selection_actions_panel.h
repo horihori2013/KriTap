@@ -7,6 +7,7 @@
 #ifndef _KIS_SELECTION_ACTIONS_PANEL_H_
 #define _KIS_SELECTION_ACTIONS_PANEL_H_
 
+#include "kis_config.h"
 #include "kis_types.h"
 #include <QColor>
 #include <QObject>
@@ -23,34 +24,83 @@
 class KisCanvas2;
 class KisCoordinatesConverter;
 class KisViewManager;
+class KoColorDisplayRendererInterface;
 
 class KisSelectionActionsPanel;
 typedef KisSharedPtr<KisSelectionActionsPanel> KisSelectionActionsPanelSP;
 
-class KRITAUI_EXPORT KisSelectionActionsPanel : public QWidget
+using Orientation = KisConfig::SelectionActionsBarOrientation;
+using Position = KisConfig::SelectionActionsBarPosition;
+using Behavior = KisConfig::SelectionActionsBarBehavior;
+
+class KRITAUI_EXPORT KisSelectionActionsPanel : public QObject
 {
     Q_OBJECT
 public:
     KisSelectionActionsPanel() = delete;
-    KisSelectionActionsPanel(KisViewManager *viewManager, QWidget *parent);
+    KisSelectionActionsPanel(KisViewManager *viewManager);
     ~KisSelectionActionsPanel();
 
-    void draw(QPainter &painter);
+    void draw(QPainter &painter, const KoColorDisplayRendererInterface *displayRendererInterface);
     void setVisible(bool visible);
     void setEnabled(bool enabled);
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void setOrientation(Orientation orientation);
+    void setHandleEnabled(bool enabled);
+
+    void canvasWidgetChanged(KisCanvasWidgetBase* canvas);
+
+    void updatePositioning();
+
+private Q_SLOTS:
+    void showContextMenu(const QPoint& pos);
+    void disableSelectionActionsPanel();
+    void configureSelectionActionsPanel();
+    void configChanged(bool skipResettingOffset = false);
+    void canvasStateChanged();
+    void themeChanged();
 
 private:
-    void setupButtons();
-    QPushButton *createButton(const QString &iconName, const QString &tooltip);
-    QPoint updateCanvasBoundaries(QPoint position, QWidget *canvasWidget) const;
-    QPoint initialDragHandlePosition() const;
-    void drawActionBarBackground(QPainter &gc) const;
+    void recalculateDimensions();
+
+    /// Positioning ///
+    QPoint getFixedPosition() const;
+
+    QRectF getWidgetSelectionRect() const;
+
+    QPoint horizontalFreeFloatingTopLeftPosition(bool calculateOnlyAnchor = false) const;
+    QPoint verticalFreeFloatingTopLeftPosition(bool calculateOnlyAnchor = false) const;
+    QPoint freeFloatingInitialTopLeftPosition(bool calculateOnlyAnchor = false) const;
+
+    QPoint clipPositionToCanvasBoundaries(QPoint position, QWidget *canvasWidget) const;
+
+    QPoint currentTopLeftPosition() const;
+    /// End of positioning ///
+
+
+    void drawAnchorWhileMoving(QPainter &painter) const;
+    void drawActionBarBackground(QPainter &gc, const KoColorDisplayRendererInterface *displayRendererInterface) const;
+
+    void drawDebugRectangle(QPainter &painter, Position position);
+    void drawDebugRectanglesForFreeFloatingBehaviour(QPainter &painter);
+
+    bool handlePress(QEvent *event, const QPoint &pos, Qt::MouseButton button = Qt::LeftButton);
+    bool handleMove(QEvent *event, const QPoint &pos);
+    bool handleRelease(QEvent *event);
+
+    ///Moves all the widgets that are a part of the panel
+    void movePanelWidgets();
+
+    QPoint mouseEventPos(const QMouseEvent *mouseEvent);
+    QPoint tabletEventPos(const QTabletEvent *tabletEvent);
+    // Touch events can have zero touch points when pressing an entire palm on
+    // the screen on Android, so this returns false if this is a non-touch.
+    bool touchEventPos(const QTouchEvent *touchEvent, QPoint &outPos);
+
+    QPoint transformHandleCoords(QPoint pos);
 
     struct Private;
     QScopedPointer<Private> d;
-
-Q_SIGNALS:
 };
 
 #endif

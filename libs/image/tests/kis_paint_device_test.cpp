@@ -239,24 +239,6 @@ void KisPaintDeviceTest::testRoundtripReadWrite()
     }
 }
 
-void logFailure(const QString & reason, const KoColorSpace * srcCs, const KoColorSpace * dstCs)
-{
-    QString profile1("no profile");
-    QString profile2("no profile");
-    if (srcCs->profile())
-        profile1 = srcCs->profile()->name();
-    if (dstCs->profile())
-        profile2 = dstCs->profile()->name();
-
-    QWARN(QString("Failed %1 %2 -> %3 %4 %5")
-          .arg(srcCs->name())
-          .arg(profile1)
-          .arg(dstCs->name())
-          .arg(profile2)
-          .arg(reason)
-          .toLatin1());
-}
-
 void KisPaintDeviceTest::testColorSpaceConversion()
 {
     QImage image(QString(FILES_DATA_DIR) + '/' + "tile.png");
@@ -409,7 +391,7 @@ void KisPaintDeviceTest::testThumbnailDeviceWithOffset()
     dev->setX(10);
     dev->setY(10);
 
-    QImage thumb = dev->createThumbnail(640,441,QRect(10,10,640,441));
+    QImage thumb = dev->createThumbnailUncached(640,441,QRect(10,10,640,441));
 
     image.save("oring.png");
     thumb.save("thumb.png");
@@ -2484,7 +2466,7 @@ void KisPaintDeviceTest::stressTestMemoryFragmentation()
 
         qDebug() << "Iteration:" << i;
 
-#ifdef Q_OS_LINUX
+#ifdef __GLIBC__
         struct mallinfo info = mallinfo();
         qDebug() << "Allocated on heap:" << (info.arena >> 20) << "MiB";
         qDebug() << "Mmapped regions:" << info.hblks << (info.hblkhd >> 20) << "MiB";

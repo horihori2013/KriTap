@@ -19,10 +19,13 @@
 
 #include <QDebug>
 
+#include "DebugPigment.h"
 #include "kis_debug.h"
+#include "kis_dom_utils.h"
 
 #include <KisLazyStorage.h>
 #include <KisLazyValueWrapper.h>
+#include <lcms2.h>
 
 namespace {
 struct ReverseCurveWrapper
@@ -71,6 +74,7 @@ public:
     IccColorProfile::Data *data {0};
     bool valid {false};
     bool suitableForOutput {false};
+    bool suitableForInput {false};
     bool hasColorants;
 
     using LazyBool = KisLazyStorage<KisLazyValueWrapper<bool>, std::function<bool()>>;
@@ -81,6 +85,7 @@ public:
     bool adaptedFromD50;
     cmsCIEXYZ mediaWhitePoint;
     cmsCIExyY whitePoint;
+    std::optional<double> hdrReferenceWhite;
     cmsCIEXYZTRIPLE colorants;
     cmsToneCurve *redTRC {0};
     cmsToneCurve *greenTRC {0};
@@ -100,6 +105,8 @@ public:
     bool isAbsoluteCLUT;
     bool isSaturationCLUT;
     bool isMatrixShaper;
+
+    cmsVideoSignalType *cicpValues {nullptr};
 
     QByteArray uniqueId;
 };
@@ -296,10 +303,13 @@ bool LcmsColorProfileContainer::init()
             d->hasTRC = Private::LazyBool(Private::LazyBool::init_value_tag{}, {});
         }
 
+        if (cmsIsTag(d->profile, cmsSigcicpTag)) {
+            d->cicpValues = ((cmsVideoSignalType *) cmsReadTag (d->profile, cmsSigcicpTag));
+        }
+
         // Check if the profile can convert (something->this)
-        d->suitableForOutput = cmsIsIntentSupported(d->profile,
-                                                    INTENT_PERCEPTUAL,
-                                                    LCMS_USED_AS_OUTPUT);
+        d->suitableForOutput = cmsIsIntentSupported(d->profile, INTENT_PERCEPTUAL, LCMS_USED_AS_OUTPUT);
+        d->suitableForInput  = cmsIsIntentSupported(d->profile, INTENT_PERCEPTUAL, LCMS_USED_AS_INPUT);
 
         d->version = cmsGetProfileVersion(d->profile);
         d->defaultIntent = cmsGetHeaderRenderingIntent(d->profile);
@@ -308,6 +318,26 @@ bool LcmsColorProfileContainer::init()
         d->isSaturationCLUT = cmsIsCLUT(d->profile, INTENT_SATURATION, LCMS_USED_AS_INPUT);
         d->isAbsoluteCLUT = cmsIsCLUT(d->profile, INTENT_SATURATION, LCMS_USED_AS_INPUT);
         d->isRelativeCLUT = cmsIsCLUT(d->profile, INTENT_RELATIVE_COLORIMETRIC, LCMS_USED_AS_INPUT);
+
+        if (cmsIsTag(d->profile, cmsSigMetaTag)) {
+            dbgPigment << "icc profile has dictionary entries";
+
+            cmsHANDLE dictionary = (cmsHANDLE) cmsReadTag(d->profile, cmsSigMetaTag);
+            const cmsDICTentry *entry = cmsDictGetEntryList(dictionary);
+            while (entry) {
+                QString name = QString::fromWCharArray(entry->Name, -1);
+                QString value =  QString::fromWCharArray(entry->Value, -1);
+                if (name.toLower() == "crwl") {
+                    // https://registry.color.org/dicttype-metadata/crwl
+                    double hdrReferenceWhite = KisDomUtils::toDouble(value);
+                    d->hdrReferenceWhite = std::make_optional(hdrReferenceWhite);
+
+                }
+                dbgPigment << name << value;
+                dbgPigment << entry->DisplayName << entry->DisplayValue;
+                entry = cmsDictNextEntry(entry);
+            }
+        }
 
         return true;
     }
@@ -354,6 +384,14 @@ bool LcmsColorProfileContainer::isSuitableForOutput() const
 {
     return d->suitableForOutput;
 }
+bool LcmsColorProfileContainer::isSuitableForInput() const
+{
+    return d->suitableForInput;
+}
+bool LcmsColorProfileContainer::isSuitableForWorkspace() const
+{
+    return d->suitableForOutput && d->suitableForInput;
+}
 
 bool LcmsColorProfileContainer::isSuitableForPrinting() const
 {
@@ -396,78 +434,71 @@ bool LcmsColorProfileContainer::isLinear() const
 {
     return *d->isLinear;
 }
-QVector <double> LcmsColorProfileContainer::getColorantsXYZ() const
+
+KoColorimetryUtils::XYZ fromCieXYZ(const cmsCIEXYZ &xyz) {
+    return KoColorimetryUtils::XYZ{xyz.X, xyz.Y, xyz.Z};
+}
+
+KoColorimetryUtils::xyY fromCIExyY(const cmsCIExyY &xyY) {
+    return KoColorimetryUtils::xyY{xyY.x, xyY.y, xyY.Y};
+}
+
+QVector <KoColorimetryUtils::XYZ> LcmsColorProfileContainer::getColorantsXYZ() const
 {
-    QVector <double> colorants(9);
-    colorants[0] = d->colorants.Red.X;
-    colorants[1] = d->colorants.Red.Y;
-    colorants[2] = d->colorants.Red.Z;
-    colorants[3] = d->colorants.Green.X;
-    colorants[4] = d->colorants.Green.Y;
-    colorants[5] = d->colorants.Green.Z;
-    colorants[6] = d->colorants.Blue.X;
-    colorants[7] = d->colorants.Blue.Y;
-    colorants[8] = d->colorants.Blue.Z;
+    QVector <KoColorimetryUtils::XYZ> colorants(9);
+
+    colorants.append(fromCieXYZ(d->colorants.Red));
+    colorants.append(fromCieXYZ(d->colorants.Green));
+    colorants.append(fromCieXYZ(d->colorants.Blue));
     return colorants;
 }
 
-QVector <double> LcmsColorProfileContainer::getColorantsxyY() const
+QVector<KoColorimetryUtils::xyY> LcmsColorProfileContainer::getColorantsxyY() const
 {
     cmsCIEXYZ temp1;
     cmsCIExyY temp2;
-    QVector <double> colorants(9);
+    QVector<KoColorimetryUtils::xyY> colorants;
 
     temp1.X = d->colorants.Red.X;
     temp1.Y = d->colorants.Red.Y;
     temp1.Z = d->colorants.Red.Z;
     cmsXYZ2xyY(&temp2, &temp1);
-    colorants[0] = temp2.x;
-    colorants[1] = temp2.y;
-    colorants[2] = temp2.Y;
+    colorants.append(fromCIExyY(temp2));
 
     temp1.X = d->colorants.Green.X;
     temp1.Y = d->colorants.Green.Y;
     temp1.Z = d->colorants.Green.Z;
     cmsXYZ2xyY(&temp2, &temp1);
-    colorants[3] = temp2.x;
-    colorants[4] = temp2.y;
-    colorants[5] = temp2.Y;
+    colorants.append(fromCIExyY(temp2));
 
     temp1.X = d->colorants.Blue.X;
     temp1.Y = d->colorants.Blue.Y;
     temp1.Z = d->colorants.Blue.Z;
     cmsXYZ2xyY(&temp2, &temp1);
-    colorants[6] = temp2.x;
-    colorants[7] = temp2.y;
-    colorants[8] = temp2.Y;
+    colorants.append(fromCIExyY(temp2));
 
     return colorants;
 }
 
-QVector <double> LcmsColorProfileContainer::getWhitePointXYZ() const
+KoColorimetryUtils::XYZ LcmsColorProfileContainer::getWhitePointXYZ() const
 {
-    QVector <double> tempWhitePoint(3);
-
-    tempWhitePoint[0] = d->mediaWhitePoint.X;
-    tempWhitePoint[1] = d->mediaWhitePoint.Y;
-    tempWhitePoint[2] = d->mediaWhitePoint.Z;
-
-    return tempWhitePoint;
+    return fromCieXYZ(d->mediaWhitePoint);
 }
 
-QVector <double> LcmsColorProfileContainer::getWhitePointxyY() const
+KoColorimetryUtils::xyY LcmsColorProfileContainer::getWhitePointxyY() const
 {
-    QVector <double> tempWhitePoint(3);
-    tempWhitePoint[0] = d->whitePoint.x;
-    tempWhitePoint[1] = d->whitePoint.y;
-    tempWhitePoint[2] = d->whitePoint.Y;
-    return tempWhitePoint;
+    return fromCIExyY(d->whitePoint);
+}
+
+std::optional<double> LcmsColorProfileContainer::hdrReferenceWhite() const
+{
+    return d->hdrReferenceWhite;
 }
 
 QVector <double> LcmsColorProfileContainer::getEstimatedTRC() const
 {
     QVector <double> TRCtriplet(3);
-    if (d->hasColorants) {
+    if (d->hasColorants && hasTRC()) {
         if (cmsIsToneCurveLinear(d->redTRC)) {
             TRCtriplet[0] = 1.0;
         } else {
@@ -500,7 +531,7 @@ QVector <double> LcmsColorProfileContainer::getEstimatedTRC() const
 
 void LcmsColorProfileContainer::LinearizeFloatValue(QVector <double> & Value) const
 {
-    if (d->hasColorants) {
+    if (d->hasColorants && hasTRC()) {
         if (!cmsIsToneCurveLinear(d->redTRC)) {
             Value[0] = cmsEvalToneCurveFloat(d->redTRC, Value[0]);
         }
@@ -520,7 +551,7 @@ void LcmsColorProfileContainer::LinearizeFloatValue(QVector <double> & Value) co
 
 void LcmsColorProfileContainer::DelinearizeFloatValue(QVector <double> & Value) const
 {
-    if (d->hasColorants) {
+    if (d->hasColorants && hasTRC()) {
         if (!cmsIsToneCurveLinear(d->redTRC)) {
             Value[0] = cmsEvalToneCurveFloat(*d->redTRCReverse, Value[0]);
         }
@@ -543,7 +574,7 @@ void LcmsColorProfileContainer::LinearizeFloatValueFast(QVector <double> & Value
     const qreal scale = 65535.0;
     const qreal invScale = 1.0 / scale;
 
-    if (d->hasColorants) {
+    if (d->hasColorants && hasTRC()) {
         //we can only reliably delinearise in the 0-1.0 range, outside of that leave the value alone.
 
         if (!cmsIsToneCurveLinear(d->redTRC) && Value[0]<1.0) {
@@ -570,7 +601,7 @@ void LcmsColorProfileContainer::DelinearizeFloatValueFast(QVector <double> & Val
     const qreal scale = 65535.0;
     const qreal invScale = 1.0 / scale;
 
-    if (d->hasColorants) {
+    if (d->hasColorants && hasTRC()) {
         //we can only reliably delinearise in the 0-1.0 range, outside of that leave the value alone.
 
         if (!cmsIsToneCurveLinear(d->redTRC) && Value[0]<1.0) {
@@ -627,6 +658,22 @@ QByteArray LcmsColorProfileContainer::getProfileUniqueId() const
     return d->uniqueId;
 }
 
+bool LcmsColorProfileContainer::hasCicpValues() const
+{
+    return (d->cicpValues);
+}
+
+ColorPrimaries LcmsColorProfileContainer::cicpPrimaries() const {
+    if (!d->cicpValues) return PRIMARIES_UNSPECIFIED;
+    return ColorPrimaries(d->cicpValues->ColourPrimaries);
+}
+
+TransferCharacteristics LcmsColorProfileContainer::cicpTransfer() const
+{
+    if (!d->cicpValues) return TRC_UNSPECIFIED;
+    return TransferCharacteristics(d->cicpValues->TransferCharacteristics);
+}
+
 bool LcmsColorProfileContainer::compareTRC(TransferCharacteristics characteristics, float error) const
 {
     if (!*d->hasTRC) {
@@ -655,6 +702,17 @@ bool LcmsColorProfileContainer::compareTRC(TransferCharacteristics characteristi
     }
 
     return true;
+}
+
+#include <KoColorTransferFunctions.h>
+cmsToneCurve *perceptualQuantizerDummy() {
+    cmsFloat32Number CurveVals[1024];
+    for (int i = 0; i < 1024; i++) {
+        float val = float(i)/1023.0;
+        /// IMPORTANT: 125.0 is the maximum output of the curve and is controlled by the diffuse white!
+        CurveVals[i] = (removeSmpte2048Curve(val)/125.0);
+    }
+    return cmsBuildTabulatedToneCurveFloat(NULL, 1024, CurveVals);
 }
 
 cmsToneCurve *LcmsColorProfileContainer::transferFunction(TransferCharacteristics transferFunction)
@@ -731,10 +789,11 @@ cmsToneCurve *LcmsColorProfileContainer::transferFunction(TransferCharacteristic
     case TRC_LAB_L:
         mainCurve = cmsBuildParametricToneCurve(NULL, 4, labl_parameters);
         break;
+    case TRC_ITU_R_BT_2100_0_PQ:
+        return perceptualQuantizerDummy();
+        break;
     case TRC_SMPTE_ST_428_1:
         // Requires an a*X^y construction, not possible.
-    case TRC_ITU_R_BT_2100_0_PQ:
-        // Perceptual Quantizer
     case TRC_ITU_R_BT_2100_0_HLG:
         // Hybrid log gamma.
         qWarning() << "Cannot generate an icc profile with this transfer function, will generate a linear profile";

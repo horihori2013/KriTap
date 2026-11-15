@@ -231,7 +231,9 @@ void KisSimpleUpdateQueue::addJob(KisNodeSP node, const QVector<QRect> &rects,
         /* else if(type == KisBaseRectsWalker::UNSUPPORTED) fatalKrita; */
 
         walker->collectRects(node, rc);
-        walkers.append(walker);
+        if (!walker->isEmpty()) {
+            walkers.append(walker);
+        }
     }
 
     if (!walkers.isEmpty()) {
@@ -265,6 +267,13 @@ void KisSimpleUpdateQueue::addSpontaneousJob(KisSpontaneousJob *spontaneousJob)
 bool KisSimpleUpdateQueue::isEmpty() const
 {
     QMutexLocker locker(&m_lock);
+    return m_updatesList.isEmpty() && m_spontaneousJobsList.isEmpty();
+}
+
+bool KisSimpleUpdateQueue::isIdle() const
+{
+    std::unique_lock<QMutex> locker(m_lock, std::try_to_lock);
+    if (!locker.owns_lock()) return false;
     return m_updatesList.isEmpty() && m_spontaneousJobsList.isEmpty();
 }
 

@@ -29,7 +29,9 @@
 #include <KisViewManager.h>
 #include <kis_node_manager.h>
 #include <KoSelection.h>
+#include <kis_painter.h>
 
+#include <algorithm>
 
 #include "KisAnimAutoKey.h"
 
@@ -225,7 +227,7 @@ namespace KisToolUtils {
                             [node, selection] () {
                                 KisPaintDeviceSP device = node->paintDevice();
 
-                                QScopedPointer<KisCommandUtils::CompositeCommand> parentCommand(
+                                std::unique_ptr<KisCommandUtils::CompositeCommand> parentCommand(
                                     new KisCommandUtils::CompositeCommand());
 
                                 KUndo2Command *autoKeyframeCommand = KisAutoKey::tryAutoCreateDuplicatedFrame(device);
@@ -247,7 +249,7 @@ namespace KisToolUtils {
                                 device->setDirty(dirtyRect);
                                 parentCommand->addCommand(transaction.endAndTake());
 
-                                return parentCommand.take();
+                                return parentCommand.release();
                             });
                     applicator.applyCommand(cmd, KisStrokeJobData::CONCURRENT);
                 }
@@ -266,7 +268,7 @@ namespace KisToolUtils {
         , updateColor(true)
         , addColorToCurrentPalette(false)
         , normaliseValues(false)
-        , sampleMerged(true)
+        , sampleSource(SampleSourceImage)
         , radius(1)
         , blend(100)
     {
@@ -279,7 +281,7 @@ namespace KisToolUtils {
         props.setProperty("updateColor", updateColor);
         props.setProperty("addPalette", addColorToCurrentPalette);
         props.setProperty("normaliseValues", normaliseValues);
-        props.setProperty("sampleMerged", sampleMerged);
+        props.setProperty("sampleSource", sampleSource);
         props.setProperty("radius", radius);
         props.setProperty("blend", blend);
 
@@ -299,7 +301,7 @@ namespace KisToolUtils {
         updateColor = props.getBool("updateColor", true);
         addColorToCurrentPalette = props.getBool("addPalette", false);
         normaliseValues = props.getBool("normaliseValues", false);
-        sampleMerged = props.getBool("sampleMerged", true);
+        sampleSource = static_cast<ColorSamplerSource>(props.getInt("sampleSource", static_cast<int>(SampleSourceImage)));
         radius = props.getInt("radius", 1);
         blend = props.getInt("blend", 100);
     }
@@ -312,6 +314,17 @@ namespace KisToolUtils {
             screen = qApp->primaryScreen();
         }
         QCursor::setPos(screen, point);
+    }
+
+    void KRITAUI_EXPORT showBrushSizeFloatingMessage(KoCanvasBase *canvas, qreal size)
+    {
+        KisCanvas2 *kisCanvas = dynamic_cast<KisCanvas2 *>(canvas);
+        KIS_SAFE_ASSERT_RECOVER_RETURN(kisCanvas);
+        kisCanvas->viewManager()->showFloatingMessage(i18n("Brush Size: %1 px", size),
+                                                      QIcon(),
+                                                      1000,
+                                                      KisFloatingMessage::High,
+                                                      Qt::AlignLeft | Qt::TextWordWrap | Qt::AlignVCenter);
     }
 
     // get all shape layers with shapes at point. This is a bit coarser than 'FindNodes',
@@ -345,15 +358,17 @@ namespace KisToolUtils {
             if (shape && !(currentShapes.contains(shape) && skipCurrentShapes)) {
                 shapeType = shape->shapeId();
                 KoSvgTextShape *t = dynamic_cast<KoSvgTextShape *>(shape);
-                if (t && isHorizontal) {
+                if (t) {
                     p.addRect(t->boundingRect());
-                    *isHorizontal = t->writingMode() == KoSvgText::HorizontalTB;
+                    if (isHorizontal) {
+                        *isHorizontal = t->writingMode() == KoSvgText::HorizontalTB;
+                    }
                     if (!t->shapesInside().isEmpty()) {
                         QPainterPath paths;
                         Q_FOREACH(KoShape *s, t->shapesInside()) {
                             KoPathShape *path = dynamic_cast<KoPathShape *>(s);
                             if (path) {
-                                paths.addPath(t->absoluteTransformation().map(path->absoluteTransformation().map(path->outline())));
+                                paths.addPath(path->absoluteTransformation().map(path->outline()));
                             }
                         }
                         if (!paths.isEmpty()) {
@@ -394,6 +409,139 @@ namespace KisToolUtils {
         }
 
         return true;
+    }
+
+
+    QString nodeEditableMessage(KisNodeSP node, bool blockedNoIndirectPainting)
+    {
+        QString message;
+        if (!node->isEditable(true) || blockedNoIndirectPainting) {
+            if (!node->visible() && node->userLocked()) {
+                message = i18n("Layer is locked and invisible.");
+            } else if (node->userLocked()) {
+                message = i18n("Layer is locked.");
+            } else if(!node->visible()) {
+                message = i18n("Layer is invisible.");
+            } else if (blockedNoIndirectPainting) {
+                message = i18n("Layer can be painted in Wash Mode only.");
+            } else {
+                message = i18n("Group not editable.");
+            }
+        }
+        return message;
+    }
+
+
+    StandardBrushSizes::StandardBrushSizes(int minSize, int maxSize)
+    {
+        int brushSize = minSize;
+        do {
+            m_sizes.push_back(brushSize);
+            int increment = qMax(1, int(std::ceil(qreal(brushSize) / 15)));
+            brushSize += increment;
+        } while (brushSize < maxSize);
+        m_sizes.push_back(maxSize);
+    }
+
+    int StandardBrushSizes::increaseBrushSize(qreal size)
+    {
+        std::vector<int>::iterator result = std::upper_bound(m_sizes.begin(), m_sizes.end(), qRound(size));
+        return result != m_sizes.end() ? *result : m_sizes.back();
+    }
+
+    int StandardBrushSizes::decreaseBrushSize(qreal size)
+    {
+        std::vector<int>::reverse_iterator result =
+            std::upper_bound(m_sizes.rbegin(), m_sizes.rend(), qRound(size), std::greater<int>());
+        return result != m_sizes.rend() ? *result : m_sizes.front();
+    }
+
+
+    void trimDeviceForClipboard(KisImageSP image,
+                                KisPaintDeviceSP device,
+                                KisSelectionSP selection,
+                                bool makeSharpClip)
+    {
+        KIS_SAFE_ASSERT_RECOVER_RETURN(image);
+
+        QRect rc = selection ? selection->selectedExactRect() : image->bounds();
+
+        const KoColorSpace *cs = device->colorSpace();
+
+        if (selection) {
+            // Apply selection mask.
+            KisPaintDeviceSP selectionProjection = selection->projection();
+            const KoColorSpace *selCs = selection->projection()->colorSpace();
+
+            KisSequentialIterator layerIt(device, rc);
+            KisSequentialConstIterator selectionIt(selectionProjection, rc);
+
+            while (layerIt.nextPixel() && selectionIt.nextPixel()) {
+
+                /**
+                 * Sharp method is an exact reverse of COMPOSITE_OVER
+                 * so if you cover the cut/copied piece over its source
+                 * you get an exactly the same image without any seams
+                 */
+                if (makeSharpClip) {
+                    qreal dstAlpha = cs->opacityF(layerIt.rawData());
+                    qreal sel = selCs->opacityF(selectionIt.oldRawData());
+                    qreal newAlpha = sel * dstAlpha / (1.0 - dstAlpha + sel * dstAlpha);
+                    float mask = newAlpha / dstAlpha;
+
+                    cs->applyAlphaNormedFloatMask(layerIt.rawData(), &mask, 1);
+                } else {
+                    cs->applyAlphaU8Mask(layerIt.rawData(), selectionIt.oldRawData(), 1);
+                }
+            }
+
+            // if we have a selection, then we should remove the rest of the image
+            // and make it fully transparent
+            device->setDefaultPixel(KoColor::createTransparent(device->colorSpace()));
+            device->purgeDefaultPixels();
+        }
+
+        device->crop(rc);
+    }
+
+    KisImageSP buildImageForClipboard(KisImageSP srcImage, KisNodeList nodes)
+    {
+        KisImageSP clipImage = new KisImage(0, srcImage->width(), srcImage->height(), srcImage->colorSpace(), "ClipImage");
+        clipImage->setResolution(srcImage->xRes(), srcImage->yRes());
+        Q_FOREACH (KisNodeSP node, nodes) {
+            clipImage->addNode(node, clipImage->root());
+        }
+
+        clipImage->refreshGraphAsync();
+        clipImage->waitForDone();
+
+        return clipImage;
+    }
+
+    void recenterClip(KisPaintDeviceSP clip, const QPoint &newCenter)
+    {
+        const QRect clipBounds = clip->nonDefaultPixelArea();
+        const QPoint diff = newCenter - clipBounds.center();
+        clip->moveTo(clip->offset() + diff);
+    }
+
+    void ensureClipVisible(const QRect &imageBounds, KisPaintDeviceSP clip)
+    {
+        const QRect clipBounds = clip->nonDefaultPixelArea();
+        if (!imageBounds.intersects(clipBounds)) {
+            const QPoint diff = imageBounds.center() - clipBounds.center();
+            clip->moveTo(clip->offset() + diff);
+        }
+    }
+
+    void bakeDefaultPixel(KisPaintDeviceSP clip, const QRect &rc)
+    {
+        if (clip->defaultPixel().opacityU8() != OPACITY_TRANSPARENT_U8) {
+            KisPaintDeviceSP copy = new KisPaintDevice(clip->colorSpace());
+            copy->makeCloneFromRough(clip, rc);
+            KisPainter::copyAreaOptimized(rc.topLeft(), copy, clip, rc);
+            clip->setDefaultPixel(KoColor::createTransparent(clip->colorSpace()));
+        }
     }
 
 }

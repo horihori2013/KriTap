@@ -15,6 +15,8 @@
 #include <KoShapeManager.h>
 #include <KoCanvasResourceProvider.h>
 #include <commands/KoShapeTransformCommand.h>
+#include <KoShapeBulkActionLock.h>
+#include <KoColorDisplayRendererInterface.h>
 
 #include <QPointF>
 #include <math.h>
@@ -73,19 +75,24 @@ void ShapeRotateStrategy::rotateBy(qreal angle)
 
     QTransform applyMatrix = matrix * m_rotationMatrix.inverted();
     m_rotationMatrix = matrix;
+
+    KoShapeBulkActionLock lock(m_transformedShapesAndSelection);
+
     Q_FOREACH (KoShape *shape, m_transformedShapesAndSelection) {
-        QRectF dirtyRect = shape->boundingRect();
         shape->applyAbsoluteTransformation(applyMatrix);
-        dirtyRect |= shape->boundingRect();
-        shape->updateAbsolute(dirtyRect);
     }
+
+    KoShapeBulkActionLock::bulkShapesUpdate(lock.unlock());
 }
 
-void ShapeRotateStrategy::paint(QPainter &painter, const KoViewConverter &converter)
+void ShapeRotateStrategy::paint(QPainter &painter, const KoViewConverter &converter, const KoColorDisplayRendererInterface *displayRendererInterface)
 {
     // paint the rotation center
-    painter.setPen(QPen(Qt::red));
-    painter.setBrush(QBrush(Qt::red));
+    KoColor c;
+    c.fromQColor(Qt::red);
+    QColor red = displayRendererInterface->convertColorToDisplayColorSpace(c);
+    painter.setPen(QPen(red));
+    painter.setBrush(QBrush(red));
     painter.setRenderHint(QPainter::Antialiasing, true);
     QRectF circle(0, 0, handleRadius(), handleRadius());
     circle.moveCenter(converter.documentToView(m_rotationCenter));

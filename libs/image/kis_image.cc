@@ -88,6 +88,7 @@
 #include <QtCore>
 
 #include <functional>
+#include <memory>
 
 #include "kis_time_span.h"
 
@@ -99,6 +100,7 @@
 #include "KisBusyWaitBroker.h"
 #include <KisStaticInitializer.h>
 #include "KisImageGlobalSelectionManagementInterface.h"
+#include "kis_hdr_metadata.h"
 
 
 // #define SANITY_CHECKS
@@ -195,6 +197,8 @@ public:
             });
         }
 
+        updateHDRMetadataOnColorSpaceChange(colorSpace);
+
         connect(q, SIGNAL(sigImageModified()), KisMemoryStatisticsServer::instance(), SLOT(notifyImageChanged()));
         connect(undoStore.data(), SIGNAL(historyStateChanged()), &signalRouter, SLOT(emitImageModifiedNotification()));
     }
@@ -277,6 +281,10 @@ public:
 
     KisCompositeProgressProxy compositeProgressProxy;
 
+    std::optional<KisRelativeContentLightLevelInformation> relativeContentLightLevelInformation;
+    std::optional<KisColorVolumeInformation> colorVolumeInformation;
+    std::optional<double> diffuseWhiteLightLevel;
+
     QPointF axesCenter;
     bool allowMasksOnRootNode = false;
 
@@ -293,6 +301,21 @@ public:
                                     bool convertLayers,
                                     KoColorConversionTransformation::Intent renderingIntent,
                                     KoColorConversionTransformation::ConversionFlags conversionFlags);
+
+    void updateHDRMetadataOnColorSpaceChange(const KoColorSpace *newColorSpace) {
+        const KoColorProfile *profile = newColorSpace->profile();
+        if (!profile) return;
+
+        if (profile->hdrReferenceWhite()) {
+            diffuseWhiteLightLevel = profile->hdrReferenceWhite();
+        } else if (profile->getTransferCharacteristics() == TRC_ITU_R_BT_2100_0_PQ) {
+            diffuseWhiteLightLevel = 203.0;
+        } else if (!newColorSpace->hasHighDynamicRange()) {
+            relativeContentLightLevelInformation = std::nullopt;
+            colorVolumeInformation = std::nullopt;
+            diffuseWhiteLightLevel = std::nullopt;
+        }
+    }
 
     struct SetImageProjectionColorSpace;
 };
@@ -335,7 +358,6 @@ KisImage::~KisImage()
     waitForDone();
 
     delete m_d;
-    disconnect(); // in case Qt gets confused
 }
 
 KisImageSP KisImage::fromQImage(const QImage &image, KisUndoStore *undoStore)
@@ -487,6 +509,10 @@ void KisImage::copyFromImageImpl(const KisImage &rhs, int policy)
             m_d->proofingConfig = proofingConfig;
         }
     }
+
+    m_d->colorVolumeInformation = rhs.m_d->colorVolumeInformation;
+    m_d->relativeContentLightLevelInformation = rhs.m_d->relativeContentLightLevelInformation;
+    m_d->diffuseWhiteLightLevel = rhs.m_d->diffuseWhiteLightLevel;
 
     bool exactCopy = policy & EXACT_COPY;
 
@@ -875,42 +901,69 @@ void KisImage::cropImage(const QRect& newRect)
 void KisImage::purgeUnusedData(bool isCancellable)
 {
     /**
-     * WARNING: don't use this function unless you know what you are doing!
-     *
-     * It breaks undo on layers! Therefore, after calling it, KisImage is not
-     * undo-capable anymore!
+     * In cancellable mode, the action does **not** touch the paint
+     * devices of the image, only projections, because it can break
+     * undo/redo.
      */
 
     struct PurgeUnusedDataStroke : public KisRunnableBasedStrokeStrategy {
         PurgeUnusedDataStroke(KisImageSP image, bool isCancellable)
             : KisRunnableBasedStrokeStrategy(QLatin1String("purge-unused-data"),
-                                             kundo2_noi18n("purge-unused-data")),
-              m_image(image)
+                                             kundo2_i18n("Purge Unused Data")),
+              m_image(image),
+              m_finalCommand(new KUndo2Command(this->name()))
+
         {
             this->enableJob(JOB_INIT, true, KisStrokeJobData::BARRIER, KisStrokeJobData::EXCLUSIVE);
             this->enableJob(JOB_DOSTROKE, true);
-            setClearsRedoOnStart(false);
+            this->enableJob(JOB_FINISH, true, KisStrokeJobData::SEQUENTIAL);
+
+            setClearsRedoOnStart(!isCancellable);
             setRequestsOtherStrokesToEnd(!isCancellable);
             setCanForgetAboutMe(isCancellable);
         }
 
         void initStrokeCallback() override
         {
-            KisPaintDeviceList deviceList;
+            KisPaintDeviceList paintDevicesList;
+            KisPaintDeviceList projectionsList;
             QVector<KisStrokeJobData*> jobsData;
 
             KisLayerUtils::recursiveApplyNodes(m_image->root(),
-                [&deviceList](KisNodeSP node) {
-                   deviceList << node->getLodCapableDevices();
+                [&paintDevicesList, &projectionsList, this](KisNodeSP node) {
+                    KisPaintDeviceList deviceList = node->getLodCapableDevices();
+
+                    Q_FOREACH (KisPaintDeviceSP dev, deviceList) {
+                        if (!dev) continue;
+
+                        // we do **not** strip paint devices in the forgettable
+                        // mode, since we should handle transactions for them
+                        if (dev == node->paintDevice() && !canForgetAboutMe()) {
+                            paintDevicesList << dev;
+                        } else {
+                            projectionsList << dev;
+                        }
+                    }
                  });
 
             /// make sure we deduplicate the list to avoid
             /// concurrent write access to the devices
-            KritaUtils::makeContainerUnique(deviceList);
+            KritaUtils::makeContainerUnique(paintDevicesList);
+            KritaUtils::makeContainerUnique(projectionsList);
 
-            Q_FOREACH (KisPaintDeviceSP device, deviceList) {
-                if (!device) continue;
+            Q_FOREACH(KisPaintDeviceSP dev, paintDevicesList) {
+                projectionsList.removeAll(dev);
 
+                // all transactions will be linked to the final command via the
+                // parent-child relationship
+                m_transactions.emplace_back(dev, m_finalCommand.get(), -1, nullptr, KisTransaction::None);
+            }
+
+            // now, when the transactions are started, we can merge the two lists
+            paintDevicesList << projectionsList;
+            projectionsList.clear();
+
+            Q_FOREACH (KisPaintDeviceSP device, paintDevicesList) {
                 KritaUtils::addJobConcurrent(jobsData,
                     [device] () {
                         const_cast<KisPaintDevice*>(device.data())->purgeDefaultPixels();
@@ -920,8 +973,36 @@ void KisImage::purgeUnusedData(bool isCancellable)
             addMutatedJobs(jobsData);
         }
 
+        void finishStrokeCallback() override {
+            for (auto it = m_transactions.begin(); it != m_transactions.end(); ++it) {
+                std::unique_ptr<KUndo2Command> cmd(it->endAndTake());
+
+                // verify the transaction command is linked to m_finalCommand,
+                // if not, just delete on return
+                KIS_SAFE_ASSERT_RECOVER(cmd->hasParent()) { continue; }
+
+                // if has a parent, release...
+                (void)cmd.release();
+            }
+
+            m_transactions.clear();
+
+            m_finalCommand->redo();
+            m_image->postExecutionUndoAdapter()->addCommand(toQShared(m_finalCommand.release()));
+
+            // now reset the thumbnail generation limitation
+            KisLayerUtils::recursiveApplyNodes(m_image->root(),
+                [](KisNodeSP node) {
+                    if (node->preferredThumbnailBoundsMode() != KisThumbnailBoundsMode::Precise) {
+                        node->setPreferredThumbnailBoundsMode(KisThumbnailBoundsMode::Precise);
+                    }
+                });
+        }
+
     private:
         KisImageSP m_image;
+        std::unique_ptr<KUndo2Command> m_finalCommand;
+        std::vector<KisTransaction> m_transactions;
     };
 
     KisStrokeId id = startStroke(new PurgeUnusedDataStroke(this, isCancellable));
@@ -1519,6 +1600,7 @@ bool KisImage::assignImageProfile(const KoColorProfile *profile, bool blockAllUp
 void KisImage::setProjectionColorSpace(const KoColorSpace * colorSpace)
 {
     m_d->colorSpace = colorSpace;
+    m_d->updateHDRMetadataOnColorSpaceChange(m_d->colorSpace);
 }
 
 const KoColorSpace * KisImage::colorSpace() const
@@ -2021,6 +2103,41 @@ bool KisImage::startIsolatedMode(KisNodeSP node, bool isolateLayer, bool isolate
     endStroke(id);
 
     return true;
+}
+
+std::optional<KisRelativeContentLightLevelInformation> KisImage::relativeContentLightLevelInformation() const
+{
+    return m_d->relativeContentLightLevelInformation;
+}
+
+void KisImage::setRelativeContentLightLevelInformation(const std::optional<KisRelativeContentLightLevelInformation> clli)
+{
+    m_d->relativeContentLightLevelInformation = clli;
+}
+
+std::optional<KisColorVolumeInformation> KisImage::colorVolumeInformation() const
+{
+    return m_d->colorVolumeInformation;
+}
+
+void KisImage::setColorVolumeInformation(const std::optional<KisColorVolumeInformation> cvi)
+{
+    m_d->colorVolumeInformation = cvi;
+}
+
+std::optional<double> KisImage::hdrReferenceWhiteLightLevel() const
+{
+    return m_d->diffuseWhiteLightLevel;
+}
+
+void KisImage::setHdrReferenceWhiteLightLevel(const std::optional<double> value)
+{
+    if (m_d->colorSpace->profile()->hdrReferenceWhite() && m_d->colorSpace->profile()->hdrReferenceWhite() != value) {
+        qWarning() << "Cannot set the diffuse white metadata on the image: profile provides a different inconsistent value";
+        return;
+    }
+
+    m_d->diffuseWhiteLightLevel = value;
 }
 
 void KisImage::stopIsolatedMode()
@@ -2583,8 +2700,16 @@ KisImageAnimationInterface* KisImage::animationInterface() const
 
 void KisImage::setProofingConfiguration(KisProofingConfigurationSP proofingConfig)
 {
+    const bool changed = bool(m_d->proofingConfig) != bool(proofingConfig) ||
+        (m_d->proofingConfig && proofingConfig && *m_d->proofingConfig != *proofingConfig);
+
+    // we still assign even when unchanged since they can be different
+    // shared pointer objects
     m_d->proofingConfig = proofingConfig;
-    Q_EMIT sigProofingConfigChanged();
+
+    if (changed) {
+        Q_EMIT sigProofingConfigChanged();
+    }
 }
 
 KisProofingConfigurationSP KisImage::proofingConfiguration() const

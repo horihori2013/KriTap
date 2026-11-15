@@ -14,6 +14,12 @@ class TestProfileGeneration : public QObject
 private Q_SLOTS:
     void testTransferFunctions();
 
+    void testCICPwriting_data();
+    void testCICPwriting();
+
+    void testRetrieveNits_data();
+    void testRetrieveNits();
+
 };
 
 #endif // TESTPROFILEGENERATION_H

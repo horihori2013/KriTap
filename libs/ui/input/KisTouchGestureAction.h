@@ -27,6 +27,8 @@ public:
         KisToolSelectContiguous,
         KisToolMove,
         KisToolTransform,
+        ToggleEraserPreset,
+        MirrorView
     };
 
     KisTouchGestureAction();

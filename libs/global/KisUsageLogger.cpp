@@ -16,6 +16,8 @@
 #include <QDir>
 #include <QScreen>
 #include <QClipboard>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QThread>
 #include <QApplication>
 #include <klocalizedstring.h>
@@ -32,6 +34,7 @@
 #endif
 
 #ifdef Q_OS_ANDROID
+#include <KisAndroidExitInfo.h>
 #if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
 #include <QtAndroidExtras/QtAndroid>
 #endif
@@ -51,6 +54,7 @@ struct KisUsageLogger::Private {
     bool active {false};
     QFile logFile;
     QFile sysInfoFile;
+    QMutex mutex;
 };
 
 KisUsageLogger::KisUsageLogger()
@@ -64,15 +68,22 @@ KisUsageLogger::KisUsageLogger()
 
     QFileInfo fi(d->logFile.fileName());
     if (fi.size() > 100 * 1000 * 1000) { // 100 mb seems a reasonable max
-        d->logFile.open(QIODevice::WriteOnly | QIODevice::Truncate);
-        d->logFile.close();
+        if (d->logFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            d->logFile.close();
+        } else {
+            qWarning() << "Could not clear the >100MB" << d->logFile.fileName() << ":" << d->logFile.errorString();
+        }
     }
     else {
         rotateLog();
     }
 
-    d->logFile.open(QFile::Append | QFile::Text);
-    d->sysInfoFile.open(QFile::WriteOnly | QFile::Text);
+    if (!d->logFile.open(QFile::Append | QFile::Text)) {
+        qWarning() << "Could not open" << d->logFile.fileName() << "for writing:" << d->logFile.errorString();
+    }
+    if (!d->sysInfoFile.open(QFile::WriteOnly | QFile::Text)) {
+        qWarning() << "Could not open" << d->sysInfoFile.fileName() << "for writing:" << d->sysInfoFile.errorString();
+    }
 }
 
 KisUsageLogger::~KisUsageLogger()
@@ -115,7 +126,10 @@ QString KisUsageLogger::basicSystemInfo()
         }
     }
 #endif
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    // Attribute does nothing on Qt6
     systemInfo.append("\n Hidpi: ").append(QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling) ? "true" : "false");
+#endif
 #ifdef Q_OS_MACOS
     KisMacosEntitlements entitlements;
     systemInfo.append("\n Sandbox: ").append((entitlements.sandbox()) ? "true" : "false");
@@ -212,27 +226,22 @@ void KisUsageLogger::close()
 
 void KisUsageLogger::log(const QString &message)
 {
+    QMutexLocker locker(&s_instance->d->mutex);
+
     if (!s_instance->d->active) return;
     if (!s_instance->d->logFile.isOpen()) return;
 
     s_instance->d->logFile.write(QDateTime::currentDateTime().toString(Qt::RFC2822Date).toUtf8());
     s_instance->d->logFile.write(": ");
-    write(message);
-}
-
-void KisUsageLogger::write(const QString &message)
-{
-    if (!s_instance->d->active) return;
-    if (!s_instance->d->logFile.isOpen()) return;
-
     s_instance->d->logFile.write(message.toUtf8());
     s_instance->d->logFile.write("\n");
-
     s_instance->d->logFile.flush();
 }
 
 void KisUsageLogger::writeSysInfo(const QString &message)
 {
+    QMutexLocker locker(&s_instance->d->mutex);
+
     if (!s_instance->d->active) return;
     if (!s_instance->d->sysInfoFile.isOpen()) return;
 
@@ -242,7 +251,6 @@ void KisUsageLogger::writeSysInfo(const QString &message)
     s_instance->d->sysInfoFile.flush();
 
 }
-
 
 void KisUsageLogger::writeHeader()
 {
@@ -269,6 +277,12 @@ void KisUsageLogger::writeHeader()
         .arg(qApp->style()->objectName(),
              QStyleFactory::keys().join(", ")));
 
+#ifdef Q_OS_ANDROID
+    KisAndroidExitInfo androidExitInfo = KisAndroidExitInfo::getLast();
+    if (androidExitInfo.isValid()) {
+        log(QStringLiteral("Last exit: %1").arg(androidExitInfo.buildLogString()));
+    }
+#endif
 }
 
 QString KisUsageLogger::screenInformation()
@@ -308,58 +322,54 @@ QString KisUsageLogger::screenInformation()
 
 void KisUsageLogger::rotateLog()
 {
-    if (d->logFile.exists()) {
-        {
-            // Check for CLOSING SESSION
-            d->logFile.open(QFile::ReadOnly);
-            QString log = QString::fromUtf8(d->logFile.readAll());
-            if (!log.split(s_sectionHeader).last().contains("CLOSING SESSION")) {
-                log.append("\nKRITA DID NOT CLOSE CORRECTLY\n");
-                QString crashLog = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/kritacrash.log");
-                if (QFileInfo(crashLog).exists()) {
-                    QFile f(crashLog);
-                    f.open(QFile::ReadOnly);
-                    QString crashes = QString::fromUtf8(f.readAll());
-                    f.close();
+    if (!d->logFile.exists()) { return; }
 
-                    QStringList crashlist = crashes.split("-------------------");
-                    log.append(QString("\nThere were %1 crashes in total in the crash log.\n").arg(crashlist.size()));
+    // Check for CLOSING SESSION
+    if (d->logFile.open(QFile::ReadOnly)) {
+        QString log = QString::fromUtf8(d->logFile.readAll());
+        if (!log.split(s_sectionHeader).last().contains("CLOSING SESSION")) {
+            log.append("\nKRITA DID NOT CLOSE CORRECTLY\n");
+            QString crashLog = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/kritacrash.log");
+            QFile f(crashLog);
+            if (f.open(QFile::ReadOnly)) {
+                QString crashes = QString::fromUtf8(f.readAll());
+                f.close();
 
-                    if (crashes.size() > 0) {
-                        log.append(crashlist.last());
-                    }
+                QStringList crashlist = crashes.split("-------------------");
+                log.append(QString("\nThere were %1 crashes in total in the crash log.\n").arg(crashlist.size()));
+
+                if (crashes.size() > 0) {
+                    log.append(crashlist.last());
                 }
-                d->logFile.close();
-                d->logFile.open(QFile::WriteOnly);
+            }
+            d->logFile.close();
+            if (d->logFile.open(QFile::WriteOnly)) {
                 d->logFile.write(log.toUtf8());
             }
-            d->logFile.flush();
-            d->logFile.close();
         }
+        d->logFile.flush();
+        d->logFile.close();
+    }
 
-        {
-            // Rotate
-            d->logFile.open(QFile::ReadOnly);
-            QString log = QString::fromUtf8(d->logFile.readAll());
-            d->logFile.close();
-            QStringList logItems = log.split("SESSION:");
-            QStringList keptItems;
-            int sectionCount = logItems.size();
-            if (sectionCount > s_maxLogs) {
-                for (int i = sectionCount - s_maxLogs; i < sectionCount; ++i) {
-                    if (logItems.size() > i ) {
-                        keptItems.append(logItems[i]);
-                    }
+    // Rotate
+    if (d->logFile.open(QFile::ReadOnly)) {
+        QString log = QString::fromUtf8(d->logFile.readAll());
+        d->logFile.close();
+        QStringList logItems = log.split("SESSION:");
+        QStringList keptItems;
+        int sectionCount = logItems.size();
+        if (sectionCount > s_maxLogs) {
+            for (int i = sectionCount - s_maxLogs; i < sectionCount; ++i) {
+                if (logItems.size() > i ) {
+                    keptItems.append(logItems[i]);
                 }
+            }
 
-                d->logFile.open(QFile::WriteOnly);
+            if (d->logFile.open(QFile::WriteOnly)) {
                 d->logFile.write(keptItems.join("\nSESSION:").toUtf8());
                 d->logFile.flush();
                 d->logFile.close();
             }
         }
-
-
     }
 }
-

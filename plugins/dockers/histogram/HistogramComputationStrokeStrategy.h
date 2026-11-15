@@ -18,7 +18,9 @@ using HistVector = std::vector<std::vector<quint32> >; //Don't use QVector here 
 struct HistogramData
 {
     HistVector bins;
+    HistVector binsLog;
     const KoColorSpace* colorSpace {0};
+    float maximumValue {1.0};
 };
 Q_DECLARE_METATYPE(HistogramData)
 

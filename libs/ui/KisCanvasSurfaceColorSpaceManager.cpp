@@ -8,27 +8,58 @@
 
 #include <KoColorProfile.h>
 #include <KoColorSpaceRegistry.h>
+#include <KoColorProfileQuery.h>
 
 #include <kis_config.h>
-#include <kis_config_notifier.h>
 
 #include <KisDisplayConfig.h>
 #include <KisProofingConfiguration.h>
 
+#include <surfacecolormanagement/KisSurfaceColorimetry.h>
 #include <surfacecolormanagement/KisSurfaceColorManagerInterface.h>
 
-KisCanvasSurfaceColorSpaceManager::KisCanvasSurfaceColorSpaceManager(KisSurfaceColorManagerInterface *interface, QObject *parent)
-    : QObject(parent)
-    , m_interface(interface)
-{
-    KisConfig cfg(true);
-    m_currentConfig = KisDisplayConfig(-1, cfg);
-    m_currentConfig.profile = KoColorSpaceRegistry::instance()->p709SRGBProfile();
-    m_surfaceMode = cfg.canvasSurfaceColorSpaceManagementMode();
+namespace {
+struct SurfaceFormatSelectionResult {
+    const KoColorProfile *profile = nullptr;
+    std::optional<KisSurfaceColorimetry::SurfaceDescription> requestedDescription;
+    QString errorMessage; // empty when no error
+};
+} /* namespace */
 
-    connect(m_interface.data(), &KisSurfaceColorManagerInterface::sigReadyChanged, this, &KisCanvasSurfaceColorSpaceManager::slotInterfaceReadyChanged);
-    connect(m_interface.data(), &KisSurfaceColorManagerInterface::sigPreferredSurfaceDescriptionChanged, this, &KisCanvasSurfaceColorSpaceManager::slotInterfacePreferredDescriptionChanged);
-    connect(KisConfigNotifier::instance(), &KisConfigNotifier::configChanged, this, &KisCanvasSurfaceColorSpaceManager::slotConfigChanged);
+struct KRITAUI_NO_EXPORT KisCanvasSurfaceColorSpaceManager::Private
+{
+    Private(KisSurfaceColorManagerInterface *interface) : interface(interface) {}
+
+    QScopedPointer<KisSurfaceColorManagerInterface> interface;
+    KisDisplayConfig currentConfig;
+    std::optional<KisSurfaceColorimetry::RenderIntent> proofingIntentOverride;
+    KisConfig::CanvasSurfaceMode surfaceMode = KisConfig::CanvasSurfaceMode::Preferred;
+    QString lastErrorString;
+
+    static KisSurfaceColorimetry::RenderIntent calculateConfigIntent(const KisDisplayConfig::Options &options);
+
+    SurfaceFormatSelectionResult
+    selectSurfaceDescription(KisConfig::CanvasSurfaceMode surfaceMode, const KisSurfaceColorimetry::SurfaceDescription &compositorPreferred);
+};
+
+KisCanvasSurfaceColorSpaceManager::KisCanvasSurfaceColorSpaceManager(KisSurfaceColorManagerInterface *interface,
+                                                                     const KisConfig::CanvasSurfaceMode surfaceMode,
+                                                                     const KisDisplayConfig::Options &options,
+                                                                     QObject *parent)
+    : QObject(parent)
+    , m_d(new Private(interface))
+{
+    m_d->currentConfig.profile = KoColorSpaceRegistry::instance()->p709SRGBProfile();
+    m_d->currentConfig.setOptions(options);
+    m_d->currentConfig.isHDR = false;
+    m_d->surfaceMode = surfaceMode;
+
+    connect(m_d->interface.data(), &KisSurfaceColorManagerInterface::sigReadyChanged, this, &KisCanvasSurfaceColorSpaceManager::slotInterfaceReadyChanged);
+    connect(m_d->interface.data(), &KisSurfaceColorManagerInterface::sigPreferredSurfaceDescriptionChanged, this, &KisCanvasSurfaceColorSpaceManager::slotInterfacePreferredDescriptionChanged);
+
+    if (m_d->interface->isReady()) {
+        slotInterfaceReadyChanged(true);
+    }
 }
 
 KisCanvasSurfaceColorSpaceManager::~KisCanvasSurfaceColorSpaceManager()
@@ -40,10 +71,7 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
     QString report;
     QDebug str(&report);
 
-    str << "(canvas surface color manager)" << Qt::endl;
-    str << Qt::endl;
-
-    if (!m_interface->isReady()) {
+    if (!m_d->interface->isReady()) {
         str << "WARNING: surface color management interface is not ready!" << Qt::endl;
         str << Qt::endl;
     }
@@ -53,36 +81,39 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
     using KisSurfaceColorimetry::NamedPrimaries;
     using KisSurfaceColorimetry::NamedTransferFunction;
 
-    RenderIntent preferredIntent = calculateConfigIntent(m_currentConfig);
-    str << "Configured intent:" << preferredIntent << "supported:" << m_interface->supportsRenderIntent(preferredIntent) << Qt::endl;
-
-    str << "Proofing intent:";
-    if (m_proofingIntentOverride) {
-        str << *m_proofingIntentOverride << "supported:" << m_interface->supportsRenderIntent(*m_proofingIntentOverride) << Qt::endl;
-    } else {
-        str << "<none>" << Qt::endl;
+    if (!m_d->lastErrorString.isEmpty()) {
+        str.noquote().nospace()
+            << "ERROR: Failed to set up color management for the surface: "
+            << m_d->lastErrorString
+            << Qt::endl;
+        str << Qt::endl;
     }
 
+    str << "Configured mode:" << m_d->surfaceMode << Qt::endl;
+
+    RenderIntent preferredIntent = Private::calculateConfigIntent(m_d->currentConfig.options());
+    str << "Configured intent:" << preferredIntent << "supported:" << m_d->interface->supportsRenderIntent(preferredIntent) << Qt::endl;
+
     str << "Actual intent:";
-    if (m_interface->renderingIntent()) {
-        str << *m_interface->renderingIntent() << Qt::endl;
+    if (m_d->interface->renderingIntent()) {
+        str << *m_d->interface->renderingIntent() << Qt::endl;
     } else {
         str << "<none>" << Qt::endl;
     }
     str << Qt::endl;
 
     str << "Active surface description:";
-    if (m_interface->surfaceDescription()) {
+    if (m_d->interface->surfaceDescription()) {
         str << Qt::endl;
-        str.noquote() << m_interface->surfaceDescription()->makeTextReport() << Qt::endl;
+        str.noquote() << m_d->interface->surfaceDescription()->makeTextReport() << Qt::endl;
     } else {
         str << "<none>" << Qt::endl;
     }
     str << Qt::endl;
 
     str << "Selected Profile:";
-    if (m_currentConfig.profile) {
-        auto profile = m_currentConfig.profile;
+    if (m_d->currentConfig.profile) {
+        auto profile = m_d->currentConfig.profile;
 
         str << profile->name() << Qt::endl;
         str << "    primaries:" << KoColorProfile::getColorPrimariesName(profile->getColorPrimaries()) << Qt::endl;
@@ -91,10 +122,10 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
 
         {
             auto colVec = profile->getColorantsxyY();
-            KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(colVec.size() == 9, report);
-            KisColorimetryUtils::xyY colR{colVec[0], colVec[1], colVec[2]};
-            KisColorimetryUtils::xyY colG{colVec[3], colVec[4], colVec[5]};
-            KisColorimetryUtils::xyY colB{colVec[6], colVec[7], colVec[8]};
+            KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(colVec.size() == 3, report);
+            KoColorimetryUtils::xyY colR = colVec[0];
+            KoColorimetryUtils::xyY colG = colVec[1];
+            KoColorimetryUtils::xyY colB = colVec[2];
 
             str << "    red:  " << colR << Qt::endl;
             str << "    green:" << colG << Qt::endl;
@@ -102,9 +133,7 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
         }
 
         {
-            auto whiteVec = profile->getWhitePointxyY();
-            KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(whiteVec.size() == 3, report);
-            KisColorimetryUtils::xyY white{whiteVec[0], whiteVec[1], whiteVec[2]};
+            KoColorimetryUtils::xyY white = profile->getWhitePointxyY();
 
             str << "    white: " << white << Qt::endl;
             str << Qt::endl;
@@ -115,9 +144,9 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
     }
 
     str << "Compositor preferred surface description:";
-    if (m_interface->preferredSurfaceDescription()) {
+    if (m_d->interface->preferredSurfaceDescription()) {
         str << Qt::endl;
-        str.noquote() << m_interface->preferredSurfaceDescription()->makeTextReport() << Qt::endl;
+        str.noquote() << m_d->interface->preferredSurfaceDescription()->makeTextReport() << Qt::endl;
     } else {
         str << "<none>" << Qt::endl;
     }
@@ -126,20 +155,44 @@ QString KisCanvasSurfaceColorSpaceManager::colorManagementReport() const
     return report;
 }
 
-KisSurfaceColorimetry::RenderIntent KisCanvasSurfaceColorSpaceManager::calculateConfigIntent(int kritaIntent, bool useBlackPointCompensation)
+QString KisCanvasSurfaceColorSpaceManager::osPreferredColorSpaceReport() const
+{
+    QString report;
+    QDebug str(&report);
+
+    if (!m_d->interface->isReady()) {
+        str << "WARNING: surface color management interface is not ready!" << Qt::endl;
+        str << Qt::endl;
+    }
+
+    if (m_d->interface->preferredSurfaceDescription()) {
+        str << Qt::endl;
+        str.noquote() << m_d->interface->preferredSurfaceDescription()->makeTextReport() << Qt::endl;
+    } else {
+        str << "<none>" << Qt::endl;
+    }
+
+    return report;
+}
+
+std::optional<KisSurfaceColorimetry::SurfaceDescription> KisCanvasSurfaceColorSpaceManager::currentSurfaceDescription() const
+{
+    return m_d->interface->preferredSurfaceDescription();
+}
+
+KisSurfaceColorimetry::RenderIntent KisCanvasSurfaceColorSpaceManager::Private::calculateConfigIntent(const KisDisplayConfig::Options &options)
 {
     using KisSurfaceColorimetry::RenderIntent;
 
-    KisConfig cfg(true);
     RenderIntent intent = RenderIntent::render_intent_perceptual;
 
-    switch (kritaIntent) {
+    switch (options.first) {
         case INTENT_PERCEPTUAL:
             // default value
             break;
         case INTENT_RELATIVE_COLORIMETRIC:
             intent =
-                useBlackPointCompensation ?
+                options.second.testFlag(KoColorConversionTransformation::ConversionFlag::BlackpointCompensation) ?
                 RenderIntent::render_intent_relative_bpc :
                 RenderIntent::render_intent_relative;
             break;
@@ -155,100 +208,196 @@ KisSurfaceColorimetry::RenderIntent KisCanvasSurfaceColorSpaceManager::calculate
     return intent;
 }
 
-KisSurfaceColorimetry::RenderIntent KisCanvasSurfaceColorSpaceManager::calculateConfigIntent(const KisDisplayConfig &config)
+void KisCanvasSurfaceColorSpaceManager::setDisplayConfigOptions(const KisConfig::CanvasSurfaceMode surfaceMode, const KisDisplayConfig::Options &options)
 {
-    return calculateConfigIntent(config.intent,
-        config.conversionFlags.testFlag(KoColorConversionTransformation::BlackpointCompensation));
+    if (!m_d->interface->isReady()) return;
+    if (surfaceMode == m_d->surfaceMode && options == m_d->currentConfig.options()) return;
+
+    m_d->surfaceMode = surfaceMode;
+    reinitializeSurfaceDescription(options);
 }
 
-void KisCanvasSurfaceColorSpaceManager::slotConfigChanged()
+void KisCanvasSurfaceColorSpaceManager::setDisplayConfigOptions(const KisDisplayConfig::Options &options)
 {
-    KisDisplayConfig oldDisplayConfig = m_currentConfig;
-
-    KisConfig cfg(true);
-    KisDisplayConfig config(-1, cfg);
-
-    KisSurfaceColorimetry::RenderIntent newIntent =
-        calculateConfigIntent(config.intent,
-            config.conversionFlags.testFlag(KoColorConversionTransformation::BlackpointCompensation));
-
-    if (newIntent != m_interface->renderingIntent() ||
-        m_surfaceMode != cfg.canvasSurfaceColorSpaceManagementMode()) {
-
-        m_currentConfig.intent = config.intent;
-        m_currentConfig.conversionFlags = config.conversionFlags;
-        m_surfaceMode = cfg.canvasSurfaceColorSpaceManagementMode();
-
-        if (m_interface->isReady()) {
-            reinitializeSurfaceDescription();
-        }
-    }
-
-    config.profile = m_currentConfig.profile;
-
-    if (config != oldDisplayConfig) {
-        m_currentConfig = config;
-        Q_EMIT sigDisplayConfigChanged(m_currentConfig);
-    }
-}
-
-void KisCanvasSurfaceColorSpaceManager::setProofingConfiguration(KisProofingConfigurationSP proofingConfig)
-{
-    /**
-     * WARNING: this code duplicates logic from KisOpenGLUpdateInfoBuilder::buildUpdateInfo()
-     * and KisProofingConfiguration::determineDisplayIntent() and
-     * KisProofingConfiguration::determineDisplayFlags. Ideally, they should be unified.
-     */
-
-    std::optional<KisSurfaceColorimetry::RenderIntent> newRenderingIntent;
-
-    if (proofingConfig && proofingConfig->displayFlags.testFlag(KoColorConversionTransformation::SoftProofing)) {
-        if (proofingConfig->displayMode == KisProofingConfiguration::Paper) {
-            newRenderingIntent = KisSurfaceColorimetry::RenderIntent::render_intent_absolute;
-        } else if (proofingConfig->displayMode == KisProofingConfiguration::Custom) {
-            newRenderingIntent =
-                calculateConfigIntent(proofingConfig->displayIntent,
-                    proofingConfig->displayFlags.testFlag(KoColorConversionTransformation::BlackpointCompensation));
-        }
-    }
-
-    if (m_proofingIntentOverride != newRenderingIntent) {
-        m_proofingIntentOverride = newRenderingIntent;
-
-        if (m_interface->isReady()) {
-            reinitializeSurfaceDescription();
-        }
-    }
+    setDisplayConfigOptions(m_d->surfaceMode, options);
 }
 
 void KisCanvasSurfaceColorSpaceManager::slotInterfaceReadyChanged(bool isReady)
 {
     if (isReady) {
-        reinitializeSurfaceDescription();
+        reinitializeSurfaceDescription(m_d->currentConfig.options());
     }
 }
 
 void KisCanvasSurfaceColorSpaceManager::slotInterfacePreferredDescriptionChanged()
 {
-    reinitializeSurfaceDescription();
+    reinitializeSurfaceDescription(m_d->currentConfig.options());
 }
 
 #include <KoColorProfile.h>
 #include <surfacecolormanagement/KisSurfaceColorimetryIccUtils.h>
 
-void KisCanvasSurfaceColorSpaceManager::reinitializeSurfaceDescription()
+SurfaceFormatSelectionResult
+KisCanvasSurfaceColorSpaceManager::Private::
+selectSurfaceDescription(KisConfig::CanvasSurfaceMode requestedSurfaceMode, const KisSurfaceColorimetry::SurfaceDescription &compositorPreferred)
 {
-    using KisSurfaceColorimetry::RenderIntent;
-    using KisSurfaceColorimetry::SurfaceDescription;
     using KisSurfaceColorimetry::NamedPrimaries;
     using KisSurfaceColorimetry::NamedTransferFunction;
+    using KisSurfaceColorimetry::RenderIntent;
+    using KisSurfaceColorimetry::SurfaceDescription;
+    using KisSurfaceColorimetry::Luminance;
+
+    std::optional<SurfaceDescription> requestedDescription = SurfaceDescription();
+    const KoColorProfile *profile = nullptr;
+
+    // we have our own definition of the Rec2020PQ space with
+    // the reference point fixed to 80 cd/m2
+    auto makeKritaRec2020PQLuminance = []() {
+        Luminance luminance;
+        luminance.minLuminance = 0;
+        luminance.referenceLuminance = 80;
+        luminance.maxLuminance = 10000;
+        return luminance;
+    };
+
+    if (requestedSurfaceMode == KisConfig::CanvasSurfaceMode::Preferred) {
+        if (compositorPreferred.colorSpace.isHDR()) {
+            // we support HDR only via Rec2020PQ, so reset the color space to that
+            // (KWin 6.5+ reports gamma-2.2 as preferred color space for whatever
+            //  reason)
+            requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_bt2020;
+            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_st2084_pq;
+        } else {
+            // we don't copy mastering properties, since they mean a different thing
+            // for the preferred space and outputs
+            requestedDescription->colorSpace = compositorPreferred.colorSpace;
+        }
+
+        if (std::holds_alternative<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction)
+            && std::get<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction)
+                == NamedTransferFunction::transfer_function_st2084_pq) {
+            requestedDescription->colorSpace.luminance = makeKritaRec2020PQLuminance();
+        }
+    } else if (requestedSurfaceMode == KisConfig::CanvasSurfaceMode::Rec2020pq) {
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_bt2020;
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_st2084_pq;
+        requestedDescription->colorSpace.luminance = makeKritaRec2020PQLuminance();
+    } else if (requestedSurfaceMode == KisConfig::CanvasSurfaceMode::Rec709g22) {
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
+        if (compositorPreferred.colorSpace.luminance) {
+            // rec709-g22 is considered as SDR in lcms, so we should our space to SDR range
+            requestedDescription->colorSpace.luminance = compositorPreferred.colorSpace.luminance->clipToSdr();
+        }
+    } else if (requestedSurfaceMode == KisConfig::CanvasSurfaceMode::Rec709g10) {
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_ext_linear;
+        if (compositorPreferred.colorSpace.luminance) {
+            /**
+             * Our definition of rec709-g10 is different from the one used in Wayland.
+             * Krita defines it as "value 1.0 is reference white" and everything above is
+             * HDR values. But Wayland declares it as "0.0...1.0 is the full HDR range" and
+             * reference white value being put somewhere inbetween. It technically allows
+             * Wayland to use 10-bit integer surfaces for rec709-g10 space, which is a bad
+             * idea in general (due to potential resolution limit). But given that Wayland/Mesa
+             * doesn't seem to support 16-bit float surfaces, that is the only option they have.
+             *
+             * Anyway, due to limitations of 10-bit integer surfaces in rec709-g10 mode,
+             * we just refuse to support that.
+             */
+            requestedDescription->colorSpace.luminance = compositorPreferred.colorSpace.luminance->clipToSdr();
+        }
+    }
+
+    if (std::holds_alternative<NamedPrimaries>(requestedDescription->colorSpace.primaries)
+        && std::get<NamedPrimaries>(requestedDescription->colorSpace.primaries) == NamedPrimaries::primaries_unknown) {
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
+    }
+
+    if (std::holds_alternative<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction)
+        && std::get<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction)
+            == NamedTransferFunction::transfer_function_unknown) {
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
+    }
+
+    if (!this->interface->supportsSurfaceDescription(*requestedDescription)) {
+        // try pure sRGB
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_srgb;
+
+        if (!this->interface->supportsSurfaceDescription(*requestedDescription)) {
+            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
+
+            if (!this->interface->supportsSurfaceDescription(*requestedDescription)) {
+                QString errorMessage = "failed to find a suitable surface format for the compositor";
+                qWarning().nospace().noquote() << "ERROR: " << errorMessage;
+                return {KoColorSpaceRegistry::instance()->p709SRGBProfile(), std::nullopt, errorMessage};
+            }
+        }
+    }
+
+    {
+        auto request = colorSpaceToRequest(requestedDescription->colorSpace);
+        if (request.isValid()) {
+            profile = KoColorSpaceRegistry::instance()->profileFor(request);
+        }
+    }
+
+    if (!profile) {
+        // keep primaries, but change the transfer function to gamma22
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
+        if (this->interface->supportsSurfaceDescription(*requestedDescription)) {
+            auto request = colorSpaceToRequest(requestedDescription->colorSpace);
+            if (request.isValid()) {
+                profile = KoColorSpaceRegistry::instance()->profileFor(request);
+            }
+        }
+    }
+
+    if (!profile) {
+        // try resetting primaries to srgb
+        requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
+        if (this->interface->supportsSurfaceDescription(*requestedDescription)) {
+            auto request = colorSpaceToRequest(requestedDescription->colorSpace);
+            if (request.isValid()) {
+                profile = KoColorSpaceRegistry::instance()->profileFor(request);
+            }
+        }
+    }
+
+    if (!profile) {
+        // now change the transfer function to srgb
+        requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_srgb;
+        if (this->interface->supportsSurfaceDescription(*requestedDescription)) {
+            auto request = colorSpaceToRequest(requestedDescription->colorSpace);
+            if (request.isValid()) {
+                profile = KoColorSpaceRegistry::instance()->profileFor(request);
+            }
+        }
+    }
+
+    if (!profile) {
+        QString errorMessage = "failed to create a profile for the compositor's preferred color space";
+        qWarning().nospace().noquote() << "ERROR: " << errorMessage;
+        qWarning() << "    " << ppVar(compositorPreferred);
+        qWarning() << "    " << ppVar(*requestedDescription);
+        return {KoColorSpaceRegistry::instance()->p709SRGBProfile(), std::nullopt, errorMessage};
+    }
+
+    return {profile, requestedDescription, {}};
+}
+
+void KisCanvasSurfaceColorSpaceManager::reinitializeSurfaceDescription(const KisDisplayConfig::Options &newOptions)
+{
+    using KisSurfaceColorimetry::NamedPrimaries;
+    using KisSurfaceColorimetry::NamedTransferFunction;
+    using KisSurfaceColorimetry::RenderIntent;
+    using KisSurfaceColorimetry::SurfaceDescription;
 
     RenderIntent preferredIntent =
-        m_proofingIntentOverride ?
-        *m_proofingIntentOverride :
-        calculateConfigIntent(m_currentConfig);
+        Private::calculateConfigIntent(newOptions);
 
-    if (!m_interface->supportsRenderIntent(preferredIntent)) {
+    if (!m_d->interface->supportsRenderIntent(preferredIntent)) {
         qWarning() << "WARNING: failed to set user preferred rendering"
                    << "intent for the surface, intent \""
                    << preferredIntent << "\" is unsupported, falling back to \"perceptual\"";
@@ -256,137 +405,68 @@ void KisCanvasSurfaceColorSpaceManager::reinitializeSurfaceDescription()
         preferredIntent = RenderIntent::render_intent_perceptual;
 
         // perceptual intent is guaranteed to be supported by the compositor
-        KIS_SAFE_ASSERT_RECOVER_RETURN(m_interface->supportsRenderIntent(preferredIntent));
+        KIS_SAFE_ASSERT_RECOVER_RETURN(m_d->interface->supportsRenderIntent(preferredIntent));
     }
 
     std::optional<SurfaceDescription> requestedDescription;
     const KoColorProfile *profile = nullptr;
 
-    if (m_surfaceMode == KisConfig::CanvasSurfaceMode::Unmanaged) {
+    if (m_d->surfaceMode == KisConfig::CanvasSurfaceMode::Unmanaged) {
         profile = KoColorSpaceRegistry::instance()->p709SRGBProfile();
+        m_d->lastErrorString.clear();
     } else {
-        requestedDescription = SurfaceDescription();
-
-        using namespace KisSurfaceColorimetry;
-
-        auto compositorPreferred = m_interface->preferredSurfaceDescription();
+        const auto compositorPreferred = m_d->interface->preferredSurfaceDescription();
         KIS_SAFE_ASSERT_RECOVER_RETURN(compositorPreferred);
 
-        if (m_surfaceMode == KisConfig::CanvasSurfaceMode::Preferred) {
-            // we don't copy mastering properties, since they mean a different thing
-            // for the preferred space and outputs
-            requestedDescription->colorSpace = compositorPreferred->colorSpace;
-        } else if (m_surfaceMode == KisConfig::CanvasSurfaceMode::Rec709g22) {
-            requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
-        } else if (m_surfaceMode == KisConfig::CanvasSurfaceMode::Rec709g10) {
-            requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_ext_linear;
-        }
-
-        // TODO: should we also set the HDR lightness properties?
-
-        if (std::holds_alternative<NamedPrimaries>(requestedDescription->colorSpace.primaries) &&
-            std::get<NamedPrimaries>(requestedDescription->colorSpace.primaries) == NamedPrimaries::primaries_unknown) {
-
-            requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
-        }
-
-        if (std::holds_alternative<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction) &&
-            std::get<NamedTransferFunction>(requestedDescription->colorSpace.transferFunction) == NamedTransferFunction::transfer_function_unknown) {
-
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
-        }
-
-        if (!m_interface->supportsSurfaceDescription(*requestedDescription)) {
-
-            // try pure sRGB
-            requestedDescription->colorSpace.primaries = NamedPrimaries::primaries_srgb;
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_srgb;
-
-            if (!m_interface->supportsSurfaceDescription(*requestedDescription)) {
-                requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
-
-                if (!m_interface->supportsSurfaceDescription(*requestedDescription)) {
-                    qWarning() << "WARNING: failed to find a suitable surface format for the compositor";
-                    return; // TODO: extra signals?
-                }
-            }
-        }
-
-        {
-            auto request = colorSpaceToRequest(requestedDescription->colorSpace);
-            if (request.isValid()) {
-                profile = KoColorSpaceRegistry::instance()->profileFor(request.colorants,
-                                                                       request.colorPrimariesType,
-                                                                       request.transferFunction);
-            }
-        }
-
-        if (!profile) {
-            // keep primaries, but change the transfer function to gamma22
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_gamma22;
-            if (m_interface->supportsSurfaceDescription(*requestedDescription)) {
-                auto request = colorSpaceToRequest(requestedDescription->colorSpace);
-                if (request.isValid()) {
-                    profile = KoColorSpaceRegistry::instance()->profileFor(request.colorants,
-                                                                           request.colorPrimariesType,
-                                                                           request.transferFunction);
-                }
-            }
-        }
-
-        if (!profile) {
-            // keep primaries, but change the transfer function to srgb
-            requestedDescription->colorSpace.transferFunction = NamedTransferFunction::transfer_function_srgb;
-            if (m_interface->supportsSurfaceDescription(*requestedDescription)) {
-                auto request = colorSpaceToRequest(requestedDescription->colorSpace);
-                if (request.isValid()) {
-                    profile = KoColorSpaceRegistry::instance()->profileFor(request.colorants,
-                                                                           request.colorPrimariesType,
-                                                                           request.transferFunction);
-                }
-            }
-        }
-
-        if (!profile) {
-            qWarning() << "WARNING: failed to to create a profile for the compositor's preferred color space";
-            qWarning() << "    " << ppVar(compositorPreferred);
-            qWarning() << "    " << ppVar(*requestedDescription);
-            // TODO: debug all supported values for the compositor
-            return; // TODO: extra signals?
-        }
+        auto result = m_d->selectSurfaceDescription(m_d->surfaceMode, *compositorPreferred);
+        profile = result.profile;
+        requestedDescription = result.requestedDescription;
+        m_d->lastErrorString = result.errorMessage;
     }
 
     KIS_SAFE_ASSERT_RECOVER_RETURN(profile);
-    KIS_SAFE_ASSERT_RECOVER_RETURN(!requestedDescription || m_interface->supportsSurfaceDescription(*requestedDescription));
+    KIS_SAFE_ASSERT_RECOVER_RETURN(!requestedDescription || m_d->interface->supportsSurfaceDescription(*requestedDescription));
 
-    if (true || m_interface->surfaceDescription() != requestedDescription ||
-        m_interface->renderingIntent() != preferredIntent) {
+    if (m_d->interface->surfaceDescription() != requestedDescription ||
+        m_d->interface->renderingIntent() != preferredIntent) {
 
         if (requestedDescription) {
-            auto future = m_interface->setSurfaceDescription(*requestedDescription, preferredIntent);
-            future.then([](QFuture<bool> result) {
+            auto future = m_d->interface->setSurfaceDescription(*requestedDescription, preferredIntent);
+            future.then([this](QFuture<bool> result) {
                 if (!result.isValid() || !result.result()) {
-                    qWarning()
-                        << "WARNING: failed to set color space for the surface, setSurfaceDescription() returned false";
+                    QString errorMessage = "failed to set color space for the surface, setSurfaceDescription() returned false";
+                    m_d->lastErrorString = errorMessage;
+                    qWarning().nospace().noquote() << "ERROR: " << errorMessage;
                 }
             });
         } else {
-            m_interface->unsetSurfaceDescription();
+            m_d->interface->unsetSurfaceDescription();
         }
     }
 
-    KIS_SAFE_ASSERT_RECOVER_RETURN(m_currentConfig.profile);
+    const bool requestedDescriptionIsHDR = requestedDescription && requestedDescription->colorSpace.isHDR();
 
-    if (*m_currentConfig.profile != *profile) {
-        m_currentConfig.profile = profile;
-        Q_EMIT sigDisplayConfigChanged(m_currentConfig);
+    KisDisplayConfig newDisplayConfig;
+    newDisplayConfig.profile = profile;
+    newDisplayConfig.setOptions(newOptions); // TODO: think about failure to set the intent and infinite update loop
+    newDisplayConfig.isHDR = requestedDescriptionIsHDR;
+
+    KIS_SAFE_ASSERT_RECOVER(m_d->currentConfig.profile) {
+        m_d->currentConfig.profile = KoColorSpaceRegistry::instance()->p709SRGBProfile();
     }
 
+    if (m_d->currentConfig != newDisplayConfig) {
+        m_d->currentConfig = newDisplayConfig;
+        Q_EMIT sigDisplayConfigChanged(m_d->currentConfig);
+    }
+}
+
+bool KisCanvasSurfaceColorSpaceManager::isReady() const
+{
+    return m_d->interface->isReady();
 }
 
 KisDisplayConfig KisCanvasSurfaceColorSpaceManager::displayConfig() const
 {
-    return m_currentConfig;
+    return m_d->currentConfig;
 }

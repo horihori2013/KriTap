@@ -285,7 +285,7 @@ void ToolTransformArgs::transformSrcAndDst(const QTransform &t)
         m_transformedCenter = t.map(m_transformedCenter);
 
         QMatrix4x4 m(t);
-        m_cameraPos = m * m_cameraPos;
+        m_cameraPos = m.map(m_cameraPos);
     } else if (m_mode == PERSPECTIVE_4POINT) {
         m_originalCenter = t.map(m_originalCenter);
         m_transformedCenter = t.map(m_transformedCenter);
@@ -565,7 +565,7 @@ void ToolTransformArgs::saveContinuedState()
 
 void ToolTransformArgs::restoreContinuedState()
 {
-    QScopedPointer<ToolTransformArgs> tempTransformation(
+    std::unique_ptr<ToolTransformArgs> tempTransformation(
         new ToolTransformArgs(*m_continuedTransformation));
 
     *this = *tempTransformation;
@@ -574,7 +574,7 @@ void ToolTransformArgs::restoreContinuedState()
 
 const ToolTransformArgs* ToolTransformArgs::continuedTransform() const
 {
-    return m_continuedTransformation.data();
+    return m_continuedTransformation.get();
 }
 
 const KisBezierTransformMesh *ToolTransformArgs::meshTransform() const
@@ -625,7 +625,7 @@ void ToolTransformArgs::scale3dSrcAndDst(qreal scale)
         // so we cannot just do `QMatrix4x4 m(t)`.
         QMatrix4x4 m;
         m.scale(scale);
-        m_cameraPos = m * m_cameraPos;
+        m_cameraPos = m.map(m_cameraPos);
     } else {
         transformSrcAndDst(t);
     }

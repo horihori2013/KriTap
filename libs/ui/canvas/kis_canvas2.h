@@ -109,6 +109,9 @@ public: // KoCanvasBase implementation
      */
     KoShapeManager *globalShapeManager() const;
 
+    KoShape *currentShapeManagerOwnerShape() const override;
+    void setCurrentShapeManagerOwnerShape(KoShape *source) override;
+
     /**
      * Return shape manager associated with the currently active node.
      * If current node has no internal shape manager, return null.
@@ -121,6 +124,8 @@ public: // KoCanvasBase implementation
     const KisCoordinatesConverter* coordinatesConverter() const;
     const KoViewConverter *viewConverter() const override;
     KoViewConverter *viewConverter() override;
+
+    KoColorDisplayRendererInterface* displayRendererInterface() const override;
 
     QWidget* canvasWidget() override;
 
@@ -257,6 +262,7 @@ public Q_SLOTS:
     bool yAxisMirrored() const;
     void slotSoftProofing();
     void slotGamutCheck();
+    void slotChangeGlobalProofingConfig();
     void slotChangeProofingConfig();
     void slotPopupPaletteRequestedZoomChange(int zoom);
 
@@ -287,8 +293,6 @@ private Q_SLOTS:
 
     void slotEffectiveZoomChanged(qreal newZoom);
     void slotCanvasStateChanged();
-
-    void viewportOffsetMoved(const QPointF &oldOffset, const QPointF &newOffset);
 
     void slotSelectionChanged();
 
@@ -328,9 +332,7 @@ private:
     void updateCanvasWidgetImpl(const QRect &rc = QRect());
     void setCanvasWidget(KisAbstractCanvasWidget *widget);
     void resetCanvas(bool useOpenGL);
-    void setDisplayConfig(const KisDisplayConfig &config);
-
-    const KoColorProfile* effectiveDisplayProfile(int screenNumber, const KisConfig &config) const;
+    void slotSurfaceFormatChanged(const KisDisplayConfig &config);
 
     void notifyLevelOfDetailChange();
 

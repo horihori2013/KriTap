@@ -46,6 +46,8 @@ public:
     static QCursor rotateCanvasDiscreteCursor();
     static QCursor samplerImageForegroundCursor();
     static QCursor samplerImageBackgroundCursor();
+    static QCursor samplerGroupForegroundCursor();
+    static QCursor samplerGroupBackgroundCursor();
     static QCursor samplerLayerForegroundCursor();
     static QCursor samplerLayerBackgroundCursor();
     static QCursor changeExposureCursor();
@@ -73,6 +75,8 @@ public:
     // by QImage can be used. The file will be stored in the KisIconCache, so
     // each file will be loaded only once.
     static QCursor load(const QString & cursorName, int hotspotX = -1, int hotspotY = -1);
+
+    static QCursor loadWithSize(const QString & cursorName, int width, int height, int hotspotX = -1, int hotspotY = -1);
 
 private:
 

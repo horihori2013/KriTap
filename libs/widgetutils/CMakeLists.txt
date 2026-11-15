@@ -49,6 +49,7 @@ set(kritawidgetutils_LIB_SRCS
     KisMenuStyleDontCloseOnAlt.cpp
     KisSpinBoxI18nHelper.cpp
     KisScreenMigrationTracker.cpp
+    KisRootSurfaceTrackerBase.cpp
 
     config/khelpclient.cpp
     config/klanguagebutton.cpp
@@ -144,6 +145,10 @@ if (APPLE)
     target_link_libraries(kritawidgetutils PRIVATE kritamacosutils)
 endif ()
 
+if (ANDROID)
+    target_link_libraries(kritawidgetutils PRIVATE Qt${QT_MAJOR_VERSION}::AndroidExtras)
+endif()
+
 target_link_libraries(kritawidgetutils
     PUBLIC
         Qt${QT_MAJOR_VERSION}::Widgets
@@ -161,7 +166,6 @@ target_link_libraries(kritawidgetutils
         KF${KF_MAJOR}::ConfigGui
         KF${KF_MAJOR}::GuiAddons
         KF${KF_MAJOR}::WidgetsAddons
-        KF${KF_MAJOR}::WindowSystem
         kritaplugin
         
         ${KRITA_WIDGET_UTILS_EXTRA_LIBS}
@@ -169,7 +173,18 @@ target_link_libraries(kritawidgetutils
 
 if (QT_MAJOR_VERSION STREQUAL "6")
     target_link_libraries(kritawidgetutils PRIVATE KF6::ColorScheme)
+
+    if (HAVE_WAYLAND)
+        set_source_files_properties(
+            KoItemToolTip.cpp
+            PROPERTIES
+            INCLUDE_DIRECTORIES
+            "${Qt6WaylandGlobalPrivate_INCLUDE_DIRS};${Qt6WaylandClient_PRIVATE_INCLUDE_DIRS};${Qt6Gui_PRIVATE_INCLUDE_DIRS}"
+        )
+    endif()
 endif()
+
+
 
 set_target_properties(kritawidgetutils
     PROPERTIES VERSION ${GENERIC_KRITA_LIB_VERSION} SOVERSION ${GENERIC_KRITA_LIB_SOVERSION}

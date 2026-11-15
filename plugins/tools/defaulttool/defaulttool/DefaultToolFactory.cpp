@@ -37,8 +37,10 @@ KoToolBase *DefaultToolFactory::createTool(KoCanvasBase *canvas)
     return new DefaultTool(canvas, true);
 }
 
-QList<QAction *> DefaultToolFactory::createActionsImpl()
+QList<QAction *> DefaultToolFactory::createActionsImpl(KoToolManager *toolManager)
 {
+    Q_UNUSED(toolManager);
+
     KisActionRegistry *actionRegistry = KisActionRegistry::instance();
 
     QList<QAction *> actions;
@@ -72,6 +74,21 @@ QList<QAction *> DefaultToolFactory::createActionsImpl()
     actions << actionRegistry->makeQAction("object_intersect", this);
     actions << actionRegistry->makeQAction("object_subtract", this);
     actions << actionRegistry->makeQAction("object_split", this);
+
+    actions << actionRegistry->makeQAction("text_type_preformatted", this);
+    actions << actionRegistry->makeQAction("text_type_pre_positioned", this);
+    actions << actionRegistry->makeQAction("text_type_inline_wrap", this);
+
+    actions << actionRegistry->makeQAction("add_shape_to_flow_area", this);
+    actions << actionRegistry->makeQAction("subtract_shape_from_flow_area", this);
+    actions << actionRegistry->makeQAction("put_text_on_path", this);
+    actions << actionRegistry->makeQAction("remove_shapes_from_text_flow", this);
+
+    actions << actionRegistry->makeQAction("flow_shape_type_toggle", this);
+    actions << actionRegistry->makeQAction("flow_shape_order_back", this);
+    actions << actionRegistry->makeQAction("flow_shape_order_earlier", this);
+    actions << actionRegistry->makeQAction("flow_shape_order_later", this);
+    actions << actionRegistry->makeQAction("flow_shape_order_front", this);
 
     return actions;
 

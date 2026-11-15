@@ -41,7 +41,7 @@ typedef KisBaseNode::Property* OptionalProperty;
 class NodeDelegate::Private
 {
 public:
-    Private(NodeDelegate *_q) : q(_q), view(0), edit(0) { }
+    Private(NodeDelegate *_q, NodeView *_view) : q(_q), view(_view), edit(0), tip(_view) { }
 
     NodeDelegate *q;
 
@@ -88,10 +88,8 @@ public:
 
 NodeDelegate::NodeDelegate(NodeView *view, QObject *parent)
     : QAbstractItemDelegate(parent)
-    , d(new Private(this))
+    , d(new Private(this, view))
 {
-    d->view = view;
-
     QApplication::instance()->installEventFilter(this);
     connect(KisConfigNotifier::instance(), SIGNAL(configChanged()), SLOT(slotConfigChanged()));
     connect(this, SIGNAL(resetVisibilityStasis()), SLOT(slotResetState()));
@@ -1037,6 +1035,20 @@ NodeDelegate::Private::propForMousePos(const QModelIndex &index, const QPoint &m
 
 bool NodeDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index)
 {
+    //Explicitly handle mouse release events
+    if (event->type() == QEvent::MouseButtonRelease &&index.flags() & Qt::ItemIsEnabled)  {
+        //For some reason qt5 doesn't give us which button was released, From my testing i couldn't get a release event on rmb, so we assume that it's lmb
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        auto clickedProperty = d->propForMousePos(index, mouseEvent->pos(), option);
+        if (!clickedProperty && mouseEvent->modifiers() == Qt::ControlModifier) {
+            changeSelectionAndCurrentIndex(index);
+            return true;
+        }
+
+        //We only need this event for ctrl clicks, so we just return here
+        return false;
+    }
+
     if ((event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
         && (index.flags() & Qt::ItemIsEnabled))
     {
@@ -1127,11 +1139,6 @@ bool NodeDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const Q
                         model->setData(index, true, KisNodeModel::AlternateActiveRole);
 
                         return true;
-                    } else if (mouseEvent->modifiers() == Qt::ControlModifier) {
-                        // the control modifier shifts the current index as well (even when deselected), so we
-                        // handle it manually.
-                        changeSelectionAndCurrentIndex(index);
-                        return true;
                     }
                     return false;
                 }
@@ -1152,12 +1159,10 @@ bool NodeDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const Q
                      hoveredProperty->id == KisLayerPropertiesIcons::layerColorSpaceMismatch.id())) {
                 QToolTip::showText(helpEvent->globalPos(), hoveredProperty->state.toString(), d->view);
             } else {
-                d->tip.showTip(d->view, helpEvent->pos(), option, index);
+                d->tip.showTip(helpEvent->pos(), option, index);
             }
         }
         return true;
-    } else if (event->type() == QEvent::Leave) {
-        d->tip.hide();
     }
 
     return false;

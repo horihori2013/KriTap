@@ -11,29 +11,33 @@
 
 #include <QPointF>
 #include <QSizeF>
+#include <KisHandleStyle.h>
 
 class SvgTextTool;
 
 class KoSvgTextShape;
+class KoShape;
 
 class SvgCreateTextStrategy : public KoInteractionStrategy
 {
 public:
-    SvgCreateTextStrategy(SvgTextTool *tool, const QPointF &clicked);
+    SvgCreateTextStrategy(SvgTextTool *tool, const QPointF &clicked, KoShape *shape = nullptr);
     ~SvgCreateTextStrategy() override = default;
 
-    void paint(QPainter &painter, const KoViewConverter &converter) override;
+    void paint(QPainter &painter, const KoViewConverter &converter, const KoColorDisplayRendererInterface *displayRendererInterface) override;
     void handleMouseMove(const QPointF &mouseLocation, Qt::KeyboardModifiers modifiers) override;
     KUndo2Command *createCommand() override;
     void cancelInteraction() override;
     void finishInteraction(Qt::KeyboardModifiers modifiers) override;
 
     bool draggingInlineSize();
+    bool hasWrappingShape();
 
 private:
     QPointF m_dragStart;
     QPointF m_dragEnd;
     QSizeF m_minSizeInline;
+    KoShape *m_flowShape;
     Qt::KeyboardModifiers m_modifiers;
 };
 

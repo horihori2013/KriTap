@@ -5,8 +5,10 @@
  */
 
 #include "KisReferenceImage.h"
+#include "KoColorProfile.h"
 #include "KoColorSpaceRegistry.h"
 
+#include <QtMath>
 #include <QImage>
 #include <QMessageBox>
 #include <QPainter>
@@ -22,7 +24,6 @@
 #include <kundo2command.h>
 #include <KoStore.h>
 #include <KoStoreDevice.h>
-#include <KoTosContainer_p.h>
 #include <krita_utils.h>
 #include <kis_coordinates_converter.h>
 #include <kis_dom_utils.h>
@@ -74,7 +75,17 @@ struct KisReferenceImage::Private : public QSharedData
         if (image.isNull()) {
             KisDocument * doc = KisPart::instance()->createTemporaryDocument();
             if (doc->openPath(externalFilename, KisDocument::DontAddToRecent)) {
-                image = doc->image()->convertToQImage(doc->image()->bounds(), 0);
+                if (doc->image()->colorSpace()->colorModelId() == RGBAColorModelID) {
+                    if (doc->image()->colorSpace()->colorDepthId() == Float32BitsColorDepthID || doc->image()->colorSpace()->colorDepthId() == Float16BitsColorDepthID) {
+                        // Because we store as PNG, we'll need to convert to PQ here. One problem: we need to check when saving the reference images.
+                        const KoColorSpace *pqCs = KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(), Integer16BitsColorDepthID.id(), KoColorSpaceRegistry::instance()->p2020PQProfile());
+                        doc->image()->convertImageColorSpace(pqCs, KoColorConversionTransformation::IntentRelativeColorimetric, KoColorConversionTransformation::internalConversionFlags());
+                    }
+                    image = doc->image()->convertToQImage(doc->image()->bounds(), doc->image()->colorSpace()->profile());
+                    image.setColorSpace(KoColorSpaceRegistry::instance()->QColorSpaceForProfile(doc->image()->colorSpace()->profile()));
+                } else {
+                    image = doc->image()->convertToQImage(doc->image()->bounds(), 0);
+                }
             }
             KisPart::instance()->removeDocument(doc);
         }
@@ -82,13 +93,20 @@ struct KisReferenceImage::Private : public QSharedData
         // See https://bugs.kde.org/show_bug.cgi?id=416515 -- a jpeg image
         // loaded into a qimage cannot be saved to png unless we explicitly
         // convert the colorspace of the QImage
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (image.colorSpace().colorModel() != QColorSpace::ColorModel::Rgb || !image.colorSpace().isValid()) {
+            image.convertToColorSpace(QColorSpace(QColorSpace::SRgb));
+        }
+#else
         image.convertToColorSpace(QColorSpace(QColorSpace::SRgb));
+#endif
 
         return (!image.isNull());
     }
 
     bool loadFromQImage(const QImage &img) {
         image = img;
+
         return !image.isNull();
     }
 
@@ -102,7 +120,10 @@ struct KisReferenceImage::Private : public QSharedData
                 gc2.drawImage(QPoint(), image);
             }
         } else {
+            // Need to convert ref image to ARGB to draw the zoom preview when color sampling
+            // Convert here to make sure already loaded ref images are converted
             cachedImage = image;
+            cachedImage.convertTo(QImage::Format_ARGB32);
         }
 
         mipmap = KisQImagePyramid(cachedImage, false);
@@ -152,7 +173,7 @@ KisReferenceImage::KisReferenceImage()
 }
 
 KisReferenceImage::KisReferenceImage(const KisReferenceImage &rhs)
-    : KoTosContainer(rhs)
+    : KoShape(rhs)
     , d(rhs.d)
 {}
 
@@ -184,9 +205,8 @@ KisReferenceImage * KisReferenceImage::fromFile(const QString &filename, const K
 
 KisReferenceImage *KisReferenceImage::fromClipboard(const KisCoordinatesConverter &converter)
 {
-    const auto sz = KisClipboard::instance()->clipSize();
-    KisPaintDeviceSP clip = KisClipboard::instance()->clip({0, 0, sz.width(), sz.height()}, true);
-    return fromPaintDevice(clip, converter, nullptr);
+    KisImageSP clipImage = KisClipboard::instance()->clipImage(true);
+    return fromPaintDevice(clipImage->projection(), converter, nullptr);
 }
 
 KisReferenceImage *
@@ -197,7 +217,16 @@ KisReferenceImage::fromPaintDevice(KisPaintDeviceSP src, const KisCoordinatesCon
     }
 
     auto *reference = new KisReferenceImage();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (src->colorSpace()->colorModelId() == RGBAColorModelID) {
+        reference->d->image = src->convertToQImage(src->colorSpace()->profile());
+        reference->d->image.setColorSpace(KoColorSpaceRegistry::instance()->QColorSpaceForProfile(src->colorSpace()->profile()));
+    } else {
+        reference->d->image = src->convertToQImage(KoColorSpaceRegistry::instance()->p709SRGBProfile());
+    }
+#else
     reference->d->image = src->convertToQImage(KoColorSpaceRegistry::instance()->p709SRGBProfile());
+#endif
 
     QRect r = QRect(QPoint(), reference->d->image.size());
     QSizeF size = converter.imageToDocument(r).size();
@@ -245,6 +274,26 @@ void KisReferenceImage::paint(QPainter &gc) const
     // order: zoom/rotation of the view; scale to high res; scale and rotation done by the user
     QImage prescaled = d->mipmap.getClosestWithoutWorkaroundBorder(transform * devicePixelRatioFTransform * gc.transform(), &scale);
     transform.scale(1.0 / scale, 1.0 / scale);
+
+    // Color conversion.
+    QImage *targetD = dynamic_cast<QImage*>(gc.device());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const bool getTargetCs = (targetD && targetD->colorSpace().colorModel() == QColorSpace::ColorModel::Rgb);
+
+    const KoColorProfile *targetP = getTargetCs? KoColorSpaceRegistry::instance()->profileForQColorSpace(targetD->colorSpace()): KoColorSpaceRegistry::instance()->p709SRGBProfile();
+    const KoColorProfile *sourceP = KoColorSpaceRegistry::instance()->profileForQColorSpace(d->image.colorSpace());
+    if (targetP != sourceP) {
+        KisPaintDeviceSP dev = new KisPaintDevice(KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(), Integer8BitsColorDepthID.id(), sourceP));
+        dev->convertFromQImage(prescaled, sourceP);
+        dev->convertTo(KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(), Integer8BitsColorDepthID.id(), targetP));
+        prescaled = dev->convertToQImage(targetP);
+        if (getTargetCs) {
+            prescaled.setColorSpace(targetD->colorSpace());
+        } else {
+            prescaled.setColorSpace(QColorSpace(QColorSpace::SRgb));
+        }
+    }
+#endif
 
     if (scale > 1.0) {
         // enlarging should be done without smooth transformation
@@ -303,21 +352,53 @@ void KisReferenceImage::setFilename(const QString &filename)
     d->externalFilename = filename;
 }
 
-QColor KisReferenceImage::getPixel(QPointF position)
+QPointF KisReferenceImage::documentToPixel(const QPointF &docPoint)
 {
-    if (transparency() == 1.0) return Qt::transparent;
+    QSizeF shapeSize = size();
+    QTransform scale = QTransform::fromScale(d->image.width() / shapeSize.width(), d->image.height() / shapeSize.height());
 
-    const QSizeF shapeSize = size();
-    const QTransform scale = QTransform::fromScale(d->image.width() / shapeSize.width(), d->image.height() / shapeSize.height());
+    QTransform transform = absoluteTransformation().inverted() * scale;
+    QPointF localPosition = docPoint * transform;
 
-    const QTransform transform = absoluteTransformation().inverted() * scale;
-    const QPointF localPosition = position * transform;
+    return localPosition;
+}
+
+
+QPoint KisReferenceImage::documentToPixelFloored(const QPointF &docPoint)
+{
+    QPointF localPoint = documentToPixel(docPoint);
+    return QPoint(qFloor(localPoint.x()), qFloor(localPoint.y()));
+}
+
+KoColor KisReferenceImage::getPixel(QPointF position)
+{
+    KoColor transparent;
+    transparent.setOpacity(0.0);
+    if (transparency() == 1.0) return transparent;
+
+    const QPoint localPosition = documentToPixelFloored(position);
 
     if (d->cachedImage.isNull()) {
         d->updateCache();
     }
 
-    return d->cachedImage.pixelColor(localPosition.toPoint());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileForQColorSpace(d->image.colorSpace());
+    const KoColorSpace *cs = KoColorSpaceRegistry::instance()->colorSpace(RGBAColorModelID.id(), Integer16BitsColorDepthID.id(), profile);
+#else
+    const KoColorSpace *cs = KoColorSpaceRegistry::instance()->rgb8(KoColorSpaceRegistry::instance()->p709SRGBProfile());
+#endif
+
+    KoColor c(cs);
+    QColor pixel = d->cachedImage.pixelColor(localPosition);
+    QVector<float> channels = {
+        static_cast<float>(pixel.blueF()),
+        static_cast<float>(pixel.greenF()),
+        static_cast<float>(pixel.redF()),
+        1.0f};
+    cs->fromNormalisedChannelsValue( c.data(),channels);
+
+    return c;
 }
 
 void KisReferenceImage::saveXml(QDomDocument &document, QDomElement &parentElement, int id)
@@ -419,6 +500,13 @@ bool KisReferenceImage::loadImage(KoStore *store)
 QImage KisReferenceImage::getImage()
 {
     return d->image;
+}
+
+QImage KisReferenceImage::getCachedImage()
+{
+    if (d->cachedImage.isNull()) d->updateCache();
+
+    return d->cachedImage;
 }
 
 KoShape *KisReferenceImage::cloneShape() const

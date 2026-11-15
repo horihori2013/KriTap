@@ -9,6 +9,7 @@
 
 #include <QTreeView>
 #include <QScroller>
+#include <optional>
 
 #include "kritalayerdocker_export.h"
 
@@ -63,6 +64,7 @@ public:
     void dragMoveEvent(QDragMoveEvent *ev) override;
 
     void dragLeaveEvent(QDragLeaveEvent *e) override;
+    void mousePressEvent(QMouseEvent *e) override;
 
     /**
      * Add toggle actions for all the properties associated with the
@@ -98,9 +100,7 @@ public:
     void toggleSolo(const QModelIndex &index);
 
 protected:
-    QItemSelectionModel::SelectionFlags selectionCommand(const QModelIndex &index,
-                                                         const QEvent *event) const override;
-
+    QItemSelectionModel::SelectionFlags selectionCommand(const QModelIndex &index, const QEvent *event) const override;
     QModelIndex indexAt(const QPoint &point) const override;
     bool viewportEvent(QEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -144,6 +144,9 @@ private:
     void setDraggingFlag(bool flag = true);
 
     void updateSelectedCheckboxColumn();
+
+    std::optional<QModelIndex> getActiveItem();
+    void setExclusiveActiveItem(QModelIndex index);
 
     bool m_draggingFlag;
 

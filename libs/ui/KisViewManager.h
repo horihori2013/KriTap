@@ -99,6 +99,7 @@ public:  // Krita specific interfaces
 
     /// The node manager handles everything about nodes
     KisNodeManager *nodeManager() const;
+    KoToolManager *toolManager() const;
 
     KisActionManager *actionManager() const;
 
@@ -178,6 +179,9 @@ public:
                              KisFloatingMessage::Priority priority = KisFloatingMessage::Medium,
                              int alignment = Qt::AlignCenter | Qt::TextWordWrap);
 
+    void showFloatingZoomMessage(const QString &message);
+    void showFloatingRotationMessage(const QString &message);
+
     /// @return the KisMainWindow this view is in, or 0
     KisMainWindow *mainWindow() const;
 
@@ -223,7 +227,6 @@ public Q_SLOTS:
     void slotUpdateAuthorProfileActions();
 
     void slotToggleFgBg();
-    void slotResetFgBg();
 
     // Enable the last set brush outline, or disable it if already enabled
     void slotToggleBrushOutline();
@@ -255,7 +258,6 @@ private Q_SLOTS:
     void slotSaveRulersTrackMouseState(bool value);
     void slotResetRotation();
     void slotResetDisplay();
-    void slotToggleFullscreen();
     void slotCreateOpacityResource(bool isOpacityPresetMode, KoToolBase *tool);
 private:
     void createActions();
@@ -265,6 +267,10 @@ private:
 
     /// The zoommanager handles everything action-related to zooming
     KisZoomManager * zoomManager();
+
+    void handleFloatingZoomRotationMessage(QString &messageToClear);
+
+    void updateCanvasOnlyActionState();
 
 private:
     class KisViewManagerPrivate;

@@ -32,6 +32,14 @@ bool KoDummyColorProfile::isSuitableForOutput() const
 {
     return true;
 }
+bool KoDummyColorProfile::isSuitableForInput() const
+{
+    return true;
+}
+bool KoDummyColorProfile::isSuitableForWorkspace() const
+{
+    return true;
+}
 
 bool KoDummyColorProfile::isSuitableForPrinting() const
 {
@@ -70,32 +78,42 @@ bool KoDummyColorProfile::isLinear() const
 {
     return true;
 }
-QVector<double> KoDummyColorProfile::getColorantsXYZ() const
+QVector<KoColorimetryUtils::XYZ> KoDummyColorProfile::getColorantsXYZ() const
 {
-    QVector<double> d50Dummy(3);
-    d50Dummy<<0.34773<<0.35952<<1.0;
-    return d50Dummy;
+    QVector<KoColorimetryUtils::XYZ> sRGBStandardAdaptedColorants = {
+        KoColorimetryUtils::XYZ{0.43603516, 0.22248840, 0.01391602},
+        KoColorimetryUtils::XYZ{0.38511658, 0.71690369, 0.09706116},
+        KoColorimetryUtils::XYZ{0.14305115, 0.06060791, 0.71392822}
+    };
+    return sRGBStandardAdaptedColorants;
 }
 
-QVector<double> KoDummyColorProfile::getColorantsxyY() const
+QVector<KoColorimetryUtils::xyY> KoDummyColorProfile::getColorantsxyY() const
 {
-    QVector<double> d50Dummy(3);
-    d50Dummy<<0.34773<<0.35952<<1.0;
-    return d50Dummy;
+    QVector<KoColorimetryUtils::xyY> result;
+
+    QVector<KoColorimetryUtils::XYZ> srgb = getColorantsXYZ();
+
+    Q_FOREACH (KoColorimetryUtils::XYZ c, srgb) {
+        result.append(c.toxyY());
+    }
+
+    return result;
 }
 
-QVector<double> KoDummyColorProfile::getWhitePointXYZ() const
+KoColorimetryUtils::XYZ KoDummyColorProfile::getWhitePointXYZ() const
 {
-    QVector<double> d50Dummy(3);
-    d50Dummy<<0.9642<<1.0000<<0.8249;
-    return d50Dummy;
+    return KoColorimetryUtils::XYZ{0.9642, 1.0000, 0.8249};
 }
 
-QVector<double> KoDummyColorProfile::getWhitePointxyY() const
+KoColorimetryUtils::xyY KoDummyColorProfile::getWhitePointxyY() const
 {
-    QVector<double> d50Dummy(3);
-    d50Dummy<<0.34773<<0.35952<<1.0;
-    return d50Dummy;
+    return KoColorimetryUtils::xyY{0.34773, 0.35952, 1.0};
+}
+
+std::optional<double> KoDummyColorProfile::hdrReferenceWhite() const
+{
+    return std::nullopt;
 }
 
 QVector <double> KoDummyColorProfile::getEstimatedTRC() const

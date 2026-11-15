@@ -60,6 +60,13 @@ public:
                     qreal amount,
                     qreal sigma);
 
+    void restoreShapePoints(const QPointF &base,
+                            qreal amount,
+                            qreal sigma,
+                            bool preserveRotation,
+                            bool preserveScale,
+                            bool preserveStretch);
+
     const QVector<QPointF>& originalPoints() const;
     QVector<QPointF>& transformedPoints();
 
@@ -77,6 +84,7 @@ public:
 
     QRect approxChangeRect(const QRect &rc);
     QRect approxNeedRect(const QRect &rc, const QRect &fullBounds);
+    QRectF accumulatedStrokesBounds() const;
 
     void transformSrcAndDst(const QTransform &t);
 

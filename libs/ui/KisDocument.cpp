@@ -66,6 +66,7 @@
 #include <QPainter>
 #include <QRect>
 #include <QScopedPointer>
+#include <QScopedValueRollback>
 #include <QSize>
 #include <QStringList>
 #include <QtGlobal>
@@ -91,6 +92,7 @@
 #include <kis_idle_watcher.h>
 #include <kis_signal_auto_connection.h>
 #include <kis_canvas_widget_base.h>
+#include "KisUniqueColorSet.h"
 #include "kis_layer_utils.h"
 #include "kis_selection_mask.h"
 
@@ -325,10 +327,10 @@ public:
         , importExportManager(new KisImportExportManager(_q))
         , autoSaveTimer(new QTimer(_q))
         , undoStack(new UndoStack(_q))
-        , colorHistory(rhs.colorHistory)
         , nserver(new KisNameServer(*rhs.nserver))
         , preActivatedNode(0) // the node is from another hierarchy!
         , imageIdleWatcher(2000 /*ms*/)
+        , colorHistoryModel(rhs.colorHistoryModel)
     {
         copyFromImpl(rhs, _q, CONSTRUCT);
         connect(&imageIdleWatcher, SIGNAL(startedIdleMode()), q, SLOT(slotPerformIdleRoutines()));
@@ -397,16 +399,17 @@ public:
     qreal audioLevel = 1.0;
 
     QColor globalAssistantsColor;
-    QList<KoColor> colorHistory;
+    KisUniqueColorSet colorHistoryModel;
 
     KisGridConfig gridConfig;
 
     bool imageModifiedWithoutUndo = false;
     bool modifiedWhileSaving = false;
-    QScopedPointer<KisDocument> backgroundSaveDocument;
+    std::unique_ptr<KisDocument> backgroundSaveDocument;
     QPointer<KoUpdater> savingUpdater;
     QFuture<KisImportExportErrorCode> childSavingFuture;
     KritaUtils::ExportFileJob backgroundSaveJob;
+    QMetaObject::Connection completeSavingConnection;
     KisSignalAutoConnectionsStore referenceLayerConnections;
 
     bool isRecovered = false;
@@ -514,6 +517,7 @@ void KisDocument::Private::copyFromImpl(const Private &rhs, KisDocument *q, KisD
         q->setAudioTracks(rhs.audioTracks);
         q->setAudioVolume(rhs.audioLevel);
         q->setGridConfig(rhs.gridConfig);
+        colorHistoryModel.setColorList(rhs.colorHistoryModel.colorList());
     } else {
         // in CONSTRUCT mode, we cannot use the functions of KisDocument
         // because KisDocument does not yet have a pointer to us.
@@ -736,17 +740,64 @@ KisDocument *KisDocument::clone(bool addStorage)
 
 bool KisDocument::exportDocumentImpl(const KritaUtils::ExportFileJob &job, KisPropertiesConfigurationSP exportConfiguration, bool isAdvancedExporting)
 {
-    QFileInfo filePathInfo(job.filePath);
+    // ANDROID NOTES (other comments in this file reference this one!)
+    //
+    // The Android file system doesn't work like on a real operating system.
+    // Instead of normal file paths, we get to deal with "content URIs", which
+    // can have various kinds of storage providers behind them. For example,
+    // there's a "normal" storage provider, a slightly less normal documents
+    // provider, a Google Drive provider and various kinds of third-party
+    // providers that are mostly just good at losing the data you give them.
+    // For example, we have reports of compression programs that provide a
+    // storage provider to write to ZIP or RAR archives or something. Except
+    // that they don't seem to work at all, they just accept the data with no
+    // error and throw it on the floor.
+    //
+    // The providers are particularly unreliable with regards to permissions,
+    // so calling "isWritable" will just always return false on some of them.
+    // This includes the default provider on some devices, which means checking
+    // whether a file is writable will mean that the user can't save anything!
+    // So, all the Android code skips over the writability check and assumes the
+    // files are writable. If they're not, we'll notice later anyway, by the
+    // fact that writing to them fails.
+    //
+    // Another issue is that it's only possible to overwrite files using File >
+    // Save. Using File > Save As or File > Export can't replace existing
+    // files. The reason for this is that we have to go through the operating
+    // system to request access to a file and the only things you can ask for
+    // is to open an existing file or to create a new file. Out of necessity,
+    // Save As and Export use the latter. If the user selects an existing file,
+    // the operating system "helpfully" appends a number to the path, *after*
+    // the file extension of course, because it hates the living. So that's
+    // another reason we can't go with the "safer" option of assuming that files
+    // aren't writable in some cases, since that would prevent the user from
+    // saving them normally and end up with a lot of "kiki.kra (2)".
+    //
+    // Also, when you request a file from the operating system, it always
+    // creates an empty file. That means checking whether a file exists will
+    // pretty much always succeed, so to know whether a file actually exists
+    // you have to check whether it isn't empty. Of course providers may fail to
+    // implement this correctly, but I'm not aware of any of them botching it
+    // that hard. Well, at least none of the ones that actually save files, as
+    // mentioned above some of them just seem to lose whatever you give them.
 
-    if (filePathInfo.exists() && !filePathInfo.isWritable()) {
+    QFileInfo filePathInfo(job.filePath);
+    bool fileExists = filePathInfo.exists();
+#ifdef Q_OS_ANDROID
+    if (fileExists) {
+        fileExists = filePathInfo.size() > 0;
+    }
+#else
+    if (fileExists && !filePathInfo.isWritable()) {
         slotCompleteSavingDocument(job, ImportExportCodes::NoAccessToWrite,
                                    i18n("%1 cannot be written to. Please save under a different name.", job.filePath),
                                    "");
         return false;
     }
+#endif
 
     KisConfig cfg(true);
-    if (cfg.backupFile() && filePathInfo.exists()) {
+    if (cfg.backupFile() && fileExists) {
 
         QString backupDir;
 
@@ -858,6 +909,9 @@ bool KisDocument::exportDocumentImpl(const KritaUtils::ExportFileJob &job, KisPr
             errorMessage = i18n("Could not start saving %1. Unknown failure has happened", job.filePath);
             errorCode = ImportExportCodes::Failure;
             break;
+        case KritaUtils::BackgroudSavingStartResult::Cancelled:
+            errorCode = ImportExportCodes::Cancelled;
+            break;
         case KritaUtils::BackgroudSavingStartResult::Success:
             // noop, not possible
             break;
@@ -939,7 +993,9 @@ QByteArray KisDocument::serializeToNativeByteArray()
         return buffer.data();
     }
 
-    d->savingImage = d->image;
+    // temporary set the saving image to avoid shared pointer
+    // leaking (see bug 528540)
+    QScopedValueRollback<KisImageSP> rollback(d->savingImage, d->image);
 
     if (!filter->convert(this, &buffer).isOk()) {
         qWarning() << "serializeToByteArray():: Could not export to our native format";
@@ -1053,8 +1109,14 @@ void KisDocument::Private::updateDocumentMetadataOnSaving(const QString &filePat
     q->setMimeType(mimeType);
     q->updateEditingTime(true);
 
+#ifdef Q_OS_ANDROID
+    // See the comment titled "ANDROID NOTES" in this file for an explanation of
+    // what this is about. (This is not that comment.)
+    q->setReadWrite(true);
+#else
     QFileInfo fi(filePath);
     q->setReadWrite(fi.isWritable());
+#endif
 
     if (!modifiedWhileSaving) {
         /**
@@ -1318,7 +1380,7 @@ KritaUtils::BackgroudSavingStartResult KisDocument::initiateSavingInBackground(c
 {
     KIS_ASSERT_RECOVER_RETURN_VALUE(job.isValid(), KritaUtils::BackgroudSavingStartResult::Failure);
 
-    QScopedPointer<KisDocument> clonedDocument;
+    std::unique_ptr<KisDocument> clonedDocument;
 
     if (!optionalClonedDocument) {
         clonedDocument.reset(lockAndCloneForSaving());
@@ -1387,7 +1449,7 @@ KritaUtils::BackgroudSavingStartResult KisDocument::initiateSavingInBackground(c
      */
     savingMutexLock.release();
 
-    d->backgroundSaveDocument.reset(clonedDocument.take());
+    d->backgroundSaveDocument.reset(clonedDocument.release());
     d->backgroundSaveJob = job;
     d->modifiedWhileSaving = false;
 
@@ -1395,29 +1457,35 @@ KritaUtils::BackgroudSavingStartResult KisDocument::initiateSavingInBackground(c
         d->backgroundSaveDocument->d->isAutosaving = true;
     }
 
-    connect(d->backgroundSaveDocument.data(),
+    connect(d->backgroundSaveDocument.get(),
             SIGNAL(sigBackgroundSavingFinished(KisImportExportErrorCode, QString, QString)),
             this,
             SLOT(slotChildCompletedSavingInBackground(KisImportExportErrorCode, QString, QString)));
 
 
-    connect(this, SIGNAL(sigCompleteBackgroundSaving(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
-            receiverObject, receiverMethod, Qt::UniqueConnection);
+    if (d->completeSavingConnection) {
+        disconnect(d->completeSavingConnection);
+    }
+    d->completeSavingConnection = connect(
+        this, SIGNAL(sigCompleteBackgroundSaving(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
+        receiverObject, receiverMethod);
 
-    bool started =
+    KisImportExportErrorCode error =
             d->backgroundSaveDocument->startExportInBackground(actionName,
                                                                job.filePath,
                                                                job.filePath,
                                                                job.mimeType,
                                                                job.flags & KritaUtils::SaveShowWarnings,
                                                                exportConfiguration, isAdvancedExporting);
-
-    if (!started) {
+    if (!error.isOk()) {
         // the state should have been deinitialized in slotChildCompletedSavingInBackground()
         KIS_SAFE_ASSERT_RECOVER (!d->backgroundSaveDocument && !d->backgroundSaveJob.isValid()) {
-            d->backgroundSaveDocument.take()->deleteLater();
+            d->backgroundSaveDocument.release()->deleteLater();
             d->savingMutex.unlock();
             d->backgroundSaveJob = KritaUtils::ExportFileJob();
+        }
+        if (error.isCancelled()) {
+            return KritaUtils::BackgroudSavingStartResult::Cancelled;
         }
         return KritaUtils::BackgroudSavingStartResult::Failure;
     }
@@ -1443,7 +1511,7 @@ void KisDocument::slotChildCompletedSavingInBackground(KisImportExportErrorCode 
         d->backgroundSaveDocument->d->isAutosaving = false;
     }
 
-    d->backgroundSaveDocument.take()->deleteLater();
+    d->backgroundSaveDocument.release()->deleteLater();
 
     KIS_ASSERT_RECOVER_RETURN(d->backgroundSaveJob.isValid());
 
@@ -1460,6 +1528,10 @@ void KisDocument::slotChildCompletedSavingInBackground(KisImportExportErrorCode 
                                  QString::number(fi.size())));
 
     Q_EMIT sigCompleteBackgroundSaving(job, status, errorMessage, warningMessage);
+    // One-shot: disconnect immediately after firing so future save completions
+    // don't invoke a stale or unrelated slot.
+    disconnect(d->completeSavingConnection);
+    d->completeSavingConnection = {};
 }
 
 void KisDocument::slotAutoSaveImpl(std::unique_ptr<KisDocument> &&optionalClonedDocument)
@@ -1545,7 +1617,7 @@ bool KisDocument::resourceSavingFilter(const QString &path, const QByteArray &mi
 
                         if (exportDocumentSync(tempFileName, mimeType, exportConfiguration)) {
                             QFile f2(tempFileName);
-                            f2.open(QFile::ReadOnly);
+                            KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(f2.open(QFile::ReadOnly), false);
 
                             QByteArray ba = f2.readAll();
 
@@ -1642,7 +1714,7 @@ void KisDocument::slotCompleteAutoSaving(const KritaUtils::ExportFileJob &job, K
     }
 }
 
-bool KisDocument::startExportInBackground(const QString &actionName,
+KisImportExportErrorCode KisDocument::startExportInBackground(const QString &actionName,
                                           const QString &location,
                                           const QString &realLocation,
                                           const QByteArray &mimeType,
@@ -1675,7 +1747,7 @@ bool KisDocument::startExportInBackground(const QString &actionName,
         }
         d->savingImage.clear();
         Q_EMIT sigBackgroundSavingFinished(initializationStatus, initializationStatus.errorMessage(), "");
-        return false;
+        return initializationStatus;
     }
 
     typedef QFutureWatcher<KisImportExportErrorCode> StatusWatcher;
@@ -1685,7 +1757,7 @@ bool KisDocument::startExportInBackground(const QString &actionName,
     connect(watcher, SIGNAL(finished()), SLOT(finishExportInBackground()));
     connect(watcher, SIGNAL(finished()), watcher, SLOT(deleteLater()));
 
-    return true;
+    return initializationStatus;
 }
 
 void KisDocument::finishExportInBackground()
@@ -1947,8 +2019,14 @@ bool KisDocument::openPath(const QString &_path, OpenFlags flags)
                 KisPart::instance()->addRecentURLToAllMainWindows(QUrl::fromLocalFile(_path));
             }
 
+#ifdef Q_OS_ANDROID
+            // See the comment titled "ANDROID NOTES" in this file for an
+            // explanation of what this is about. (This is not that comment.)
+            setReadWrite(true);
+#else
             QFileInfo fi(_path);
             setReadWrite(fi.isWritable());
+#endif
         }
 
         setRecovered(false);
@@ -2615,17 +2693,7 @@ bool KisDocument::newImage(const QString& name,
     documentInfo()->setAboutInfo("abstract", description);
 
     KisConfig cfg(false);
-    cfg.defImageWidth(width);
-    cfg.defImageHeight(height);
-    cfg.defImageResolution(imageResolution);
-    if (!cfg.useDefaultColorSpace())
-    {
-        cfg.defColorModel(image->colorSpace()->colorModelId().id());
-        cfg.setDefaultColorDepth(image->colorSpace()->colorDepthId().id());
-        cfg.defColorProfile(image->colorSpace()->profile()->name());
-    }
-
-    bool autopin = cfg.autoPinLayersToTimeline();
+    const bool autopin = cfg.autoPinLayersToTimeline();
 
     KisLayerSP bgLayer;
     if (bgStyle == KisConfig::RASTER_LAYER || bgStyle == KisConfig::FILL_LAYER) {
@@ -2676,7 +2744,7 @@ bool KisDocument::newImage(const QString& name,
             /**
              * Preinitialize color history for new documents when possible
              */
-            setColorHistory(window->viewManager()->canvasResourceProvider()->colorHistory());
+            setColorHistoryColors(window->viewManager()->canvasResourceProvider()->colorHistoryColors());
         }
     }
 
@@ -2874,11 +2942,6 @@ QColor KisDocument::assistantsGlobalColor()
     return d->globalAssistantsColor;
 }
 
-QList<KoColor> KisDocument::colorHistory()
-{
-    return d->colorHistory;
-}
-
 QRectF KisDocument::documentBounds() const
 {
     QRectF bounds = d->image->bounds();
@@ -2892,7 +2955,17 @@ QRectF KisDocument::documentBounds() const
     return bounds;
 }
 
-void KisDocument::setColorHistory(const QList<KoColor> &colors)
+void KisDocument::setColorHistoryColors(const QList<KoColor> &colors)
 {
-    d->colorHistory = colors;
+    d->colorHistoryModel.setColorList(colors);
+}
+
+QList<KoColor> KisDocument::colorHistoryColors() const
+{
+    return d->colorHistoryModel.colorList();
+}
+
+KisUniqueColorSet* KisDocument::colorHistoryModel()
+{
+    return &d->colorHistoryModel;
 }

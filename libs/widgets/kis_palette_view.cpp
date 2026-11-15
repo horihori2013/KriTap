@@ -12,12 +12,14 @@
 #include <QLineEdit>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QScopedValueRollback>
 
 #include <KConfigGroup>
 #include <KSharedConfig>
 #include <KLocalizedString>
 
 #include <kis_icon_utils.h>
+#include <config-qt-patches-present.h>
 
 #include <KisKineticScroller.h>
 
@@ -37,6 +39,7 @@ int KisPaletteView::MINIMUM_ROW_HEIGHT = 10;
 struct KisPaletteView::Private
 {
     QPointer<KisPaletteModel> model;
+    bool foregroundColorChangeInProgress = false;
 };
 
 KisPaletteView::KisPaletteView(QWidget *parent)
@@ -67,6 +70,32 @@ KisPaletteView::KisPaletteView(QWidget *parent)
     horizontalHeader()->setMinimumSectionSize(MINIMUM_ROW_HEIGHT);
     verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     verticalHeader()->setMinimumSectionSize(MINIMUM_ROW_HEIGHT);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0) && !KRITA_QT_HEADER_VIEW_MEMORY_MODE_INITIALIZATION_FIX
+    // Qt 6.9.0 got a "feature" that lets QHeaderView avoid
+    // memory allocations until some custom row/column size
+    // request comes from the user. This feature has a problem.
+    // When calling resizeSections(QHeaderView::Fixed) on a non-
+    // empty header view, it half-initialized the header,
+    // leaving it in a broken state. All the following
+    // initialization requests will not be able to complete
+    // or fix this state.
+    //
+    // Hence we should switch the header into "memory" mode
+    // explicitly, while it has zero sections in it. It will
+    // properly initialize it.
+    //
+    // Offending commit:
+    // https://github.com/qt/qtbase/commit/9e3a96189d9db8a458e65cd5078509afe7a160db
+    //
+    // Krita's copy has a fix for this issue, which is declared by
+    // a special definition.
+
+    verticalHeader()->setStretchLastSection(true);
+    verticalHeader()->setStretchLastSection(false);
+    horizontalHeader()->setStretchLastSection(true);
+    horizontalHeader()->setStretchLastSection(false);
+#endif
 
     connect(horizontalHeader(), SIGNAL(sectionResized(int,int,int)),
             SLOT(slotHorizontalHeaderResized(int,int,int)));
@@ -155,6 +184,13 @@ bool KisPaletteView::addGroupWithDialog()
     return false;
 }
 
+void KisPaletteView::scrollTo(const QModelIndex &index, ScrollHint hint)
+{
+    if(!d->foregroundColorChangeInProgress) {
+        QTableView::scrollTo(index, hint);
+    }
+}
+
 bool KisPaletteView::removeEntryWithDialog(QModelIndex index)
 {
     bool keepColors = false;
@@ -202,6 +238,7 @@ const KoColor KisPaletteView::closestColor(const KoColor &color) const
 
 void KisPaletteView::slotFGColorChanged(const KoColor &color)
 {
+    QScopedValueRollback<bool> rollback(d->foregroundColorChangeInProgress, true);
     selectClosestColor(color);
 }
 
@@ -267,22 +304,12 @@ void KisPaletteView::slotAdditionalGuiUpdate()
     clearSpans();
     resizeRows(verticalHeader()->defaultSectionSize());
 
-//    int row = -1;
-
     for (const QString &groupName : d->model->colorSet()->swatchGroupNames()) {
         if (groupName.isEmpty()) continue;
-
-//        KisSwatchGroupSP group = d->model->colorSet()->getGroup(groupName);
-//        row += group->rowCount() + 1;
-//        setSpan(row, 0, 1, d->model->columnCount());
-//        setRowHeight(row, fontMetrics().lineSpacing() + 6);
-//        verticalHeader()->resizeSection(row, fontMetrics().lineSpacing() + 6);
-
 
         int rowNumber = d->model->colorSet()->startRowForGroup(groupName);
         setSpan(rowNumber, 0, 1, d->model->columnCount());
         setRowHeight(rowNumber, fontMetrics().lineSpacing() + 6);
-        verticalHeader()->resizeSection(rowNumber, fontMetrics().lineSpacing() + 6);
     }
 }
 

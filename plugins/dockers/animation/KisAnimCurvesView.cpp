@@ -74,7 +74,7 @@ KisAnimCurvesView::KisAnimCurvesView(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
 
-    connect(horiZoomableBar, &KisZoomableScrollBar::valueChanged, [this](qreal value){
+    connect(horiZoomableBar, &KisZoomableScrollBar::valueChanged, this, [this](qreal value){
         m_d->horizontalHeader->setPixelOffset(value);
         slotUpdateInfiniteFramesCount();
         viewport()->update();
@@ -82,14 +82,14 @@ KisAnimCurvesView::KisAnimCurvesView(QWidget *parent)
 
     connect(horiZoomableBar, &KisZoomableScrollBar::sliderReleased, this, &KisAnimCurvesView::slotUpdateHorizontalScrollbarSize);
 
-    connect(horiZoomableBar, &KisZoomableScrollBar::overscroll, [this](qreal overscroll){
+    connect(horiZoomableBar, &KisZoomableScrollBar::overscroll, this, [this](qreal overscroll){
         m_d->horizontalHeader->setPixelOffset(m_d->horizontalHeader->offset() + overscroll);
         slotUpdateInfiniteFramesCount();
         slotUpdateHorizontalScrollbarSize();
         viewport()->update();
     });
 
-    connect(horiZoomableBar, &KisZoomableScrollBar::zoom, [this](qreal zoomDelta){
+    connect(horiZoomableBar, &KisZoomableScrollBar::zoom, this, [this](qreal zoomDelta){
         qreal currentZoomLevel = m_d->horizontalHeader->zoom();
         m_d->horizontalHeader->setZoom(currentZoomLevel + zoomDelta);
         slotUpdateInfiniteFramesCount();
@@ -104,33 +104,40 @@ KisAnimCurvesView::KisAnimCurvesView(QWidget *parent)
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     vertZoomableBar->setWheelOverscrollSensitivity( 0.04f );
 
-    connect(vertZoomableBar, &KisZoomableScrollBar::zoom, [this](qreal zoomDelta){
+    connect(vertZoomableBar, &KisZoomableScrollBar::zoom, this, [this](qreal zoomDelta){
         const qreal currentZoomLevel = m_d->verticalHeader->scale();
         m_d->verticalHeader->setScale(currentZoomLevel + zoomDelta / m_d->verticalHeader->step());
     });
 
-    connect(vertZoomableBar, &KisZoomableScrollBar::overscroll, [this](qreal overscroll){
+    connect(vertZoomableBar, &KisZoomableScrollBar::overscroll, this, [this](qreal overscroll){
        qreal currentOffset = m_d->verticalHeader->valueOffset();
        m_d->verticalHeader->setValueOffset(currentOffset - overscroll * m_d->verticalHeader->step() * 0.25);
     });
     
-    connect(m_d->verticalHeader, &KisAnimCurvesValuesHeader::scaleChanged, [this](qreal){
+    connect(m_d->verticalHeader, &KisAnimCurvesValuesHeader::scaleChanged, this, [this](qreal){
         viewport()->update();
     });
     
-    connect(m_d->verticalHeader, &KisAnimCurvesValuesHeader::valueOffsetChanged, [this](qreal){
+    connect(m_d->verticalHeader, &KisAnimCurvesValuesHeader::valueOffsetChanged, this, [this](qreal){
         viewport()->update();
     });
 
-    QScroller *scroller = KisKineticScroller::createPreconfiguredScroller(this);
-    if (scroller){
-        connect(scroller, SIGNAL(stateChanged(QScroller::State)),
-                this, SLOT(slotScrollerStateChanged(QScroller::State)));
+    // Kinetic scrolling via left-click completely breaks everything, it somehow
+    // ends up reporting left clicks as right clicks and makes the whole curves
+    // view behave erratically with regards to when it wants to scroll and when
+    // you're dragging pints. So we don't enable kinetic scrolling in that case
+    // and require the use of the scrollbar instead, like on the timeline.
+    if (KisKineticScroller::getConfiguredGestureType() != QScroller::LeftMouseButtonGesture) {
+        QScroller *scroller = KisKineticScroller::createPreconfiguredScroller(this);
+        if (scroller){
+            connect(scroller, SIGNAL(stateChanged(QScroller::State)),
+                    this, SLOT(slotScrollerStateChanged(QScroller::State)));
 
-        QScrollerProperties props = scroller->scrollerProperties();
-        props.setScrollMetric(QScrollerProperties::VerticalOvershootPolicy, QScrollerProperties::OvershootAlwaysOff);
-        props.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy, QScrollerProperties::OvershootAlwaysOff);
-        scroller->setScrollerProperties(props);
+            QScrollerProperties props = scroller->scrollerProperties();
+            props.setScrollMetric(QScrollerProperties::VerticalOvershootPolicy, QScrollerProperties::OvershootAlwaysOff);
+            props.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy, QScrollerProperties::OvershootAlwaysOff);
+            scroller->setScrollerProperties(props);
+        }
     }
 }
 
@@ -156,7 +163,7 @@ void KisAnimCurvesView::setModel(QAbstractItemModel *model)
     connect(model, &QAbstractItemModel::headerDataChanged,
             this, &KisAnimCurvesView::slotHeaderDataChanged);
 
-    connect(selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(selectionModel(), &QItemSelectionModel::selectionChanged, this,
         [this](const QItemSelection& newSelection, const QItemSelection& /*oldSelection*/) {
             if (newSelection.count() == 0) {
                 activeDataChanged(QModelIndex());

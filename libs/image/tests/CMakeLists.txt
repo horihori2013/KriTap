@@ -11,8 +11,6 @@ else()
     set (HAVE_FAILING_CMAKE FALSE)
 endif()
 
-include(KritaAddBrokenUnitTest)
-
 set(KisRandomGenerator2DDemoSources KisRandomGenerator2DDemo.cpp kimageframe.cpp)
 ki18n_wrap_ui(KisRandomGenerator2DDemoSources KisRandomGenerator2DDemo.ui)
 add_executable(KisRandomGenerator2DDemo ${KisRandomGenerator2DDemoSources})
@@ -75,7 +73,6 @@ kis_add_tests(
     kis_shared_ptr_test.cpp
     kis_bsplines_test.cpp
     kis_warp_transform_worker_test.cpp
-    kis_liquify_transform_worker_test.cpp
     kis_transparency_mask_test.cpp
     kis_types_test.cpp
     kis_vec_test.cpp
@@ -97,7 +94,7 @@ kis_add_tests(
     kis_marker_painter_test.cpp
     kis_lazy_brush_test.cpp
     kis_mask_similarity_test.cpp
-    KisMaskGeneratorTest.cpp
+    KisMaskGeneratorBenchmark.cpp
     kis_layer_style_filter_environment_test.cpp
     kis_asl_parser_test.cpp
     KisPerStrokeRandomSourceTest.cpp
@@ -129,33 +126,34 @@ kis_add_tests(
     KisKeyframeAnimationInterfaceSignalTest.cpp
     KisOverlayPaintDeviceWrapperTest.cpp
     KisPaintOpPresetTest.cpp
+    KisFourPointInterpolatorTest.cpp
+    KisSpatialContainerTest.cpp
+    KisGridInterpolationToolsTest.cpp
+    KisContentLightLevelProcessingVisitorTest.cpp
     LINK_LIBRARIES kritaimage kritatestsdk
-    NAME_PREFIX "libs-image-"
-    )
-
-kis_add_test(
-    KisMplTest.cpp
-    LINK_LIBRARIES kritaimage kritatestsdk kritaglobal
-    NAME_PREFIX "libs-image-"
     )
 
 kis_add_test(
     kis_clone_layer_test.cpp
     LINK_LIBRARIES kritaimage kritatestsdk kritaglobal kritatransformmaskstubs
-    NAME_PREFIX "libs-image-"
     )
 
 kis_add_test(
     kis_transform_mask_test.cpp
     LINK_LIBRARIES kritaimage kritatestsdk kritaglobal kritatransformmaskstubs
-    NAME_PREFIX "libs-image-"
     )
 
+
+include_directories(${QUAZIP_INCLUDE_DIRS})
+
+kis_add_test(
+    kis_liquify_transform_worker_test.cpp
+    LINK_LIBRARIES kritaimage kritatestsdk ${QUAZIP_LIBRARIES}
+    )
 
 krita_add_broken_unit_tests(
     kis_perspective_transform_worker_test.cpp
     LINK_LIBRARIES kritaimage kritatestsdk
-    NAME_PREFIX "libs-image-"
     )
 
 if(APPLE)

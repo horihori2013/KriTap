@@ -36,6 +36,8 @@
 #include "KoShapeFactoryBase.h"
 #include "kis_assert.h"
 #include "kactioncollection.h"
+#include "kis_global.h"
+#include "kis_algebra_2d.h"
 
 
 KoToolProxyPrivate::KoToolProxyPrivate(KoToolProxy *p)
@@ -50,10 +52,26 @@ void KoToolProxyPrivate::timeout() // Auto scroll the canvas
 
     const QPoint originalWidgetPoint = parent->documentToWidget(widgetScrollPointDoc).toPoint();
 
-    QRectF mouseArea(widgetScrollPointDoc, QSizeF(10, 10));
-    mouseArea.setTopLeft(mouseArea.center());
+    const QPointF margin(10.0, 10.0);
 
-    controller->ensureVisibleDoc(mouseArea, true);
+    const QPointF mouseAreaTopLeftWidget = parent->documentToWidget(widgetScrollPointDoc) - margin;
+    const QPointF mouseAreaBottomRightWidget = mouseAreaTopLeftWidget + 2 * margin;
+
+    const QPointF mouseAreaTopLeftDoc = parent->widgetToDocument(mouseAreaTopLeftWidget);
+    const QPointF mouseAreaBottomRightDoc = parent->widgetToDocument(mouseAreaBottomRightWidget);
+    QRectF mouseAreaDoc(mouseAreaTopLeftDoc, mouseAreaBottomRightDoc);
+
+
+    const QPointF oldPreferredCenter = controller->preferredCenter();
+
+    controller->ensureVisibleDoc(mouseAreaDoc, true);
+
+    const QPointF newPreferredCenter = controller->preferredCenter();
+
+    // if scrolling has happened, then just return!
+    if (oldPreferredCenter == newPreferredCenter) {
+        return;
+    }
 
     widgetScrollPointDoc = parent->widgetToDocument(originalWidgetPoint);
 
@@ -102,8 +120,6 @@ KoToolProxy::KoToolProxy(KoCanvasBase *canvas, QObject *parent)
     : QObject(parent),
       d(new KoToolProxyPrivate(this))
 {
-    KoToolManager::instance()->priv()->registerToolProxy(this, canvas);
-
     connect(&d->scrollTimer, SIGNAL(timeout()), this, SLOT(timeout()));
 }
 
@@ -125,6 +141,11 @@ void KoToolProxy::repaintDecorations()
 KoCanvasBase* KoToolProxy::canvas() const
 {
     return d->controller->canvas();
+}
+
+int KoToolProxy::multiClickCount() const
+{
+    return d->multiClickCount;
 }
 
 void KoToolProxy::countMultiClick(KoPointerEvent *ev, int eventType)
@@ -180,7 +201,7 @@ void KoToolProxy::tabletEvent(QTabletEvent *event, const QPointF &point)
 
     KoInputDevice id(KoInputDevice::convertDeviceType(event),
                      KoInputDevice::convertPointerType(event), event->uniqueId());
-    KoToolManager::instance()->priv()->switchInputDevice(id);
+    d->controller->toolManager()->priv()->switchInputDevice(id);
 
     KoPointerEvent ev(event, point);
 
@@ -209,7 +230,7 @@ void KoToolProxy::mousePressEvent(KoPointerEvent *ev)
 {
     d->mouseLeaveWorkaround = false;
     KoInputDevice id;
-    KoToolManager::instance()->priv()->switchInputDevice(id);
+    d->controller->toolManager()->priv()->switchInputDevice(id);
     d->mouseDownPoint = ev->pos();
 
 
@@ -267,7 +288,7 @@ void KoToolProxy::mouseMoveEvent(KoPointerEvent *event)
         return;
     }
     KoInputDevice id;
-    KoToolManager::instance()->priv()->switchInputDevice(id);
+    d->controller->toolManager()->priv()->switchInputDevice(id);
     if (d->activeTool == 0) {
         event->ignore();
         return;
@@ -289,7 +310,7 @@ void KoToolProxy::mouseReleaseEvent(KoPointerEvent* event)
 {
     d->mouseLeaveWorkaround = false;
     KoInputDevice id;
-    KoToolManager::instance()->priv()->switchInputDevice(id);
+    d->controller->toolManager()->priv()->switchInputDevice(id);
     d->scrollTimer.stop();
 
     if (d->activeTool) {

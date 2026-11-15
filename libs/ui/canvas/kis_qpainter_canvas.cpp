@@ -40,8 +40,8 @@
 #include "kis_canvas_updates_compressor.h"
 #include "kis_config_notifier.h"
 #include "kis_group_layer.h"
-#include "canvas/kis_display_color_converter.h"
 
+#include "KisLongPressEventFilter.h"
 #include <KoCanvasController.h>
 #include <KisRepaintDebugger.h>
 #include <KisDisplayConfig.h>
@@ -60,6 +60,8 @@ KisQPainterCanvas::KisQPainterCanvas(KisCanvas2 *canvas, KisCoordinatesConverter
         , KisCanvasWidgetBase(canvas, coordinatesConverter)
         , m_d(new Private())
 {
+    setProperty(KisLongPressEventFilter::ENABLED_PROPERTY, false);
+
     setAutoFillBackground(true);
     setAcceptDrops(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -176,10 +178,10 @@ void KisQPainterCanvas::channelSelectionChanged(const QBitArray &channelFlags)
     m_d->prescaledProjection->setChannelFlags(channelFlags);
 }
 
-void KisQPainterCanvas::setDisplayColorConverter(KisDisplayColorConverter *colorConverter)
+void KisQPainterCanvas::setDisplayConfig(const KisDisplayConfig &config)
 {
     Q_ASSERT(m_d->prescaledProjection);
-    m_d->prescaledProjection->setDisplayConfig(colorConverter->displayConfig());
+    m_d->prescaledProjection->setDisplayConfig(config);
 }
 
 void KisQPainterCanvas::setDisplayFilter(QSharedPointer<KisDisplayFilter> displayFilter)

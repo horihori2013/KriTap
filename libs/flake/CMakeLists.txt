@@ -52,8 +52,8 @@ set(kritaflake_SRCS
     KoSelectedShapesProxySimple.cpp
     KoShape.cpp
     KoShapeAnchor.cpp
+    KoShapeBulkActionLock.cpp
     KoShapeControllerBase.cpp
-    KoShapeApplicationData.cpp
     KoShapeContainer.cpp
     KoShapeContainerModel.cpp
     KoShapeGroup.cpp
@@ -102,21 +102,10 @@ set(kritaflake_SRCS
     KoSnapProxy.cpp
     KoSnapStrategy.cpp
     KoSnapData.cpp
-    KoShapeShadow.cpp
     KoSharedLoadingData.cpp
     KoSharedSavingData.cpp
     KoViewConverter.cpp
     KoViewTransformStillPoint.cpp
-    KoFilterEffect.cpp
-    KoFilterEffectStack.cpp
-    KoFilterEffectFactoryBase.cpp
-    KoFilterEffectRegistry.cpp
-    KoFilterEffectConfigWidgetBase.cpp
-    KoFilterEffectRenderContext.cpp
-    KoFilterEffectLoadingContext.cpp
-    KoTextShapeDataBase.cpp
-    KoTosContainer.cpp
-    KoTosContainerModel.cpp
     KoClipMaskApplicatorBase.cpp
     ${__per_arch_alpha_applicator_factory_objs}
     KoClipMaskPainter.cpp
@@ -155,10 +144,8 @@ set(kritaflake_SRCS
     commands/KoParameterToPathCommand.cpp
     commands/KoShapeTransformCommand.cpp
     commands/KoPathFillRuleCommand.cpp
-    commands/KoShapeShadowCommand.cpp
     commands/KoPathReverseCommand.cpp
     commands/KoShapeRenameCommand.cpp
-    commands/KoShapeRunAroundCommand.cpp
     commands/KoPathPointMergeCommand.cpp
     commands/KoShapeTransparencyCommand.cpp
     commands/KoShapeClipCommand.cpp
@@ -171,6 +158,11 @@ set(kritaflake_SRCS
     commands/KoAddRemoveShapeCommands.cpp
     commands/KoShapePaintOrderCommand.cpp
     commands/KoShapeMergeTextPropertiesCommand.cpp
+    commands/KoSvgConvertTextTypeCommand.cpp
+    commands/KoSvgTextAddRemoveShapeCommands.cpp
+    commands/KoSvgTextReorderShapeInsideCommand.cpp
+    commands/KoSvgTextFlipShapeContourTypeCommand.cpp
+    commands/KoSvgTextPathInfoChangeCommand.cpp
 
     html/HtmlSavingContext.cpp
     html/HtmlWriter.cpp
@@ -204,7 +196,6 @@ set(kritaflake_SRCS
     svg/SvgParser.cpp
     svg/SvgStyleParser.cpp
     svg/SvgGradientHelper.cpp
-    svg/SvgFilterHelper.cpp
     svg/SvgCssHelper.cpp
     svg/SvgClipPathHelper.cpp
     svg/SvgLoadingContext.cpp
@@ -246,6 +237,7 @@ set(kritaflake_SRCS
     text/KoFontGlyphModel.cpp
     text/KoOpenTypeFeatureInfoFactory.cpp
     text/data/KoUnicodeBlockData.cpp
+    text/KoSvgTextShapeOutlineHelper.cpp
 
     resources/KoSvgSymbolCollectionResource.cpp
     resources/KoGamutMask.cpp

@@ -76,7 +76,7 @@
     </Action>
 
     <Action name="file_import_file">
-      <icon>document-import</icon>
+      <icon>document-import-16</icon>
       <text>Open ex&amp;isting Document as Untitled Document...</text>
       <whatsThis></whatsThis>
       <toolTip>Open existing Document as Untitled Document</toolTip>
@@ -88,7 +88,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_export_file">
-      <icon>document-export</icon>
+      <icon>document-export-16</icon>
       <text>E&amp;xport...</text>
       <whatsThis></whatsThis>
       <toolTip>Export</toolTip>
@@ -100,7 +100,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_export_advanced">
-      <icon>document-export</icon>
+      <icon>export-advanced</icon>
       <text>Export Advanced...</text>
       <whatsThis></whatsThis>
       <toolTip>Advanced Export</toolTip>
@@ -113,7 +113,7 @@
     </Action>
 
     <Action name="file_import_animation">
-      <icon></icon>
+      <icon>import-frame</icon>
       <text>Import animation frames...</text>
       <whatsThis></whatsThis>
       <toolTip>Import animation frames</toolTip>
@@ -125,7 +125,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_import_video_animation">
-      <icon></icon>
+      <icon>import-video</icon>
       <text>Import video animation...</text>
       <whatsThis></whatsThis>
       <toolTip>Import video animation</toolTip>
@@ -161,7 +161,7 @@
       <statusTip></statusTip>
     </Action>    
     <Action name="save_incremental_version">
-      <icon></icon>
+      <icon>save-version</icon>
       <text>Save Incremental &amp;Version</text>
       <whatsThis></whatsThis>
       <toolTip>Save Incremental Version</toolTip>
@@ -173,7 +173,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="save_incremental_backup">
-      <icon></icon>
+      <icon>save-back-up</icon>
       <text>Save Incremental &amp;Backup</text>
       <whatsThis></whatsThis>
       <toolTip>Save Incremental Backup</toolTip>
@@ -197,7 +197,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="create_copy">
-      <icon></icon>
+      <icon>create-copy-from-current</icon>
       <text>Create Copy &amp;From Current Image</text>
       <whatsThis></whatsThis>
       <toolTip>Create Copy From Current Image</toolTip>
@@ -209,7 +209,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_documentinfo">
-      <icon>configure</icon>
+      <icon>document-information</icon>
       <text>&amp;Document Information</text>
       <whatsThis></whatsThis>
       <toolTip>Document Information</toolTip>
@@ -221,7 +221,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_close_all">
-      <icon></icon>
+      <icon>close-all-tabs</icon>
       <text>&amp;Close All</text>
       <whatsThis></whatsThis>
       <toolTip>Close All</toolTip>
@@ -233,7 +233,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="file_close">
-      <icon></icon>
+      <icon>close-tab</icon>
       <text>C&amp;lose</text>
       <whatsThis></whatsThis>
       <toolTip>Close</toolTip>
@@ -297,7 +297,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="edit_copy">
-      <icon>edit-copy</icon>
+      <icon>edit-copy-16</icon>
       <text>&amp;Copy</text>
       <whatsThis></whatsThis>
       <toolTip>Copy selection to clipboard</toolTip>
@@ -309,7 +309,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="copy_sharp">
-      <icon></icon>
+      <icon>copy-sharp</icon>
       <text>C&amp;opy (sharp)</text>
       <whatsThis></whatsThis>
       <toolTip>Copy (sharp)</toolTip>
@@ -321,7 +321,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="cut_sharp">
-      <icon></icon>
+      <icon>cut-sharp</icon>
       <text>Cut (&amp;sharp)</text>
       <whatsThis></whatsThis>
       <toolTip>Cut (sharp)</toolTip>
@@ -333,7 +333,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="copy_merged">
-      <icon></icon>
+      <icon>copy-merged</icon>
       <text>Copy &amp;merged</text>
       <whatsThis></whatsThis>
       <toolTip>Copy merged</toolTip>
@@ -345,7 +345,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="copy_layer_style">
-      <icon></icon>
+      <icon>copy-layer-style</icon>
       <text>Copy Layer Style</text>
       <whatsThis></whatsThis>
       <toolTip>Copy Layer Style from the Current Node</toolTip>
@@ -357,7 +357,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="edit_paste">
-      <icon>edit-paste</icon>
+      <icon>edit-paste-16</icon>
       <text>&amp;Paste</text>
       <whatsThis></whatsThis>
       <toolTip>Paste clipboard content</toolTip>
@@ -369,7 +369,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_at">
-      <icon></icon>
+      <icon>paste-at-cursor</icon>
       <text>Paste at Cursor</text>
       <whatsThis></whatsThis>
       <toolTip>Paste at cursor</toolTip>
@@ -381,7 +381,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_into">
-      <icon></icon>
+      <icon>paste-into-active-layer</icon>
       <text>Paste into Active Layer</text>
       <whatsThis></whatsThis>
       <toolTip>Paste into Active Layer</toolTip>
@@ -393,7 +393,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_new">
-      <icon></icon>
+      <icon>paste-into-new-image</icon>
       <text>Paste into &amp;New Image</text>
       <whatsThis></whatsThis>
       <toolTip>Paste into New Image</toolTip>
@@ -405,7 +405,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_shape_style">
-      <icon></icon>
+      <icon>paste-shape-style</icon>
       <text>Paste Shape Style</text>
       <whatsThis></whatsThis>
       <toolTip>Paste Shape Style</toolTip>
@@ -417,7 +417,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_as_reference">
-      <icon></icon>
+      <icon>paste-reference</icon>
       <text>Paste as R&amp;eference Image</text>
       <whatsThis></whatsThis>
       <toolTip>Paste as Reference Image</toolTip>
@@ -429,7 +429,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="paste_layer_style">
-      <icon></icon>
+      <icon>paste-layer-style</icon>
       <text>Paste Layer Style</text>
       <whatsThis></whatsThis>
       <toolTip>Paste Layer Style into the Current Node</toolTip>
@@ -660,7 +660,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="wrap_around_hv_axis">
-      <icon>wraparound</icon>
+      <icon>wrap-both</icon>
       <text>Wrap Around Both Directions</text>
       <whatsThis></whatsThis>
       <toolTip>Wrap Around Both Directions</toolTip>
@@ -672,7 +672,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="wrap_around_h_axis">
-      <icon>wraparound</icon>
+      <icon>wrap-horizontally</icon>
       <text>Wrap Around Horizontally</text>
       <whatsThis></whatsThis>
       <toolTip>Wrap Around Horizontally</toolTip>
@@ -684,7 +684,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="wrap_around_v_axis">
-      <icon>wraparound</icon>
+      <icon>wrap-vertically</icon>
       <text>Wrap Around Vertically</text>
       <whatsThis></whatsThis>
       <toolTip>Wrap Around Vertically</toolTip>
@@ -1192,6 +1192,18 @@
       <isCheckable>false</isCheckable>
       <statusTip></statusTip>
     </Action>
+    <Action name="purge_unused_image_data">
+      <icon></icon>
+      <text>Purge Unused Image Data</text>
+      <whatsThis></whatsThis>
+      <toolTip>Removes all fully transparent pixels from the image storage</toolTip>
+      <iconText></iconText>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut></shortcut>
+      <isCheckable>false</isCheckable>
+      <statusTip></statusTip>
+    </Action>
     <Action name="resizeimagetolayer">
       <icon></icon>
       <text>Trim to Current &amp;Layer</text>
@@ -1389,7 +1401,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="reselect">
-      <icon></icon>
+      <icon>reselect</icon>
       <text>&amp;Reselect</text>
       <whatsThis></whatsThis>
       <toolTip>Reselect</toolTip>
@@ -1401,7 +1413,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="convert_to_vector_selection">
-      <icon></icon>
+      <icon>convert_vector_selection</icon>
       <text>&amp;Convert to Vector Selection</text>
       <whatsThis></whatsThis>
       <toolTip>Convert to Vector Selection</toolTip>
@@ -1413,7 +1425,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="convert_to_raster_selection">
-      <icon></icon>
+      <icon>convert_raster_selection</icon>
       <text>&amp;Convert to Raster Selection</text>
       <whatsThis></whatsThis>
       <toolTip>Convert to Raster Selection</toolTip>
@@ -1425,7 +1437,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="edit_selection">
-      <icon></icon>
+      <icon>edit_selection</icon>
       <text>Edit Selection</text>
       <whatsThis></whatsThis>
       <toolTip>Edit Selection</toolTip>
@@ -1437,7 +1449,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="convert_shapes_to_vector_selection">
-      <icon></icon>
+      <icon>shapes_to_vector_selection</icon>
       <text>Convert Shapes to &amp;Vector Selection</text>
       <whatsThis></whatsThis>
       <toolTip>Convert Shapes to Vector Selection</toolTip>
@@ -1449,7 +1461,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="featherselection">
-      <icon></icon>
+      <icon>feather_select</icon>
       <text>&amp;Feather Selection...</text>
       <whatsThis></whatsThis>
       <toolTip>Feather Selection</toolTip>
@@ -1461,7 +1473,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="toggle_display_selection">
-      <icon></icon>
+      <icon>show_selection</icon>
       <text>Dis&amp;play Selection</text>
       <whatsThis></whatsThis>
       <toolTip>Display Selection</toolTip>
@@ -1545,7 +1557,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="growselection">
-      <icon></icon>
+      <icon>grow_selection</icon>
       <text>&amp;Grow Selection...</text>
       <whatsThis></whatsThis>
       <toolTip>Grow Selection</toolTip>
@@ -1557,7 +1569,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="shrinkselection">
-      <icon></icon>
+      <icon>shrink_selection</icon>
       <text>S&amp;hrink Selection...</text>
       <whatsThis></whatsThis>
       <toolTip>Shrink Selection</toolTip>
@@ -1569,7 +1581,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="borderselection">
-      <icon></icon>
+      <icon>border_selection</icon>
       <text>&amp;Border Selection...</text>
       <whatsThis></whatsThis>
       <toolTip>Border Selection</toolTip>
@@ -1588,6 +1600,30 @@
       <iconText>Smooth</iconText>
       <activationFlags>10000000000</activationFlags>
       <activationConditions>100</activationConditions>
+      <shortcut></shortcut>
+      <isCheckable>false</isCheckable>
+      <statusTip></statusTip>
+    </Action>
+    <Action name="enable_sap">
+      <icon></icon>
+      <text>Enable Selection Actions Bar</text>
+      <whatsThis></whatsThis>
+      <toolTip></toolTip>
+      <iconText></iconText>
+      <activationFlags>1</activationFlags>
+      <activationConditions></activationConditions>
+      <shortcut></shortcut>
+      <isCheckable>true</isCheckable>
+      <statusTip></statusTip>
+    </Action>
+    <Action name="configure_sap">
+      <icon></icon>
+      <text>Configure selection actions bar</text>
+      <whatsThis></whatsThis>
+      <toolTip></toolTip>
+      <iconText></iconText>
+      <activationFlags></activationFlags>
+      <activationConditions></activationConditions>
       <shortcut></shortcut>
       <isCheckable>false</isCheckable>
       <statusTip></statusTip>
@@ -1987,7 +2023,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="brushslider1">
-      <icon></icon>
+      <icon>brush-option-slider-1</icon>
       <text>Brush option slider 1</text>
       <whatsThis></whatsThis>
       <toolTip>Brush option slider 1</toolTip>
@@ -1997,7 +2033,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="brushslider2">
-      <icon></icon>
+      <icon>brush-option-slider-2</icon>
       <text>Brush option slider 2</text>
       <whatsThis></whatsThis>
       <toolTip>Brush option slider 2</toolTip>
@@ -2007,7 +2043,7 @@
       <statusTip></statusTip>
     </Action>
     <Action name="brushslider3">
-      <icon></icon>
+      <icon>brush-option-slider-3</icon>
       <text>Brush option slider 3</text>
       <whatsThis></whatsThis>
       <toolTip>Brush option slider 3</toolTip>
@@ -2017,7 +2053,7 @@
       <statusTip></statusTip>
     </Action>
 	<Action name="brushslider4">
-      <icon></icon>
+      <icon>brush-option-slider-4</icon>
       <text>Brush option slider 4</text>
       <whatsThis></whatsThis>
       <toolTip>Brush option slider 4</toolTip>
@@ -2027,7 +2063,7 @@
       <statusTip></statusTip>
     </Action>
 	<Action name="brushslider5">
-      <icon></icon>
+      <icon>brush-option-slider-5</icon>
       <text>Brush option slider 5</text>
       <whatsThis></whatsThis>
       <toolTip>Brush option slider 5</toolTip>

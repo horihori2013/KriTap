@@ -11,12 +11,14 @@
 #include <QPointF>
 #include <QVector>
 #include <QPolygonF>
+#include <QPainterPath>
 #include <QTransform>
 #include <cmath>
 #include <kis_global.h>
 #include <kritaglobal_export.h>
 #include <functional>
 #include <boost/optional.hpp>
+#include <optional>
 
 class QPainterPath;
 class QTransform;
@@ -61,6 +63,12 @@ template <class T>
 qreal norm(const T &a)
 {
     return std::sqrt(pow2(a.x()) + pow2(a.y()));
+}
+
+template <class T>
+qreal normSquared(const T &a)
+{
+    return pow2(a.x()) + pow2(a.y());
 }
 
 template <class Point>
@@ -310,6 +318,22 @@ inline Point clampPoint(Point pt, const Rect &bounds)
     return pt;
 }
 
+template <class Point>
+inline typename PointTypeTraits<Point>::rect_type
+createRectFromCorners(Point corner1, Point corner2)
+{
+    return typename PointTypeTraits<Point>::rect_type(qMin(corner1.x(), corner2.x()), qMin(corner1.y(), corner2.y()), qAbs(corner1.x() - corner2.x()), qAbs(corner1.y() - corner2.y()));
+}
+
+inline QRectF createRectFromCorners(QLineF line)
+{
+    QPointF a = line.p1();
+    QPointF b = line.p2();
+    return createRectFromCorners(a, b);
+}
+
+
+
 template <class Size>
 auto maxDimension(Size size) -> decltype(size.width()) {
     return qMax(size.width(), size.height());
@@ -417,8 +441,10 @@ bool KRITAGLOBAL_EXPORT intersectLineRect(QLineF &line, const QRect rect, bool e
 // the same but with a convex polygon; uses Cyrus-Beck algorithm
 bool KRITAGLOBAL_EXPORT intersectLineConvexPolygon(QLineF &line, const QPolygonF polygon, bool extendFirst, bool extendSecond);
 
+//QList<QLineF> KRITAGLOBAL_EXPORT intersectLineConcavePolygon(const QPolygonF polygon, const QLineF& line, bool extendFirst, bool extendSecond);
+
 /**
- * Crop line to rect; if it doesn't intersect, just return an empty line (QLineF()).
+ * @brief Crop line to rect; if it doesn't intersect, just return an empty line (QLineF()).
  *
  * This is using intersectLineRect, but with the difference that it doesn't require the user to check the return value.
  * It's useful for drawing code, since it let the developer not use `if` before drawing.
@@ -439,7 +465,12 @@ void KRITAGLOBAL_EXPORT cropLineToRect(QLineF &line, const QRect rect, bool exte
 
 void KRITAGLOBAL_EXPORT cropLineToConvexPolygon(QLineF &line, const QPolygonF polygon, bool extendFirst, bool extendSecond);
 
-
+/**
+ * @brief calculateConvexHull Calculate the convex hull of the polygon using the QuickHull
+ * @param polygon to find the convex hull of
+ * @return
+ */
+QPolygonF KRITAGLOBAL_EXPORT calculateConvexHull(const QPolygonF &polygon);
 
 
 template <class Point>
@@ -549,6 +580,120 @@ private:
     const qreal m_radius_sq;
     const qreal m_fadeCoeff;
 };
+
+
+// wrapper for QPainterPath providing sane line segment indexing
+class KRITAGLOBAL_EXPORT VectorPath
+{
+public:
+    struct VectorPathPoint
+    {
+        typedef enum Type {
+            MoveTo,
+            LineTo,
+            BezierTo
+        } Type;
+
+
+        QPointF endPoint {QPointF()};
+        QPointF controlPoint1 {QPointF()};
+        QPointF controlPoint2 {QPointF()};
+
+        Type type {MoveTo};
+
+        VectorPathPoint() {
+        }
+
+        VectorPathPoint(Type _type, QPointF _endPoint, QPointF c1 = QPointF(), QPointF c2 = QPointF()) {
+            type = _type;
+            endPoint = _endPoint;
+            controlPoint1 = c1;
+            controlPoint2 = c2;
+        }
+
+        static VectorPathPoint moveTo(QPointF _endPoint) {
+            return VectorPathPoint(MoveTo, _endPoint);
+        }
+
+        static VectorPathPoint lineTo(QPointF _endPoint) {
+            return VectorPathPoint(LineTo, _endPoint);
+        }
+
+        static VectorPathPoint bezierTo(QPointF _endPoint, QPointF _controlPoint1, QPointF _controlPoint2) {
+            return VectorPathPoint(BezierTo, _endPoint, _controlPoint1, _controlPoint2);
+        }
+    };
+
+    struct Segment
+    {
+        VectorPathPoint start;
+        VectorPathPoint end;
+
+        QPointF startPoint {QPointF()};
+        QPointF endPoint {QPointF()};
+        QPointF controlPoint1 {QPointF()};
+        QPointF controlPoint2 {QPointF()};
+
+        VectorPathPoint::Type type {VectorPathPoint::MoveTo};
+
+        Segment(VectorPathPoint _start, VectorPathPoint _end)
+            : start(_start)
+            , end(_end)
+            , startPoint(_start.endPoint)
+            , endPoint(_end.endPoint)
+            , controlPoint1(_end.controlPoint1)
+            , controlPoint2(_end.controlPoint2)
+            , type(_end.type)
+        {
+
+        }
+
+    };
+
+public:
+    VectorPath(const QPainterPath& path);
+    VectorPath(const QList<VectorPathPoint> path);
+
+
+    int pointsCount() const;
+    VectorPathPoint pointAt(int i) const;
+    int segmentsCount() const;
+    QList<VectorPathPoint> segmentAt(int i) const;
+    std::optional<Segment> segmentAtAsSegment(int i) const;
+
+    QLineF segmentAtAsLine(int i) const;
+
+
+    static QList<QPointF> intersectSegmentWithLineBounded(const QLineF &line, const Segment &segment);
+    static QList<QPointF> intersectSegmentWithLineBounded(const QLineF &line, const VectorPathPoint &p1, const VectorPathPoint &p2);
+
+
+
+    int pathIndexToSegmentIndex(int index);
+    int segmentIndexToPathIndex(int index);
+
+
+    VectorPath trulySimplified(qreal epsDegrees = 0.5) const;
+    // not open-path friendly
+    VectorPath reversed() const;
+
+
+    bool fuzzyComparePointsCyclic(const VectorPath& path, qreal eps = 0.0f) const;
+
+
+    QPainterPath asPainterPath() const;
+
+private:
+    QPainterPath m_originalPath;
+    QList<VectorPathPoint> m_points;
+
+
+
+};
+
+QDebug KRITAGLOBAL_EXPORT operator<<(QDebug debug, const VectorPath &path);
+QDebug KRITAGLOBAL_EXPORT operator<<(QDebug debug, const VectorPath::VectorPathPoint &point);
+
 
 QVector<QPoint> KRITAGLOBAL_EXPORT sampleRectWithPoints(const QRect &rect);
 QVector<QPointF> KRITAGLOBAL_EXPORT sampleRectWithPoints(const QRectF &rect);
@@ -704,6 +849,105 @@ bool fuzzyCompareRects(const Rect &r1, const Rect &r2, Difference tolerance) {
     return maxError < tolerance;
 }
 
+
+
+template<class Polygon, typename Difference = decltype(Polygon::first())>
+bool isPolygonRect(const Polygon &poly, Difference tolerance) {
+    typedef decltype(poly.first()) Point;
+
+    auto sameVert = [tolerance] (Point p1, Point p2) {
+        return std::abs(p2.x() - p1.x()) < tolerance;
+    };
+
+
+    auto sameHoriz = [tolerance] (Point p1, Point p2) {
+        return std::abs(p2.y() - p1.y()) < tolerance;
+    };
+
+    const int rectCorners = 4;
+    if (poly.length() != rectCorners) {
+        if (poly.length() != rectCorners + 1 || !fuzzyPointCompare(poly[0], poly[rectCorners], tolerance)) {
+            return false;
+        }
+    }
+
+    bool correctRect = sameVert(poly[0], poly[1]) && sameHoriz(poly[1], poly[2]) && sameVert(poly[2], poly[3]) && sameHoriz(poly[3], poly[0]);
+    if (correctRect) {
+        return true;
+    }
+    return sameHoriz(poly[0], poly[1]) && sameVert(poly[1], poly[2]) && sameHoriz(poly[2], poly[3]) && sameVert(poly[3], poly[0]);
+}
+
+template<class Polygon, typename Difference = decltype(Polygon::first())>
+bool isPolygonPixelAlignedRect(const Polygon &poly, Difference tolerance) {
+    if (!isPolygonRect(poly, tolerance)) {
+        return false;
+    }
+
+    for (int i = 0; i < poly.length(); i++) {
+        if (!fuzzyPointCompare(poly[i], QPointF(poly[i].toPoint()), tolerance)) {
+            return false;
+        }
+    }
+    return true;
+
+}
+
+template <class T>
+bool isPolygonTrulyConvex(const QVector<T> &polygon, bool ensureNoLoops = true, qreal maxAngle = 180.0) {
+    int numPoints = polygon.size();
+    if (numPoints < 3)
+        return true;
+
+    if (fuzzyPointCompare(polygon[0], polygon[numPoints - 1])) {
+        // common in QPainterPaths to have the startPoint and endPoint the same
+        numPoints--;
+    }
+
+    int sign = 0;
+    qreal angleSum = 0;
+
+    for (int i = 0; i < numPoints; i++) {
+        int a = i;
+        int b = wrapValue(i + 1, numPoints);
+        int c = wrapValue(i + 2, numPoints);
+
+        qreal angle = angleBetweenVectors(static_cast<QPointF>(polygon[b] - polygon[a]), static_cast<QPointF>(polygon[c] - polygon[b]));
+
+        if (angle < -M_PI) {
+            angle += 2*M_PI;
+        }
+
+        if (angle > M_PI) {
+            angle -= 2*M_PI;
+        }
+
+        angleSum += angle;
+
+        const bool checkMinAngle = !qFuzzyCompare(maxAngle, 180.0);
+        const qreal minAngle = kisDegreesToRadians(180.0 - maxAngle);
+
+        if (checkMinAngle && qAbs(angle) < minAngle) {
+            return false;
+        }
+
+        if (sign == 0) {
+            sign = signZZ(angle);
+        } else {
+            int currentSign = signZZ(angle);
+            if (currentSign != 0 && currentSign != sign) {
+                return false;
+            }
+        }
+    }
+
+    if (ensureNoLoops && !qFuzzyCompare(qAbs(angleSum), 2*M_PI)) {
+        return false;
+    }
+
+    return true;
+}
+
 struct KRITAGLOBAL_EXPORT DecomposedMatrix {
     DecomposedMatrix();
 
@@ -816,6 +1060,9 @@ QVector<QPointF> KRITAGLOBAL_EXPORT findTrianglePoint(const QPointF &p1, const Q
  */
 boost::optional<QPointF> KRITAGLOBAL_EXPORT findTrianglePointNearest(const QPointF &p1, const QPointF &p2, qreal a, qreal b, const QPointF &nearest);
 
+bool isOnLine(const QLineF &line, const QPointF &point, const qreal eps, bool boundedStart, bool boundedEnd, bool includeEnds);
+
+
 /**
  * @brief moveElasticPoint moves point \p pt based on the model of elasticity
  * @param pt point in question, tied to points \p base, \p wingA and \p wingB
@@ -851,6 +1098,29 @@ QPointF KRITAGLOBAL_EXPORT moveElasticPoint(const QPointF &pt,
                                             const QPointF &base, const QPointF &newBase,
                                             const QVector<QPointF> &anchorPoints);
 
+
+QPointF KRITAGLOBAL_EXPORT findNearestPointOnLine(const QPointF &point, const QLineF &line, bool unbounded = true);
+
+/**
+ * @brief movePointAlongTheLine moves the point a particular distance in the specified direction
+ * @param point the point to move
+ * @param direction the direction to move the point along
+ * @param distance distance to move the point
+ * @return the new position of the moved point
+ */
+QPointF KRITAGLOBAL_EXPORT movePointInTheDirection(const QPointF& point, const QPointF& direction, qreal distance);
+
+
+/**
+ * @brief movePointAlongTheLine moves the point a particular distance in the specified direction
+ * @param point the point to move
+ * @param direction the direction to move the point along
+ * @param distance distance to move the point
+ * @param ensureOnLine if true, the algorithm will first change the point to the nearest point on the line, and then move it along the line
+ *                     (if not true, it's an equivalent of movePointInTheDirection, with QPointF being a vector of direction)
+ * @return the new position of the moved point
+ */
+QPointF KRITAGLOBAL_EXPORT movePointAlongTheLine(const QPointF& point, const QLineF& direction, qreal distance, bool ensureOnLine);
 
 /**
  * @brief a simple class to generate Halton sequence
@@ -918,18 +1188,74 @@ private:
 // requirements: only one local minimum between xA and xB
 // Golden Section is supposed to be usually faster than Ternary Section
 // NOTE: tiar: this function was debugged and should be working correctly but is not used anywhere any longer
-qreal findMinimumGoldenSection(std::function<qreal(qreal)> f, qreal xA, qreal xB, qreal eps, int maxIter);
+qreal KRITAGLOBAL_EXPORT findMinimumGoldenSection(std::function<qreal(qreal)> f, qreal xA, qreal xB, qreal eps, int maxIter);
 
 // find minimum of the function f(x) between points xA and xB, with eps precision, using Ternary Section
 // requirements: only one local minimum between xA and xB
 // Golden Section is supposed to be usually faster than Ternary Section
 // NOTE: tiar: this function was debugged and should be working correctly but is not used anywhere any longer
-qreal findMinimumTernarySection(std::function<qreal(qreal)> f, qreal xA, qreal xB, qreal eps, int maxIter);
+qreal KRITAGLOBAL_EXPORT findMinimumTernarySection(std::function<qreal(qreal)> f, qreal xA, qreal xB, qreal eps, int maxIter);
 
+// kis_global has the same function, this needs to be removed
 qreal KRITAGLOBAL_EXPORT pointToLineDistSquared(const QPointF& pt, const QLineF& line);
+
+QList<QLineF> KRITAGLOBAL_EXPORT getParallelLines(const QLineF& line, const qreal distance);
+
+QPainterPath KRITAGLOBAL_EXPORT getOnePathFromRectangleCutThrough(const QList<QPointF> &points, const QLineF &line, bool left);
+
+///
+/// \brief getPathsFromRectangleCutThrough get paths defining both sides of a rectangle cut through using two (supposedly parallel) lines
+/// It is used in the Knife Tool
+/// If you just want to cut a rectangle, you can use the same line in both
+/// \param rect rectangle to cut
+/// \param leftLine left line of the rectangle (used for the left-(top) side of the rectangle
+/// \param rightLine right line of the rectangle (used for the right-(bottom) side of the rectangle
+/// \return
+///
+QList<QPainterPath> KRITAGLOBAL_EXPORT getPathsFromRectangleCutThrough(const QRectF &rect, const QLineF &leftLine, const QLineF &rightLine);
+
+
+// isAlgebra2D::getLineSegmentCrossingLineIndexes(QLineF const&, QPainterPath const&)
+QList<int> KRITAGLOBAL_EXPORT getLineSegmentCrossingLineIndexes(const QLineF &line, const QPainterPath& shape);
+
+///
+/// \brief removeGutterSmart
+/// \param shape1
+/// \param index1
+/// \param shape2
+/// \param index2
+/// \return
+///
+QPainterPath KRITAGLOBAL_EXPORT removeGutterSmart(const QPainterPath& shape1, int index1, const QPainterPath& shape2, int index2, bool isSameShape);
+
+
+///
+/// \brief mergeShapesWithGutter merges two shapes with a gutter shape (defined as two paths)
+/// \param shape1
+/// \param shape2
+/// \param oneEnd
+/// \param otherEnd
+/// \param index1 index of the segment in the first shape
+/// \param index2 index of the segment in the second shape
+/// \return
+///
+VectorPath mergeShapesWithGutter(const VectorPath& shape1, const VectorPath& shape2, const VectorPath& oneEnd, const VectorPath& otherEnd, int index1, int index2, bool reverseSecondPoly, bool isSameShape);
+/**
+ * @brief trySimplifyPath
+ * Tries to simplify a QPainterPath
+ * @param path -- path to simplify.
+ * @param lengthThreshold -- length at which points get merged.
+ * @return path with less nodes.
+ */
+QPainterPath KRITAGLOBAL_EXPORT trySimplifyPath(const QPainterPath &path, qreal lengthThreshold);
+
+
+bool KRITAGLOBAL_EXPORT isInsideShape(const VectorPath &path, const QPointF &point);
+bool KRITAGLOBAL_EXPORT isInsideShape(const QPainterPath &path, const QPointF &point);
+
+
 
 
 }
-
 
 #endif /* __KIS_ALGEBRA_2D_H */

@@ -60,9 +60,15 @@ public:
         OpenGLRenderer rendererId() const;
     };
 
+    enum XcbGLProviderProtocol {
+        XCB_GLX = 0,
+        XCB_EGL
+    };
+
 public:
     static RendererConfig selectSurfaceConfig(KisOpenGL::OpenGLRenderer preferredRenderer,
                                               KisConfig::RootSurfaceFormat preferredRootSurfaceFormat,
+                                              KisConfig::CanvasSurfaceBitDepthMode preferredCanvasSurfaceBitMode,
                                               bool enableDebug);
 
     static void setDefaultSurfaceConfig(const RendererConfig &config);
@@ -126,6 +132,8 @@ public:
 
     static void glInvalidateBufferData(uint buffer);
 
+    static std::optional<XcbGLProviderProtocol> xcbGlProviderProtocol();
+
 private:
     static void fakeInitWindowsOpenGL(KisOpenGL::OpenGLRenderers supportedRenderers, KisOpenGL::OpenGLRenderer preferredByQt);
 
@@ -137,5 +145,7 @@ private:
 #ifdef Q_OS_WIN
 Q_DECLARE_OPERATORS_FOR_FLAGS(KisOpenGL::OpenGLRenderers);
 #endif
+
+Q_DECLARE_METATYPE(KisOpenGL::XcbGLProviderProtocol)
 
 #endif // KIS_OPENGL_H_

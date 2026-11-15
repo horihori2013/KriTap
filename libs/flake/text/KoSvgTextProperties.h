@@ -86,7 +86,7 @@ public:
         StrokeId, ///< KoSvgText::StrokeProperty
         Opacity, ///< Double, SVG shape opacity.
         PaintOrder, ///< QVector<KoShape::PaintOrder>
-        Visiblity, ///< Bool, CSS visibility
+        Visibility, ///< Bool, CSS visibility
 
         TextLanguage, ///< a language string.
 
@@ -119,6 +119,8 @@ public:
         KraTextVersionId, ///< Int, used for handling incorrectly saved files.
         KraTextStyleType, ///< string, used to identify the style preset type (character or paragraph).
         KraTextStyleResolution, ///< Int, used to scale style presets to be pixel-relative.
+
+        LastPropertyId ///< Last Property ID, used for iteration.
     };
 
     KoSvgTextProperties();
@@ -178,15 +180,17 @@ public:
      * property is inheritable according to SVG and this set does not define
      * it.
      */
-    void inheritFrom(const KoSvgTextProperties &parentProperties, bool resolve = false);
+    void inheritFrom(const KoSvgTextProperties &parentProperties, bool resolve = false, bool onlyFontAndLineHeight = false);
 
     /**
      * @brief resolveRelativeValues
      * resolve the font-relative values.
      * @param fontSize -- fontsize to resolve 'em' to.
-     * @param xHeight -- xHeight to resolve 'ex' to.
+     * @param onlyFontAndLineHeight -- only resolve fontsize and line height (if necessary).
+     * It can make sense to only want to resolve font and line-height is line-height is LH, because all other relative
+     * units are derived from these.
      */
-    void resolveRelativeValues(const KoSvgText::FontMetrics metrics = KoSvgText::FontMetrics(12.0, true), const qreal fontSize = 12.0);
+    void resolveRelativeValues(const KoSvgText::FontMetrics metrics = KoSvgText::FontMetrics(12.0, true), const qreal fontSize = 12.0, bool onlyFontAndLineHeight = false);
 
     /**
      * Return true if the property \p id is inherited from \p parentProperties.
@@ -256,9 +260,10 @@ public:
      * @brief metrics
      * Return the metrics of the first available font.
      * @param withResolvedLineHeight -- apply the lineheight into the linegap property.
+     * @param offsetByBaseline -- ensure the metrics are offset by the dominant baseline.
      * @return metrics for the current font.
      */
-    KoSvgText::FontMetrics metrics(const bool withResolvedLineHeight = true) const;
+    KoSvgText::FontMetrics metrics(const bool withResolvedLineHeight = true, const bool offsetByBaseline = false) const;
 
     /**
      * @brief applyLineHeight
@@ -282,7 +287,7 @@ public:
     /**
      * @brief cssFontInfo
      * @return this collects all the CSS Font properties into
-     * a KoCSSFontInfo struct for usage with the KoFontRegistery.
+     * a KoCSSFontInfo struct for usage with the KoFontRegistry.
      */
     KoCSSFontInfo cssFontInfo() const;
 

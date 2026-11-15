@@ -6,6 +6,7 @@ import subprocess
 import argparse
 import shutil
 import copy
+import glob
 
 # Capture our command line parameters
 parser = argparse.ArgumentParser(description='A script for building Krita Windows package on CI')
@@ -38,6 +39,7 @@ elif not os.path.exists(os.environ['KRITACI_WINDOWS_SIGN_CONFIG']):
 
 buildPath = os.path.abspath('_build')
 depsPath = os.path.abspath('_install')
+ciUtilitiesPath = os.path.abspath(os.path.join('krita-deps-management', 'ci-utilities'))
 srcPath = os.path.abspath(os.getcwd())
 
 if arguments.skip_debug_package:
@@ -57,10 +59,11 @@ unstablePackageSuffix = '-{}'.format(os.environ['CI_COMMIT_SHORT_SHA']) \
     if not arguments.release_package_naming else ''
 
 packageName = 'krita-x64-{}{}'.format(kritaVersionString, unstablePackageSuffix)
-hookFile = os.path.join(srcPath, 'build-tools', 'ci-scripts', 'sign-windows-package-at-notary-service.py')
+hookFile = os.path.join(ciUtilitiesPath, 'sign-windows-package-at-notary-service.py')
 
 commandToRun = ' '.join([sys.executable,
-                         'packaging\windows\package-complete.py',
+                         '-u',
+                         os.path.join(ciUtilitiesPath, 'build-windows-zip-package.py'),
                          '--no-interactive',
                          '--package-name', packageName,
                          '--src-dir',  srcPath,
@@ -72,7 +75,7 @@ commandToRun = ' '.join([sys.executable,
 # Run the command
 try:
     print( "## RUNNING: " + commandToRun )
-    subprocess.check_call( commandToRun, stdout=sys.stdout, stderr=sys.stderr, shell=True )
+    subprocess.check_call(commandToRun)
 except Exception:
     print("## Failed to build zip package")
     sys.exit(1)
@@ -95,8 +98,7 @@ if arguments.build_installers:
     # Run the command
     try:
         print( "## RUNNING: " + commandToRun )
-        subprocess.check_call( commandToRun, stdout=sys.stdout, stderr=sys.stderr, shell=True,
-                              cwd=installerFolder )
+        subprocess.check_call(commandToRun, cwd=installerFolder)
     except Exception:
         print("## Failed to build the installer")
         sys.exit(1)
@@ -104,7 +106,7 @@ if arguments.build_installers:
     shutil.move(os.path.join(installerFolder, 'krita-nsis', installerFileName), os.getcwd())
 
     if signPackages:
-        commandToRun = ' '.join([sys.executable,
+        commandToRun = ' '.join([sys.executable, '-u',
                                 os.path.join('ci-notary-service', 'signwindowsbinaries.py'),
                                 '--config', os.environ['KRITACI_WINDOWS_SIGN_CONFIG'],
                                 installerFileName
@@ -113,10 +115,23 @@ if arguments.build_installers:
         # Run the command
         try:
             print( "## RUNNING: " + commandToRun )
-            subprocess.check_call( commandToRun, stdout=sys.stdout, stderr=sys.stderr, shell=True )
+            subprocess.check_call(commandToRun)
         except Exception:
             print("## Failed to sign the installer")
             sys.exit(1)
+
+        if arguments.release_package_naming:
+            try:
+                print("## Verify that the installer is signed")
+                commandToRun = ' '.join([sys.executable, '-u',
+                                    os.path.join(ciUtilitiesPath, 'verify-release-binaries.py'),
+                                    '--platform', 'Windows',
+                                    '-v', '-f', installerFileName
+                                    ])
+                subprocess.check_call(commandToRun)
+            except Exception:
+                print("## Failed to verify the installer signature")
+                sys.exit(1)
 
     msixFolder = os.path.join(os.getcwd(), '_msix')
     os.makedirs(msixFolder)
@@ -131,18 +146,21 @@ if arguments.build_installers:
     if os.path.exists(os.path.join(packageFolder, 'shellex')):
         shutil.rmtree(os.path.join(packageFolder, 'shellex'))
 
-    commandToRun = ' '.join([sys.executable,
+    commandToRun = ' '.join([sys.executable, '-u',
                             os.path.join(depsPath, 'krita-msix', 'build_msix.py')
                             ])
 
     # Run the command
     try:
         print( "## RUNNING: " + commandToRun )
-        subprocess.check_call( commandToRun, stdout=sys.stdout, stderr=sys.stderr, shell=True,
-                               env=msixEnvironment, cwd=msixFolder )
+        subprocess.check_call(commandToRun, env=msixEnvironment, cwd=msixFolder)
     except Exception:
         print("## Failed to build the MSIX package")
         sys.exit(1)
 
     shutil.move(os.path.join(msixFolder, 'krita.msix'),
                 os.path.join(os.getcwd(), '{}-unsigned.msix'.format(packageName)))
+
+    for f in glob.iglob(os.path.join(msixFolder, '*.log')):
+        shutil.move(f, os.getcwd())
+

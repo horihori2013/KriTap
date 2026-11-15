@@ -59,7 +59,6 @@
 
 #include "kis_config.h"
 #include "kis_cursor.h"
-#include "dialogs/kis_dlg_adj_layer_props.h"
 #include "dialogs/kis_dlg_adjustment_layer.h"
 #include "dialogs/kis_dlg_layer_properties.h"
 #include "dialogs/kis_dlg_generator_layer.h"
@@ -169,6 +168,9 @@ void KisLayerManager::setup(KisActionManager* actionManager)
     KisAction *action = actionManager->createAction("trim_to_image");
     connect(action, SIGNAL(triggered()), this, SLOT(trimToImage()));
 
+    action = actionManager->createAction("purge_unused_image_data");
+    connect(action, SIGNAL(triggered()), this, SLOT(purgeUnusedImageData()));
+
     m_layerStyle  = actionManager->createAction("layer_style");
     connect(m_layerStyle, SIGNAL(triggered()), this, SLOT(layerStyle()));
 
@@ -228,6 +230,14 @@ void KisLayerManager::trimToImage()
     }
 }
 
+void KisLayerManager::purgeUnusedImageData()
+{
+    KisImageWSP image = m_view->image();
+    if (image) {
+        image->purgeUnusedData(false);
+    }
+}
+
 void KisLayerManager::layerProperties()
 {
     if (!m_view) return;
@@ -250,35 +260,40 @@ void KisLayerManager::layerProperties()
     KisFileLayerSP fileLayer = KisFileLayerSP(dynamic_cast<KisFileLayer*>(layer.data()));
 
     if (adjustmentLayer && !multipleLayersSelected) {
-
         KisPaintDeviceSP dev = adjustmentLayer->projection();
 
-        KisDlgAdjLayerProps dlg(adjustmentLayer, adjustmentLayer.data(), dev, m_view, adjustmentLayer->filter().data(), adjustmentLayer->name(), i18n("Filter Layer Properties"), m_view->mainWindow(), "dlgadjlayerprops");
+        KisDlgAdjustmentLayer dlg(adjustmentLayer, adjustmentLayer.data(), dev,
+                                  adjustmentLayer->name(), i18n("Filter Layer Properties"),
+                                  m_view, m_view->mainWindow(), adjustmentLayer->filter());
         dlg.resize(dlg.minimumSizeHint());
-
 
         KisFilterConfigurationSP configBefore(adjustmentLayer->filter());
         KIS_ASSERT_RECOVER_RETURN(configBefore);
         QString xmlBefore = configBefore->toXML();
 
-
         if (dlg.exec() == QDialog::Accepted) {
-
-            adjustmentLayer->setName(dlg.layerName());
+            KUndo2Command *cmd = nullptr;
 
             KisFilterConfigurationSP configAfter(dlg.filterConfiguration());
             Q_ASSERT(configAfter);
             QString xmlAfter = configAfter->toXML();
 
             if(xmlBefore != xmlAfter) {
-                KisChangeFilterCmd *cmd
-                        = new KisChangeFilterCmd(adjustmentLayer,
-                                                 configBefore->cloneWithResourcesSnapshot(),
-                                                 configAfter->cloneWithResourcesSnapshot());
-                // FIXME: check whether is needed
-                cmd->redo();
+                cmd = KisCommandUtils::composeCommands(cmd,
+                    new KisChangeFilterCmd(adjustmentLayer,
+                                           configBefore->cloneWithResourcesSnapshot(),
+                                           configAfter->cloneWithResourcesSnapshot()));
+            }
+
+            if (adjustmentLayer->name() != dlg.layerName()) {
+                cmd = KisCommandUtils::composeCommands(cmd,
+                    new KisNodeRenameCommand(adjustmentLayer,
+                                             adjustmentLayer->name(),
+                                             dlg.layerName()));
+            }
+
+            if (cmd) {
                 m_view->undoAdapter()->addCommand(cmd);
-                m_view->document()->setModified(true);
             }
         }
         else {
@@ -312,19 +327,30 @@ void KisLayerManager::layerProperties()
                 QMessageBox::critical(m_view->mainWindow(), i18nc("@title:window", "Krita"), i18n("No file name specified"));
                 return;
             }
-            fileLayer->setName(dlg.layerName());
 
-            if (fileNameOld!= fileNameNew || scalingMethodOld != scalingMethodNew || scalingFilterOld != scalingFilterNew) {
-                KisChangeFileLayerCmd *cmd
-                        = new KisChangeFileLayerCmd(fileLayer,
-                                                    basePath,
-                                                    fileNameOld,
-                                                    scalingMethodOld,
-                                                    scalingFilterOld,
-                                                    basePath,
-                                                    fileNameNew,
-                                                    scalingMethodNew,
-                                                    scalingFilterNew);
+            KUndo2Command *cmd = nullptr;
+
+            if (fileNameOld != fileNameNew || scalingMethodOld != scalingMethodNew
+                || scalingFilterOld != scalingFilterNew) {
+
+                cmd = KisCommandUtils::composeCommands(cmd,
+                    new KisChangeFileLayerCmd(fileLayer,
+                                                basePath,
+                                                fileNameOld,
+                                                scalingMethodOld,
+                                                scalingFilterOld,
+                                                basePath,
+                                                fileNameNew,
+                                                scalingMethodNew,
+                                                scalingFilterNew));
+            }
+
+            if (fileLayer->name() != dlg.layerName()) {
+                cmd = KisCommandUtils::composeCommands(cmd,
+                    new KisNodeRenameCommand(fileLayer, fileLayer->name(), dlg.layerName()));
+            }
+
+            if (cmd) {
                 m_view->undoAdapter()->addCommand(cmd);
             }
         }
@@ -719,6 +745,8 @@ KisNodeSP KisLayerManager::addAdjustmentLayer(KisNodeSP activeNode)
 
 
     KisAdjustmentLayerSP adjl = addAdjustmentLayer(activeNode, QString(), 0, selection, &applicator);
+    applicator.end();
+    image->waitForDone(); // So that previewDevice doesn't end up empty and result in empty histograms
 
     KisPaintDeviceSP previewDevice = new KisPaintDevice(*adjl->original());
 
@@ -731,10 +759,9 @@ KisNodeSP KisLayerManager::addAdjustmentLayer(KisNodeSP activeNode)
 
     if (dlg.exec() != QDialog::Accepted || adjl->filter().isNull()) {
         // XXX: add messagebox warning if there's no filter set!
-        applicator.cancel();
+        m_commandsAdapter->undoLastCommand();
     } else {
-        applicator.applyCommand(new KisNodeRenameCommand(adjl, adjl->name(), dlg.layerName()));
-        applicator.end();
+        adjl->setName(dlg.layerName());
     }
 
     return adjl;
@@ -1062,7 +1089,6 @@ void KisLayerManager::layerStyle()
     KisPSDLayerStyleSP newStyle = oldStyle->clone().dynamicCast<KisPSDLayerStyle>();
     // We want to also change the UUID, else it might be considered the same style after save and won't load correctly
     newStyle->setUuid(QUuid::createUuid());
-    newStyle->setResourcesInterface(KisGlobalResourcesInterface::instance());
 
     KisDlgLayerStyle dlg(newStyle, m_view->canvasResourceProvider());
 
@@ -1081,4 +1107,3 @@ void KisLayerManager::layerStyle()
         image->postExecutionUndoAdapter()->addCommand(command);
     }
 }
-

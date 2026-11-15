@@ -32,7 +32,7 @@ public:
     void setTransformFunction(const QPointF &mousePos, bool perspectiveModifierActive, bool shiftModifierActive, bool altModifierActive) override;
     bool shiftModifierIsUsed() const override;
 
-    void paint(QPainter &gc) override;
+    void paint(QPainter &gc, const KoColorDisplayRendererInterface *displayRendererInterface) override;
     QCursor getCurrentCursor() const override;
 
     void externalConfigChanged() override;
@@ -43,6 +43,7 @@ public:
 
     bool beginPrimaryAction(const QPointF &pt) override;
     void continuePrimaryAction(const QPointF &pt, bool shiftModifierActive, bool altModifierActive) override;
+    void continuePrimaryAction(const QPointF &pt, bool shiftModifierActive, bool altModifierActive, bool hasOriginalModifiersSet) override;
     bool endPrimaryAction() override;
 
 Q_SIGNALS:

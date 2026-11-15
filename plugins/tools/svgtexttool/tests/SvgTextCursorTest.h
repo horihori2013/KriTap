@@ -26,11 +26,17 @@ private Q_SLOTS:
     void test_ttb_lr_data();
     void test_ttb_lr();
 
+    void test_filter_control_chars_in_command_data();
+    void test_filter_control_chars_in_command();
+    
     void test_text_insert_command();
     void test_text_remove_command();
 
     void test_text_remove_dedicated_data();
     void test_text_remove_dedicated();
+
+    void test_set_transforms_on_text_command_data();
+    void test_set_transforms_on_text_command();
 };
 
 #endif // SVGTEXTCURSORTEST_H

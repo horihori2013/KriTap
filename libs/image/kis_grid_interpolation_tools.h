@@ -1,5 +1,7 @@
 /*
  *  SPDX-FileCopyrightText: 2014 Dmitry Kazakov <dimula73@gmail.com>
+ *  SPDX-FileCopyrightText: 2025 Agata Cacko <cacko.azh@gmail.com>
+ *
  *
  *  SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -17,6 +19,8 @@
 #include "kis_four_point_interpolator_backward.h"
 #include "kis_iterator_ng.h"
 #include "kis_random_sub_accessor.h"
+#include "kis_painter.h"
+#include "KisRegion.h"
 
 //#define DEBUG_PAINTING_POLYGONS
 
@@ -167,18 +171,82 @@ struct PaintDevicePolygonOp
     PaintDevicePolygonOp(KisPaintDeviceSP srcDev, KisPaintDeviceSP dstDev)
         : m_srcDev(srcDev), m_dstDev(dstDev) {}
 
+    ~PaintDevicePolygonOp()
+    {
+        /**
+         * When setCanMergeRects() is set to true, the caller should
+         * call finalize() to process all the postponed rects, which
+         * would clear the vector
+         */
+        KIS_SAFE_ASSERT_RECOVER_NOOP(m_rectsToCopy.isEmpty());
+    }
+
+    void fastCopyArea(QRect areaToCopy) {
+        fastCopyArea(areaToCopy, m_canMergeRects);
+    }
+
+    void fastCopyArea(QRect areaToCopy, bool lazy) {
+#ifdef DEBUG_PAINTING_POLYGONS
+
+        QRect boundRect = areaToCopy;
+        KisSequentialIterator dstIt(m_dstDev, boundRect);
+        KisSequentialIterator srcIt(m_srcDev, boundRect);
+
+        // this can possibly be optimized with scanlining the polygon
+        // (use intersectLineConvexPolygon to get a line at every height)
+        // but it doesn't matter much because in the vast majority of cases
+        // it should go straight to the rect area copying
+
+        while (dstIt.nextPixel()  && srcIt.nextPixel()) {
+            memcpy(dstIt.rawData(), srcIt.oldRawData(), m_dstDev->pixelSize());
+            QColor color = m_debugColor;
+            color.setHsl(KisAlgebra2D::wrapValue(m_debugColor.hslHue() + 20, 0, 360), m_debugColor.hslSaturation(), m_debugColor.lightness());
+            m_dstDev->colorSpace()->fromQColor(color, dstIt.rawData());
+        }
+        return;
+#endif
+        if (lazy) {
+            m_rectsToCopy.append(areaToCopy.adjusted(0, 0, -1, -1));
+        } else {
+            KisPainter::copyAreaOptimized(areaToCopy.topLeft(), m_srcDev, m_dstDev, areaToCopy);
+        }
+    }
+
     void operator() (const QPolygonF &srcPolygon, const QPolygonF &dstPolygon) {
-        this->operator() (srcPolygon, dstPolygon, dstPolygon);
+        operator() (srcPolygon, dstPolygon, dstPolygon);
     }
 
     void operator() (const QPolygonF &srcPolygon, const QPolygonF &dstPolygon, const QPolygonF &clipDstPolygon) {
+#ifdef DEBUG_PAINTING_POLYGONS
+        //m_rectId++;
+#endif
         QRect boundRect = clipDstPolygon.boundingRect().toAlignedRect();
         if (boundRect.isEmpty()) return;
+
+        bool samePolygon = (m_dstDev->colorSpace() == m_srcDev->colorSpace())
+                && KisAlgebra2D::fuzzyPointCompare(srcPolygon, dstPolygon, m_epsilon)
+                && KisAlgebra2D::fuzzyPointCompare(srcPolygon, clipDstPolygon, m_epsilon);
+
+        if (samePolygon && KisAlgebra2D::isPolygonPixelAlignedRect(dstPolygon, m_epsilon)) {
+            QRect boundRect = dstPolygon.boundingRect().toAlignedRect();
+            fastCopyArea(boundRect);
+            return;
+        }
+
+
+        // provess previous rects so they are all processed
+        // in the same order as without any performance improvements
+        // (according to the grid processing order)
+        copyPreviousRects();
+
 
         KisSequentialIterator dstIt(m_dstDev, boundRect);
         KisRandomSubAccessorSP srcAcc = m_srcDev->createRandomSubAccessor();
 
         KisFourPointInterpolatorBackward interp(srcPolygon, dstPolygon);
+#ifdef DEBUG_PAINTING_POLYGONS
+        int pixelId = 0;
+#endif
 
         /**
          * We need to make sure that the destination polygon is not too small,
@@ -212,7 +280,14 @@ struct PaintDevicePolygonOp
                     // "srcPoint" (which is transformed position)
 
                     srcAcc->moveTo(dstPoint);
-                    srcAcc->sampledOldRawData(dstIt.rawData());
+                    quint8* rawData = dstIt.rawData();
+                    srcAcc->sampledOldRawData(rawData);
+#ifdef DEBUG_PAINTING_POLYGONS
+                    QColor color = m_debugColor;
+                    color.setHsl(KisAlgebra2D::wrapValue(m_debugColor.hslHue() + m_rectId, 0, 360), m_debugColor.hslSaturation(), qBound(0, m_debugColor.lightness() - 50 - pixelId, 100));
+                    pixelId++;
+                    m_dstDev->colorSpace()->fromQColor(color, rawData);
+#endif
                 }
             }
 
@@ -224,14 +299,57 @@ struct PaintDevicePolygonOp
 
                 if (clipDstPolygon.containsPoint(srcPoint, Qt::OddEvenFill)) {
                     srcAcc->sampledOldRawData(dstIt.rawData());
+#ifdef DEBUG_PAINTING_POLYGONS
+                    QColor color = m_debugColor;
+                    color.setHsl(KisAlgebra2D::wrapValue(m_debugColor.hslHue() + m_rectId, 0, 360), m_debugColor.hslSaturation(), qBound(0, m_debugColor.lightness() + 50, 100));
+                    m_dstDev->colorSpace()->fromQColor(color, dstIt.rawData());
+#endif
                 }
             }
         }
 
     }
 
+    void copyPreviousRects() {
+        QVector<QRect>::iterator end = KisRegion::mergeSparseRects(m_rectsToCopy.begin(), m_rectsToCopy.end());
+
+        for (QVector<QRect>::iterator it = m_rectsToCopy.begin(); it < end; it++) {
+            QRect areaToCopy = *it;
+            fastCopyArea(areaToCopy.adjusted(0, 0, 1, 1), false);
+        }
+        m_rectsToCopy = QVector<QRect>();
+    }
+
+    void finalize() {
+        copyPreviousRects();
+    }
+
+    /**
+     * IMPORTANT: When setCanMergeRects() is set to `true`,
+     * the caller should calls finalize() in the end of
+     * the processing action to actually copy all the lazily
+     * postponed rects.
+     */
+    inline void setCanMergeRects(bool newCanMergeRects) {
+        m_canMergeRects = newCanMergeRects;
+    }
+
     KisPaintDeviceSP m_srcDev;
     KisPaintDeviceSP m_dstDev;
+    const qreal m_epsilon {0.001};
+
+#ifdef DEBUG_PAINTING_POLYGONS
+    QColor m_debugColor {Qt::red};
+    int m_rectId {0};
+    inline void setDebugColor(QColor color) {
+        m_debugColor = color;
+    }
+#endif
+
+private:
+    bool m_canMergeRects {false};
+    QVector<QRect> m_rectsToCopy;
+
 };
 
 struct QImagePolygonOp
@@ -247,12 +365,79 @@ struct QImagePolygonOp
     {
     }
 
+    ~QImagePolygonOp()
+    {
+        /**
+         * When setCanMergeRects() is set to true, the caller should
+         * call finalize() to process all the postponed rects, which
+         * would clear the vector
+         */
+        KIS_SAFE_ASSERT_RECOVER_NOOP(m_rectsToCopy.isEmpty());
+    }
+
+    void fastCopyArea(QRect areaToCopy) {
+        fastCopyArea(areaToCopy, m_canMergeRects);
+    }
+
+    void fastCopyArea(QRect areaToCopy, bool lazy) {
+        if (lazy) {
+            m_rectsToCopy.append(areaToCopy.adjusted(0, 0, -1, -1));
+            return;
+        }
+
+        // only handling saved offsets
+        QRect srcArea = areaToCopy.translated(-m_srcImageOffset.toPoint());
+        QRect dstArea = areaToCopy.translated(-m_dstImageOffset.toPoint());
+
+        srcArea = srcArea.intersected(m_srcImageRect);
+        dstArea = dstArea.intersected(m_dstImageRect);
+
+        // it might look pointless but it cuts off unneeded areas on both rects based on where they end up
+        // since *I know* they are the same rectangle before translation
+        // TODO: I'm pretty sure this logic is correct, but let's check it when I'm less sleepy
+        QRect srcAreaUntranslated = srcArea.translated(m_srcImageOffset.toPoint());
+        QRect dstAreaUntranslated = dstArea.translated(m_dstImageOffset.toPoint());
+
+        QRect actualCopyArea = srcAreaUntranslated.intersected(dstAreaUntranslated);
+        srcArea = actualCopyArea.translated(-m_srcImageOffset.toPoint());
+        dstArea = actualCopyArea.translated(-m_dstImageOffset.toPoint());
+
+        int bytesPerPixel = m_srcImage.sizeInBytes()/m_srcImage.height()/m_srcImage.width();
+
+        int srcX = srcArea.left()*bytesPerPixel;
+        int dstX = dstArea.left()*bytesPerPixel;
+
+        for (int srcY = srcArea.top(); srcY <= srcArea.bottom(); ++srcY) {
+
+            int dstY = dstArea.top() + srcY - srcArea.top();
+            const uchar *srcLine = m_srcImage.constScanLine(srcY);
+            uchar *dstLine = m_dstImage.scanLine(dstY);
+            memcpy(dstLine + dstX, srcLine + srcX, srcArea.width()*bytesPerPixel);
+
+        }
+    }
+
     void operator() (const QPolygonF &srcPolygon, const QPolygonF &dstPolygon) {
         this->operator() (srcPolygon, dstPolygon, dstPolygon);
     }
 
     void operator() (const QPolygonF &srcPolygon, const QPolygonF &dstPolygon, const QPolygonF &clipDstPolygon) {
         QRect boundRect = clipDstPolygon.boundingRect().toAlignedRect();
+
+        bool samePolygon = (m_dstImage.format() == m_srcImage.format())
+                && KisAlgebra2D::fuzzyPointCompare(srcPolygon, dstPolygon, m_epsilon)
+                && KisAlgebra2D::fuzzyPointCompare(srcPolygon, clipDstPolygon, m_epsilon);
+
+        if (samePolygon && KisAlgebra2D::isPolygonPixelAlignedRect(dstPolygon, m_epsilon)) {
+            QRect boundRect = dstPolygon.boundingRect().toAlignedRect();
+            fastCopyArea(boundRect);
+            return;
+        }
+
+        // provess previous rects so they are all processed
+        // in the same order as without any performance improvements
+        copyPreviousRects();
+
         KisFourPointInterpolatorBackward interp(srcPolygon, dstPolygon);
 
         for (int y = boundRect.top(); y <= boundRect.bottom(); y++) {
@@ -297,6 +482,32 @@ struct QImagePolygonOp
 
     }
 
+    void copyPreviousRects() {
+
+        QVector<QRect>::iterator end = KisRegion::mergeSparseRects(m_rectsToCopy.begin(), m_rectsToCopy.end());
+
+        for (QVector<QRect>::iterator it = m_rectsToCopy.begin(); it < end; it++) {
+            QRect areaToCopy = *it;
+            fastCopyArea(areaToCopy.adjusted(0, 0, 1, 1), false);
+        }
+
+        m_rectsToCopy = QVector<QRect>();
+    }
+
+    void finalize() {
+        copyPreviousRects();
+    }
+
+    /**
+     * IMPORTANT: When setCanMergeRects() is set to `true`,
+     * the caller should calls finalize() in the end of
+     * the processing action to actually copy all the lazily
+     * postponed rects.
+     */
+    inline void setCanMergeRects(bool canMergeRects) {
+        m_canMergeRects = canMergeRects;
+    }
+
     const QImage &m_srcImage;
     QImage &m_dstImage;
     QPointF m_srcImageOffset;
@@ -304,6 +515,12 @@ struct QImagePolygonOp
 
     QRect m_srcImageRect;
     QRect m_dstImageRect;
+
+    const qreal m_epsilon {0.001};
+
+private:
+    bool m_canMergeRects {false};
+    QVector<QRect> m_rectsToCopy;
 };
 
 /*************************************************************/
@@ -357,6 +574,77 @@ namespace Private {
         int far;
     };
 }
+
+inline QRect calculateCorrectSubGrid(QRect originalBoundsForGrid, int pixelPrecision, QRectF currentBounds, QSize gridSize) {
+
+    if (!QRectF(originalBoundsForGrid).intersects(currentBounds)) {
+        return QRect();
+    }
+
+    QPointF imaginaryGridStartF = QPoint(originalBoundsForGrid.x()/pixelPrecision, originalBoundsForGrid.y()/pixelPrecision)*pixelPrecision;
+
+    QPointF startPointB = currentBounds.topLeft() - imaginaryGridStartF;
+    QPoint startPointG = QPoint(startPointB.x()/pixelPrecision, startPointB.y()/pixelPrecision);
+    startPointG = QPoint(kisBoundFast(0, startPointG.x(), gridSize.width()), kisBoundFast(0, startPointG.y(), gridSize.height()));
+
+    QPointF endPointB = currentBounds.bottomRight() + QPoint(1, 1) - imaginaryGridStartF;
+    QPoint endPointG = QPoint(std::ceil(endPointB.x()/pixelPrecision), std::ceil(endPointB.y()/pixelPrecision)) + QPoint(1, 1);
+    QPoint endPointPotential = endPointG;
+
+    QPoint trueEndPoint = QPoint(kisBoundFast(0, endPointPotential.x(), gridSize.width()), kisBoundFast(0, endPointPotential.y(), gridSize.height()));
+
+    QPoint size = trueEndPoint - startPointG;
+
+    return QRect(startPointG, QSize(size.x(), size.y()));
+}
+
+inline QList<QRectF> cutOutSubgridFromBounds(QRect subGrid, QRect srcBounds, const QSize &gridSize, const QVector<QPointF> &originalPoints) {
+    if (subGrid.width() == 0 || subGrid.height() == 0) {
+        return QList<QRectF> {srcBounds};
+    }
+    QPoint topLeft = subGrid.topLeft();
+    QPoint bottomRight = subGrid.topLeft() + QPoint(subGrid.width() - 1, subGrid.height() - 1);
+
+    int topLeftIndex = pointToIndex(topLeft, gridSize);
+    int bottomRightIndex = pointToIndex(bottomRight, gridSize);
+
+    topLeftIndex = qMax(0, qMin(topLeftIndex, originalPoints.length() - 1));
+    bottomRightIndex = qMax(0, qMin(bottomRightIndex, originalPoints.length() - 1));
+
+    QPointF topLeftReal = originalPoints[topLeftIndex];
+    QPointF bottomRightReal = originalPoints[bottomRightIndex];
+    QRectF cutOut = QRectF(topLeftReal, bottomRightReal);
+
+    QList<QRectF> response;
+    // *-----------*
+    // |    top    |
+    // |-----------|
+    // | l |xxx| r |
+    // | e |xxx| i |
+    // | f |xxx| g |
+    // | t |xxx| h |
+    // |   |xxx| t |
+    // |-----------|
+    // |   bottom  |
+    // *-----------*
+
+
+    QRectF top = QRectF(srcBounds.topLeft(), QPointF(srcBounds.right() + 1, topLeftReal.y()));
+    QRectF bottom = QRectF(QPointF(srcBounds.left(), bottomRightReal.y() + 1), srcBounds.bottomRight() + QPointF(1, 1));
+    QRectF left = QRectF(QPointF(srcBounds.left(), cutOut.top()), QPointF(cutOut.left(), cutOut.bottom() + 1));
+    QRectF right = QRectF(QPointF(cutOut.right() + 1, cutOut.top()), QPointF(srcBounds.right() + 1, cutOut.bottom() + 1));
+    QList<QRectF> rects = {top, left, right, bottom};
+    for (int i = 0; i < rects.length(); i++) {
+        if (!rects[i].isEmpty()) {
+            response << rects[i];
+        }
+    }
+    return response;
+
+}
+
+
+
 
 template <class IndexesOp>
 bool getOrthogonalPointApproximation(const QPoint &cellPt,
@@ -595,6 +883,45 @@ inline void adjustAlignedPolygon(QPolygonF &polygon)
     polygon[3] += p3;
 }
 
+template <class IndexesOp>
+bool canProcessRectsInRandomOrder(IndexesOp &indexesOp, const QVector<QPointF> &transformedPoints, QSize grid) {
+    return canProcessRectsInRandomOrder(indexesOp, transformedPoints, QRect(QPoint(0, 0), grid));
+}
+
+template <class IndexesOp>
+bool canProcessRectsInRandomOrder(IndexesOp &indexesOp, const QVector<QPointF> &transformedPoints, QRect subgrid) {
+    QVector<int> polygonPoints(4);
+    QPoint startPoint = subgrid.topLeft();
+    QPoint endPoint = subgrid.bottomRight();
+
+    for (int row = startPoint.y(); row < endPoint.y(); row++) {
+        for (int col = startPoint.x(); col < endPoint.x(); col++) {
+            int numExistingPoints = 0;
+
+            polygonPoints = indexesOp.calculateMappedIndexes(col, row, &numExistingPoints);
+
+            QPolygonF dstPolygon;
+
+            for (int i = 0; i < polygonPoints.count(); i++) {
+                const int index = polygonPoints[i];
+                dstPolygon << transformedPoints[index];
+            }
+
+
+            adjustAlignedPolygon(dstPolygon);
+
+
+            if (!KisAlgebra2D::isPolygonTrulyConvex(dstPolygon)) {
+                return false;
+            }
+
+        }
+    }
+    return true;
+}
+
+
+
 template <template <class PolygonOp, class IndexesOp> class IncompletePolygonPolicy,
           class PolygonOp,
           class IndexesOp>
@@ -604,10 +931,32 @@ void iterateThroughGrid(PolygonOp &polygonOp,
                         const QVector<QPointF> &originalPoints,
                         const QVector<QPointF> &transformedPoints)
 {
-    QVector<int> polygonPoints(4);
+    iterateThroughGrid<IncompletePolygonPolicy, PolygonOp, IndexesOp>(polygonOp, indexesOp, gridSize, originalPoints, transformedPoints, QRect(QPoint(0, 0), gridSize));
+}
 
-    for (int row = 0; row < gridSize.height() - 1; row++) {
-        for (int col = 0; col < gridSize.width() - 1; col++) {
+template <template <class PolygonOp, class IndexesOp> class IncompletePolygonPolicy,
+          class PolygonOp,
+          class IndexesOp>
+void iterateThroughGrid(PolygonOp &polygonOp,
+                        IndexesOp &indexesOp,
+                        const QSize &gridSize,
+                        const QVector<QPointF> &originalPoints,
+                        const QVector<QPointF> &transformedPoints,
+                        const QRect subGrid)
+{
+    QVector<int> polygonPoints(4);
+    QPoint startPoint = subGrid.topLeft();
+    QPoint endPoint = subGrid.bottomRight(); // it's weird but bottomRight on QRect point does give us one unit of margin on both x and y
+    // when start is on (0, 0), and size is (500, 500), bottomRight is on (499, 499)
+    // but remember that it also only needs a top left corner of the polygon
+
+    KIS_SAFE_ASSERT_RECOVER(startPoint.x() >= 0 && startPoint.y() >= 0 && endPoint.x() <= gridSize.width() - 1 && endPoint.y() <= gridSize.height() - 1) {
+        startPoint = QPoint(qMax(startPoint.x(), 0), qMax(startPoint.y(), 0));
+        endPoint = QPoint(qMin(endPoint.x(), gridSize.width() - 1), qMin(startPoint.y(), gridSize.height() - 1));
+    }
+
+    for (int row = startPoint.y(); row < endPoint.y(); row++) {
+        for (int col = startPoint.x(); col < endPoint.x(); col++) {
             int numExistingPoints = 0;
 
             polygonPoints = indexesOp.calculateMappedIndexes(col, row, &numExistingPoints);
@@ -637,6 +986,8 @@ void iterateThroughGrid(PolygonOp &polygonOp,
             }
         }
     }
+
+    polygonOp.finalize();
 }
 
 }

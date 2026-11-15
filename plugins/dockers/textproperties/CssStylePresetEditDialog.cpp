@@ -25,7 +25,7 @@ CssStylePresetEditDialog::CssStylePresetEditDialog(QWidget *parent)
     , m_model(new KoSvgTextPropertiesModel())
 
 {
-    setMinimumSize(600, 400);
+    setMinimumSize(600, 450);
     setModal(true);
 
     m_quickWidget = new KisQQuickWidget(this);
@@ -67,6 +67,7 @@ void CssStylePresetEditDialog::setCurrentResource(KoCssStylePresetSP resource)
     KoSvgTextPropertyData textData;
     textData.inheritedProperties = KoSvgTextProperties();
     textData.commonProperties = properties;
+    textData.enabled = true;
     m_model->textData.set(textData);
     if (m_quickWidget->rootObject()) {
         m_quickWidget->rootObject()->setProperty("presetTitle", m_currentResource->name());
@@ -78,6 +79,9 @@ void CssStylePresetEditDialog::setCurrentResource(KoCssStylePresetSP resource)
         m_quickWidget->rootObject()->setProperty("beforeSample", m_currentResource->beforeText());
         m_quickWidget->rootObject()->setProperty("sampleText", m_currentResource->sampleText());
         m_quickWidget->rootObject()->setProperty("afterSample", m_currentResource->afterText());
+        const QSizeF paragraphSampleSize = m_currentResource->paragraphSampleSize();
+        m_quickWidget->rootObject()->setProperty("sampleWidth", paragraphSampleSize.width());
+        m_quickWidget->rootObject()->setProperty("sampleHeight", paragraphSampleSize.height());
         const int storedPPI = m_currentResource->storedPPIResolution();
         m_quickWidget->rootObject()->setProperty("makePixelRelative", storedPPI > 0);
     }
@@ -112,9 +116,15 @@ void CssStylePresetEditDialog::slotUpdateTextProperties()
         const QString after = m_quickWidget->rootObject()->property("afterSample").toString();
         const QString styleType = m_quickWidget->rootObject()->property("styleType").toString();
 
+        const int sampleHeight = m_quickWidget->rootObject()->property("sampleHeight").toInt();
+        const int sampleWidth = m_quickWidget->rootObject()->property("sampleWidth").toInt();
+        const QSizeF sampleSize = QSizeF(sampleWidth, sampleHeight);
+
+
         bool shouldUpdateSample = (before != m_currentResource->beforeText()
                 || sample != m_currentResource->sampleText()
-                || after != m_currentResource->afterText());
+                || after != m_currentResource->afterText())
+                || sampleSize != m_currentResource->paragraphSampleSize();
 
         KoSvgTextPropertyData textData = m_model->textData.get();
 
@@ -123,6 +133,11 @@ void CssStylePresetEditDialog::slotUpdateTextProperties()
             m_currentResource->setBeforeText(before);
             m_currentResource->setSampleText(sample);
             m_currentResource->setAfterText(after);
+
+            if (styleType == "paragraph") {
+                m_currentResource->setParagraphSampleSize(sampleSize);
+            }
+
             m_currentResource->setProperties(textData.commonProperties);
             m_currentResource->updateThumbnail();
             m_quickWidget->rootObject()->setProperty("presetSample", m_currentResource->sampleSvg());
@@ -139,6 +154,7 @@ QColor CssStylePresetEditDialog::modalColorDialog(QColor oldColor)
 }
 
 void CssStylePresetEditDialog::slotUpdateDirty() {
+    if (!m_quickWidget->rootObject()) return;
     bool isDirty = m_currentResource->isDirty();
     const QString title = m_quickWidget->rootObject()->property("presetTitle").toString();
     if (!isDirty && m_quickWidget->rootObject()) {

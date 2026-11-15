@@ -105,8 +105,8 @@ void KisMask::setImage(KisImageWSP image)
     KisPaintDeviceSP parentPaintDevice = parent() ? parent()->original() : 0;
     KisDefaultBoundsBaseSP defaultBounds;
 
-    if (parentPaintDevice) {
-        defaultBounds = new KisSelectionDefaultBounds(parentPaintDevice);
+    if (parent() && parent()->original()) {
+        defaultBounds = new KisMaskDefaultBounds(parent());
     } else {
         if (image) {
             qWarning() << "WARNING: KisMask::setImage() was called without any parent layer being set";
@@ -180,7 +180,7 @@ void KisMask::Private::initSelectionImpl(KisSelectionSP copyFrom, KisLayerSP par
          * We can't use setSelection as we may not have parent() yet
          */
         selection = new KisSelection(*copyFrom);
-        selection->setDefaultBounds(new KisSelectionDefaultBounds(parentPaintDevice));
+        selection->setDefaultBounds(new KisMaskDefaultBounds(parentLayer));
         selection->setResolutionProxy(copyFrom->resolutionProxy()->createOrCloneDetached(image));
     } else if (copyFromDevice) {
         KritaUtils::DeviceCopyMode copyMode =
@@ -188,7 +188,7 @@ void KisMask::Private::initSelectionImpl(KisSelectionSP copyFrom, KisLayerSP par
             KritaUtils::CopyAllFrames : KritaUtils::CopySnapshot;
 
         selection = new KisSelection(copyFromDevice, copyMode,
-                                     new KisSelectionDefaultBounds(parentPaintDevice),
+                                     new KisMaskDefaultBounds(parentLayer),
                                      toQShared(new KisImageResolutionProxy(image)));
 
         KisPixelSelectionSP pixelSelection = selection->pixelSelection();
@@ -200,7 +200,7 @@ void KisMask::Private::initSelectionImpl(KisSelectionSP copyFrom, KisLayerSP par
             q->enableAnimation();
         }
     } else {
-        selection = new KisSelection(new KisSelectionDefaultBounds(parentPaintDevice),
+        selection = new KisSelection(new KisMaskDefaultBounds(parentLayer),
                                      toQShared(new KisImageResolutionProxy(image)));
         selection->pixelSelection()->setDefaultPixel(KoColor(Qt::white, selection->pixelSelection()->colorSpace()));
 
@@ -469,15 +469,13 @@ QRect KisMask::nonDependentExtent() const
     return QRect();
 }
 
-QImage KisMask::createThumbnail(qint32 w, qint32 h, Qt::AspectRatioMode aspectRatioMode)
+QImage KisMask::createThumbnail(qint32 w, qint32 h, Qt::AspectRatioMode aspectRatioMode, KisThumbnailBoundsMode boundsMode)
 {
     KisPaintDeviceSP originalDevice =
         selection() ? selection()->projection() : 0;
 
     return originalDevice ?
-           originalDevice->createThumbnail(w, h, aspectRatioMode, 1,
-                                           KoColorConversionTransformation::internalRenderingIntent(),
-                                           KoColorConversionTransformation::internalConversionFlags()) : QImage();
+           originalDevice->createThumbnail(w, h, aspectRatioMode, boundsMode) : QImage();
 }
 
 int KisMask::thumbnailSeqNo() const
@@ -490,7 +488,7 @@ int KisMask::thumbnailSeqNo() const
 void KisMask::testingInitSelection(const QRect &rect, KisLayerSP parentLayer)
 {
     if (parentLayer) {
-        m_d->selection = new KisSelection(new KisSelectionDefaultBounds(parentLayer->paintDevice()), toQShared(new KisImageResolutionProxy(image())));
+        m_d->selection = new KisSelection(new KisMaskDefaultBounds(parentLayer), toQShared(new KisImageResolutionProxy(image())));
     } else {
         m_d->selection = new KisSelection(new KisSelectionEmptyBounds(), toQShared(new KisImageResolutionProxy(image())));
     }

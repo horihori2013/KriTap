@@ -32,11 +32,8 @@ class KoShapeContainer;
 class KoShapeStrokeModel;
 class KoShapeUserData;
 class KoViewConverter;
-class KoShapeApplicationData;
 class KoShapeSavingContext;
 class KoShapeLoadingContext;
-class KoShapeShadow;
-class KoFilterEffectStack;
 class KoSnapData;
 class KoClipPath;
 class KoClipMask;
@@ -104,42 +101,16 @@ public:
         Deleted, ///< the shape was deleted
         StrokeChanged, ///< the shapes stroke has changed
         BackgroundChanged, ///< the shapes background has changed
-        ShadowChanged, ///< the shapes shadow has changed
         BorderChanged, ///< the shapes border has changed
         ParameterChanged, ///< the shapes parameter has changed (KoParameterShape only)
         ContentChanged, ///< the content of the shape changed e.g. a new image inside a pixmap/text change inside a textshape
-        TextRunAroundChanged, ///< used after a setTextRunAroundSide()
+        TextContourMarginChanged, ///< used after text properties changed and modified the contour margin in the text shape
         ChildChanged, ///< a child of a container was changed/removed. This is propagated to all parents
         ConnectionPointChanged, ///< a connection point has changed
         ClipPathChanged, ///< the shapes clip path has changed
         ClipMaskChanged, ///< the shapes clip path has changed
-        TransparencyChanged ///< the shapetransparency value has changed
-    };
-
-    /// The behavior text should do when intersecting this shape.
-    enum TextRunAroundSide {
-        BiggestRunAroundSide,   ///< Run other text around the side that has the most space
-        LeftRunAroundSide,      ///< Run other text around the left side of the frame
-        RightRunAroundSide,     ///< Run other text around the right side of the frame
-        EnoughRunAroundSide,      ///< Run other text dynamically around both sides of the shape, provided there is sufficient space left
-        BothRunAroundSide,      ///< Run other text around both sides of the shape
-        NoRunAround,            ///< The text will be completely avoiding the frame by keeping the horizontal space that this frame occupies blank.
-        RunThrough              ///< The text will completely ignore the frame and layout as if it was not there
-    };
-
-    /// The behavior text should do when intersecting this shape.
-    enum TextRunAroundContour {
-        ContourBox,     /// Run other text around a bounding rect of the outline
-        ContourFull,   ///< Run other text around also on the inside
-        ContourOutside   ///< Run other text around only on the outside
-    };
-
-    /**
-     * TODO
-     */
-    enum RunThroughLevel {
-        Background,
-        Foreground
+        TransparencyChanged, ///< the shapetransparency value has changed
+        GeometryProtectedChanged, ///< used after a setPosition()
     };
 
     enum PaintOrder {
@@ -279,7 +250,7 @@ public:
     /**
      * @brief Get the bounding box of the shape
      *
-     * This includes the line width and the shadow of the shape
+     * This includes the line width of the shape
      *
      * @return the bounding box of the shape
      */
@@ -304,95 +275,6 @@ public:
      * united rect.
      */
     static QRectF absoluteOutlineRect(const QList<KoShape*> &shapes);
-
-    /**
-     * Return the side text should flow around this shape. This implements the ODF style:wrap
-     * attribute that specifies how text is displayed around a frame or graphic object.
-     */
-    TextRunAroundSide textRunAroundSide() const;
-
-    /**
-     * Set the side text should flow around this shape.
-     * @param side the requested side
-     * @param runThrough run through the foreground or background or...
-     */
-    void setTextRunAroundSide(TextRunAroundSide side, RunThroughLevel runThrough = Background);
-
-    /**
-     * The space between this shape's left edge and text that runs around this shape.
-     * @return the space around this shape to keep free from text
-     */
-    qreal textRunAroundDistanceLeft() const;
-
-    /**
-     * Set the space between this shape's left edge and the text that run around this shape.
-     * @param distance the space around this shape to keep free from text
-     */
-    void setTextRunAroundDistanceLeft(qreal distance);
-
-    /**
-     * The space between this shape's top edge and text that runs around this shape.
-     * @return the space around this shape to keep free from text
-     */
-    qreal textRunAroundDistanceTop() const;
-
-    /**
-     * Set the space between this shape's top edge and the text that run around this shape.
-     * @param distance the space around this shape to keep free from text
-     */
-    void setTextRunAroundDistanceTop(qreal distance);
-
-    /**
-     * The space between this shape's right edge and text that runs around this shape.
-     * @return the space around this shape to keep free from text
-     */
-    qreal textRunAroundDistanceRight() const;
-
-    /**
-     * Set the space between this shape's right edge and the text that run around this shape.
-     * @param distance the space around this shape to keep free from text
-     */
-    void setTextRunAroundDistanceRight(qreal distance);
-
-    /**
-     * The space between this shape's bottom edge and text that runs around this shape.
-     * @return the space around this shape to keep free from text
-     */
-    qreal textRunAroundDistanceBottom() const;
-
-    /**
-     * Set the space between this shape's bottom edge and the text that run around this shape.
-     * @param distance the space around this shape to keep free from text
-     */
-    void setTextRunAroundDistanceBottom(qreal distance);
-
-    /**
-     * Return the threshold above which text should flow around this shape.
-     * The text will not flow around the shape on a side unless the space available on that side
-     * is above this threshold. Only used when the text run around side is EnoughRunAroundSide.
-     * @return threshold the threshold
-     */
-    qreal textRunAroundThreshold() const;
-
-    /**
-     * Set the threshold above which text should flow around this shape.
-     * The text will not flow around the shape on a side unless the space available on that side
-     * is above this threshold. Only used when the text run around side is EnoughRunAroundSide.
-     * @param threshold the new threshold
-     */
-    void setTextRunAroundThreshold(qreal threshold);
-
-    /**
-     * Return the how tight text run around is done around this shape.
-     * @return the contour
-     */
-    TextRunAroundContour textRunAroundContour() const;
-
-    /**
-     * Set how tight text run around is done around this shape.
-     * @param contour the new contour
-     */
-    void setTextRunAroundContour(TextRunAroundContour contour);
 
     /**
      * Set the KoShapeAnchor
@@ -433,7 +315,7 @@ public:
     virtual void setBackground(QSharedPointer<KoShapeBackground> background);
 
     /**
-     * return the brush used to paint te background of this shape with.
+     * Return the brush used to paint the background of this shape with.
      * A QBrush can have a plain color, be fully transparent or have a complex fill.
      * setting such a brush will allow the shape to fill itself using that brush and
      * will be able to tell if its transparent or not.
@@ -505,20 +387,6 @@ public:
      * Minimum value of z-index
      */
     static const qint16 minZIndex;
-
-    /**
-     * Retrieve the run through property of this shape.
-     * The run through property is used to determine if the shape is behind, inside or before text.
-     * @return the run through of this shape.
-     */
-    int runThrough() const;
-
-    /**
-     * Set the run through property of this shape.
-     * The run through property is used to determine if the shape is behind, inside or before text.
-     * @param runThrough the new run through;
-     */
-    virtual void setRunThrough(short int runThrough);
 
     /**
      * Changes the Shape to be visible or invisible.
@@ -697,18 +565,6 @@ public:
     virtual QRectF outlineRect() const;
 
     /**
-     * returns the outline of the shape in the form of a path for the use of painting a shadow.
-     *
-     * Normally this would be the same as outline() if there is a fill (background) set on the
-     * shape and empty if not.  However, a shape could reimplement this to return an outline
-     * even if no fill is defined. A typical example of this would be the picture shape
-     * which has a picture but almost never a background.
-     *
-     * @returns the outline of the shape in the form of a path.
-     */
-    virtual QPainterPath shadowOutline() const;
-
-    /**
      * Returns the currently set stroke, or 0 if there is no stroke.
      * @return the currently set stroke, or 0 if there is no stroke.
      */
@@ -773,12 +629,6 @@ public:
      * @return whether the paint order is inherited. By default it is.
      */
     bool inheritPaintOrder() const;
-
-    /// Sets the new shadow, removing the old one
-    void setShadow(KoShapeShadow *shadow);
-
-    /// Returns the currently set shadow or 0 if there is no shadow set
-    KoShapeShadow *shadow() const;
 
     /// Sets a new clip path, removing the old one
     void setClipPath(KoClipPath *clipPath);
@@ -1042,16 +892,6 @@ public:
     void setAdditionalStyleAttribute(const char *name, const QString &value);
 
     void removeAdditionalStyleAttribute(const char *name);
-
-    /**
-     * Returns the filter effect stack of the shape
-     *
-     * @return the list of filter effects applied on the shape when rendering.
-     */
-    KoFilterEffectStack *filterEffectStack() const;
-
-    /// Sets the new filter effect stack, removing the old one
-    void setFilterEffectStack(KoFilterEffectStack *filterEffectStack);
 
     /**
      * Return the tool delegates for this shape.

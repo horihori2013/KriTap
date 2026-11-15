@@ -35,7 +35,7 @@ struct KoOpenTypeFeatureInfo
         GPOS9, ///< Extension positioning.
     };
     KoOpenTypeFeatureInfo() {}
-    KoOpenTypeFeatureInfo(const QLatin1String &tag,
+    KoOpenTypeFeatureInfo(const QByteArray &tag,
                           const QString &name,
                           const QString &description,
                           const QVector<OpenTypeTable> &tables,
@@ -50,7 +50,7 @@ struct KoOpenTypeFeatureInfo
     {
     }
     
-    QLatin1String tag; ///< 4 char tag.
+    QByteArray tag; ///< 4 char tag.
     
     QString name; ///< User-friendly name.
     
@@ -60,7 +60,7 @@ struct KoOpenTypeFeatureInfo
 
     QStringList namedParameters;/// Named parameters. Only used by CVXX features and retrieved from the font.
     
-    QVector<OpenTypeTable> tables; ///< Which table type(s) are recommended for this feature in the official registery.
+    QVector<OpenTypeTable> tables; ///< Which table type(s) are recommended for this feature in the official registry.
 
     bool glyphPalette{false}; ///< Whether the feature should be visible in the glyph palette.
 
@@ -87,7 +87,7 @@ public:
      * in this case a generic KoOpenTypeFeatureInfo will be returned.
      * @return KoOpenTypeFeatureInfo for a given tag.
      */
-    KoOpenTypeFeatureInfo infoByTag(const QLatin1String &tag) const;
+    KoOpenTypeFeatureInfo infoByTag(const QByteArray &tag) const;
 
     /**
      * @brief tags

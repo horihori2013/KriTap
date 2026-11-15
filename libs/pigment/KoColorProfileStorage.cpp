@@ -15,6 +15,7 @@
 #include "DebugPigment.h"
 #include "KoColorSpaceFactory.h"
 #include "KoColorProfile.h"
+#include "KoColorProfileQuery.h"
 #include "kis_assert.h"
 
 
@@ -92,15 +93,33 @@ void KoColorProfileStorage::addProfileAlias(const QString &name, const QString &
     d->profileAlias[name] = to;
 }
 
+void KoColorProfileStorage::removeProfileAlias(const QString &name)
+{
+    QWriteLocker l(&d->lock);
+    d->profileAlias.remove(name);
+}
+
 QString KoColorProfileStorage::profileAlias(const QString &name) const
 {
     QReadLocker l(&d->lock);
-    return d->profileAlias.value(name, name);
+    /**
+     * Profile aliases are considered 'weak', i.e. they can
+     * be overridden by a read profile added to the storage.
+     */
+    return d->profileMap.contains(name) ? name : d->profileAlias.value(name, name);
 }
 
 const KoColorProfile *KoColorProfileStorage::profileByName(const QString &name) const
 {
     QReadLocker l(&d->lock);
+    /**
+     * Profile aliases are considered 'weak', i.e. they can
+     * be overridden by a read profile added to the storage.
+     */
+    if (d->profileMap.contains(name)) {
+        return d->profileMap[name];
+    }
+
     return d->profileMap.value(d->profileAlias.value(name, name), 0);
 }
 
@@ -154,58 +173,68 @@ QList<const KoColorProfile *> KoColorProfileStorage::profilesFor(const KoColorSp
     return profiles;
 }
 
-QList<const KoColorProfile *> KoColorProfileStorage::profilesFor(const QVector<double> &colorants, ColorPrimaries colorantType, TransferCharacteristics transferType, double error)
+QList<const KoColorProfile *> KoColorProfileStorage::profilesFor(const KoColorProfileQuery &query, double error)
 {
     QList<const KoColorProfile *> profiles;
 
-    if (colorants.isEmpty() && colorantType == PRIMARIES_UNSPECIFIED && transferType == TRC_UNSPECIFIED) {
+    if (!query.isValid()) {
         return profiles;
     }
 
     QReadLocker l(&d->lock);
     for (const KoColorProfile* profile : d->profileMap) {
-        bool colorantMatch = (colorants.isEmpty() || colorantType != PRIMARIES_UNSPECIFIED);
-        bool colorantTypeMatch = (colorantType == PRIMARIES_UNSPECIFIED);
-        bool transferMatch = (transferType == 2);
-        if (colorantType != PRIMARIES_UNSPECIFIED) {
-            if (int(profile->getColorPrimaries()) == colorantType) {
+        bool colorantMatch = (!query.rgbColorants.isEmpty() || query.primaries != PRIMARIES_UNSPECIFIED);
+        bool colorantTypeMatch = (query.primaries == PRIMARIES_UNSPECIFIED);
+        bool transferMatch = (query.transfer == TRC_UNSPECIFIED);
+        bool luminanceMatch = true;
+        if (query.primaries != PRIMARIES_UNSPECIFIED) {
+            if (int(profile->getColorPrimaries()) == query.primaries) {
                 colorantTypeMatch = true;
             }
         }
-        if (transferType != TRC_UNSPECIFIED) {
-            if (int(profile->getTransferCharacteristics()) == transferType) {
+        if (query.transfer != TRC_UNSPECIFIED) {
+            if (int(profile->getTransferCharacteristics()) == query.transfer) {
                 transferMatch = true;
             }
         }
 
-        if (!colorants.isEmpty() && colorantType == PRIMARIES_UNSPECIFIED) {
-            QVector<qreal> wp = profile->getWhitePointxyY();
-            if (profile->hasColorants() && colorants.size() == 8) {
-                QVector<qreal> col = profile->getColorantsxyY();
-                if (col.size() < 8 || wp.size() < 2) {
+        if (!query.rgbColorants.isEmpty() && query.primaries == PRIMARIES_UNSPECIFIED) {
+            KoColorimetryUtils::xyY wp = profile->getWhitePointxyY();
+            if (profile->getColorantsxyY().size() == query.rgbColorants.size()) {
+                QVector<KoColorimetryUtils::xyY> col = profile->getColorantsxyY();
+                if (col.isEmpty()) {
                     // too few colorants, skip.
                     continue;
                 }
-                QVector<double> compare = {wp[0], wp[1], col[0], col[1], col[3], col[4], col[6], col[7]};
 
-                for (int i = 0; i < compare.size(); i++) {
-                    colorantMatch = std::fabs(compare[i] - colorants[i]) < error;
+                colorantMatch = (std::fabs(wp.x - query.whitePoint.x) < error) && (std::fabs(wp.y - query.whitePoint.y) < error);
+                if (!colorantMatch) {
+                    continue;
+                }
+
+                for (int i = 0; i < col.size(); i++) {
+                    colorantMatch = (std::fabs(col[i].x - query.rgbColorants[i].x) < error) && (std::fabs(col[i].y - query.rgbColorants[i].y) < error);
                     if (!colorantMatch) {
                         break;
                     }
                 }
             } else {
-                if (wp.size() < 2 || colorants.size() < 2) {
-                    // too few colorants, skip.
-                    continue;
-                }
-                if (std::fabs(wp[0] - colorants[0]) < error && std::fabs(wp[1] - colorants[1]) < error) {
+                if (std::fabs(wp.x - query.whitePoint.x) < error && std::fabs(wp.y - query.whitePoint.y) < error) {
                     colorantMatch = true;
                 }
             }
         }
 
-        if (transferMatch && colorantMatch && colorantTypeMatch) {
+        if (query.transfer == TRC_ITU_R_BT_2100_0_PQ) {
+            // by default we expect HDR profiles to have HDR Reference White point
+            // to set to 203 nits
+            // TODO: should we spit a warning if the reference white is not set
+            //       for a pq space?
+            const qreal requestedHdrReferenceWhite = query.hdrReferenceWhite.value_or(203.0);
+            luminanceMatch = (profile->hdrReferenceWhite() && qFuzzyCompare(*profile->hdrReferenceWhite(), requestedHdrReferenceWhite));
+        }
+
+        if (transferMatch && colorantMatch && colorantTypeMatch && luminanceMatch) {
             profiles.push_back(profile);
         }
     }

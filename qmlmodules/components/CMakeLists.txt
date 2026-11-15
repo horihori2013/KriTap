@@ -21,6 +21,13 @@ if (QT_MAJOR_VERSION STREQUAL "6")
             KisTheme.h
             KisFontFunctions.cpp
             KisFontFunctions.h
+            KoShapeQtQuickLabel.cpp
+            KoShapeQtQuickLabel.h
+            TagFilterProxyModelQmlWrapper.cpp
+            TagFilterProxyModelQmlWrapper.h
+            KisQmlPopupWidgetManager.cpp
+            KisQmlPopupWidgetManager.h
+
     )
 
 else ()
@@ -44,6 +51,12 @@ else ()
             KisTheme.h
             KisFontFunctions.cpp
             KisFontFunctions.h
+            KoShapeQtQuickLabel.cpp
+            KoShapeQtQuickLabel.h
+            TagFilterProxyModelQmlWrapper.cpp
+            TagFilterProxyModelQmlWrapper.h
+            KisQmlPopupWidgetManager.cpp
+            KisQmlPopupWidgetManager.h
     )
 
 endif ()
@@ -82,6 +95,10 @@ ecm_target_qml_sources(kritaqmlcomponents PRIVATE PATH +qt5 SOURCES
     qml/+qt5/WindowFocusChecker.qml
 )
 
+ecm_target_qml_sources(kritaqmlcomponents PRIVATE PATH +qquickwidget SOURCES
+    qml/+qquickwidget/PopupBase.qml
+)
+
 ecm_target_qml_sources(kritaqmlcomponents SOURCES
     qml/button/GroupButton.qml
     qml/button/OptionButtonStrip.qml
@@ -105,11 +122,19 @@ ecm_target_qml_sources(kritaqmlcomponents SOURCES
 
     qml/WindowFocusChecker.qml
 
+    qml/ResourceView.qml
+    qml/ResourcePopup.qml
+    qml/resourceDelegates/ResourceDelegateBase.qml
+    qml/resourceDelegates/FontFamilyDelegate.qml
+    qml/PopupBase.qml
+    qml/resourceDelegates/CssStylePresetDelegate.qml
+
 )
 if (QT_MAJOR_VERSION STREQUAL "6")
     target_link_libraries(kritaqmlcomponents
         PRIVATE
         kritaui
+        kritaqmlwidgets
         Qt::Qml
         Qt::Quick
         Qt::QuickControls2
@@ -119,11 +144,23 @@ else ()
     target_link_libraries(kritaqmlcomponents
         PRIVATE
         kritaui
+        kritaqmlwidgets
         Qt::Qml
         Qt::Quick
         Qt::QuickControls2
     )
 endif ()
+
+
+if (APPLE)
+    # kritaqmlmodules lacks an RPATH which causes macdeployqt to ERROR
+    set_target_properties(kritaqmlcomponents PROPERTIES INSTALL_RPATH "@loader_path/.;
+        @executable_path/../Frameworks;
+        @loader_path/../../../lib;
+        @loader_path/../../lib;
+        @loader_path/../../../../lib"
+    )
+endif()
 
 ecm_finalize_qml_module(kritaqmlcomponents DESTINATION ${KDE_INSTALL_QMLDIR})
 

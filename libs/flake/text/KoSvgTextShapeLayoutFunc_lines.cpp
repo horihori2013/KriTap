@@ -55,7 +55,6 @@ void addWordToLine(QVector<CharacterResult> &result,
                    QPointF &currentPos,
                    QVector<int> &wordIndices,
                    LineBox &currentLine,
-                   bool ltr,
                    bool isHorizontal)
 {
     QPointF lineAdvance = currentPos;
@@ -377,12 +376,14 @@ void finalizeLine(QVector<CharacterResult> &result,
 
             int justificationCount = before.size()+after.size();
             if (justificationCount > 0) {
+                const QPointF indent = currentChunk == currentLine.chunks.begin()? currentLine.textIndent: QPointF();
+                const QLineF modified = QLineF(currentChunk->length.p1()+indent, currentChunk->length.p2());
                 if (isHorizontal) {
-                    double val = currentChunk->length.length() + hangingGlyphLength - advanceLength.x();
+                    double val = modified.length() + hangingGlyphLength - advanceLength.x();
                     val = val / justificationCount;
                     justifyOffset = QPointF(val, 0);
                 } else {
-                    double val = currentChunk->length.length() + hangingGlyphLength - advanceLength.y();
+                    double val = modified.length() + hangingGlyphLength - advanceLength.y();
                     val = val / justificationCount;
                     justifyOffset = QPointF(0, val);
                 }
@@ -425,8 +426,13 @@ void finalizeLine(QVector<CharacterResult> &result,
             }
             applyInlineSizeAnchoring(result, *currentChunk, anchor, anchorPoint, ltr, isHorizontal, currentLine.textIndent, resHandler);
         } else {
-            // this adds a length for preformated text, only useful for debug.
-            currentChunk->length.setLength(isHorizontal? currentChunk->boundingBox.width(): currentChunk->boundingBox.height());
+            if (!ltr) {
+                // RTL relies on the start being 0.0, so we need to align it to the startAnchor.
+                applyInlineSizeAnchoring(result, *currentChunk, KoSvgText::AnchorStart, currentChunk->length.p1(), ltr, isHorizontal, currentLine.textIndent, resHandler);
+            } else {
+                // this adds a length for preformated text, only useful for debug.
+                currentChunk->length.setLength(isHorizontal? currentChunk->boundingBox.width(): currentChunk->boundingBox.height());
+            }
         }
     }
     lineOffset += lineHeightOffset(writingMode, result, currentLine, firstLine, resHandler);
@@ -514,10 +520,10 @@ QVector<LineBox> breakLines(const KoSvgTextProperties &properties,
                 if (abs(lineLength) - inlineSize.customValue > 0.01) {
                     softBreak = true;
                 } else {
-                    addWordToLine(result, currentPos, wordIndices, currentLine, ltr, isHorizontal);
+                    addWordToLine(result, currentPos, wordIndices, currentLine, isHorizontal);
                 }
             } else {
-                addWordToLine(result, currentPos, wordIndices, currentLine, ltr, isHorizontal);
+                addWordToLine(result, currentPos, wordIndices, currentLine, isHorizontal);
             }
         }
 
@@ -557,7 +563,7 @@ QVector<LineBox> breakLines(const KoSvgTextProperties &properties,
                         if (wordLength <= inlineSize.customValue) {
                             partialWord.append(i);
                         } else {
-                            addWordToLine(result, currentPos, partialWord, currentLine, ltr, isHorizontal);
+                            addWordToLine(result, currentPos, partialWord, currentLine, isHorizontal);
 
                             finalizeLine(result,
                                          currentPos,
@@ -582,7 +588,7 @@ QVector<LineBox> breakLines(const KoSvgTextProperties &properties,
                     wordIndices = partialWord;
                 }
             }
-            addWordToLine(result, currentPos, wordIndices, currentLine, ltr, isHorizontal);
+            addWordToLine(result, currentPos, wordIndices, currentLine, isHorizontal);
         }
 
         if (charResult.breakType == BreakType::HardBreak) {
@@ -606,7 +612,7 @@ QVector<LineBox> breakLines(const KoSvgTextProperties &properties,
 
         if (currentLine.lastLine) {
             if (!wordIndices.isEmpty()) {
-                addWordToLine(result, currentPos, wordIndices, currentLine, ltr, isHorizontal);
+                addWordToLine(result, currentPos, wordIndices, currentLine, isHorizontal);
             }
             finalizeLine(result,
                          currentPos,

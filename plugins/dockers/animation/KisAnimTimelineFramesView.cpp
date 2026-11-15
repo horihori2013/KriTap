@@ -80,6 +80,7 @@ struct KisAnimTimelineFramesView::Private
         , modifiersCatcher(0)
         , kineticScrollInfiniteFrameUpdater()
         , selectionChangedCompressor(300, KisSignalCompressor::FIRST_INACTIVE)
+        , tip(_q)
     {
         kineticScrollInfiniteFrameUpdater.setTimerType(Qt::CoarseTimer);
     }
@@ -261,7 +262,7 @@ KisAnimTimelineFramesView::KisAnimTimelineFramesView(QWidget *parent)
             connect(scroller, SIGNAL(stateChanged(QScroller::State)),
                     this, SLOT(slotScrollerStateChanged(QScroller::State)));
 
-            connect(&m_d->kineticScrollInfiniteFrameUpdater, &QTimer::timeout, [this, scroller](){
+            connect(&m_d->kineticScrollInfiniteFrameUpdater, &QTimer::timeout, this, [this, scroller](){
                 slotUpdateInfiniteFramesCount();
                 scroller->resendPrepareEvent();
             });
@@ -366,7 +367,7 @@ void KisAnimTimelineFramesView::setActionManager(KisActionManager *actionManager
         connect(action, SIGNAL(triggered()), SLOT(slotCopyFrames()));
 
         action = m_d->actionMan->createAction("copy_frames_as_clones");
-        connect(action, &KisAction::triggered, [this](){clone(false);});
+        connect(action, &KisAction::triggered, this, [this](){clone(false);});
 
         action = m_d->actionMan->createAction("make_clones_unique");
         connect(action, SIGNAL(triggered()), SLOT(slotMakeClonesUnique()));
@@ -1012,7 +1013,7 @@ void KisAnimTimelineFramesView::mousePressEvent(QMouseEvent *event)
 #endif
             option.rect = visualRect(index);
             // The offset of the headers is needed to get the correct position inside the view.
-            m_d->tip.showTip(this, event->pos() + QPoint(verticalHeader()->width(), horizontalHeader()->height()), option, index);
+            m_d->tip.showTip(event->pos() + QPoint(verticalHeader()->width(), horizontalHeader()->height()), option, index);
         }
         event->accept();
         
@@ -1090,7 +1091,7 @@ void KisAnimTimelineFramesView::mouseMoveEvent(QMouseEvent *e)
 #endif
             option.rect = visualRect(index);
             // The offset of the headers is needed to get the correct position inside the view.
-            m_d->tip.showTip(this, e->pos() + QPoint(verticalHeader()->width(), horizontalHeader()->height()), option, index);
+            m_d->tip.showTip(e->pos() + QPoint(verticalHeader()->width(), horizontalHeader()->height()), option, index);
         }
 
         e->accept();
@@ -1743,7 +1744,11 @@ QPixmap KisAnimTimelineFramesView::Private::renderToPixmap(const QModelIndexList
         const QModelIndex &current = paintPairs.at(j).second;
         //adjustViewOptionsForIndex(&option, current);
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
         q->itemDelegate(current)->paint(&painter, option, current);
+#else
+        q->itemDelegateForIndex(current)->paint(&painter, option, current);
+#endif
     }
 
     return pixmap;

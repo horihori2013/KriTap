@@ -7,12 +7,13 @@
 #define KISSURFACECOLORIMETRY_H
 
 #include <boost/operators.hpp>
-#include <KisColorimetryUtils.h>
+#include <KoColorimetryUtils.h>
+#include <kritasurfacecolormanagementapi_export.h>
 
 
 namespace KisSurfaceColorimetry
 {
-    using namespace KisColorimetryUtils;
+    using namespace KoColorimetryUtils;
 
     enum class NamedPrimaries {
         primaries_unknown = 0,
@@ -61,6 +62,14 @@ namespace KisSurfaceColorimetry
                    maxLuminance == other.maxLuminance &&
                    referenceLuminance == other.referenceLuminance;
         }
+
+        /**
+         * When we need to to limit the luminance range to SDR-only,
+         * we should use referenceLuminance for max luminance value
+         */
+        Luminance clipToSdr() const {
+            return { minLuminance, referenceLuminance, referenceLuminance };
+        }
     };
 
     struct KRITASURFACECOLORMANAGEMENTAPI_EXPORT MasteringLuminance : boost::equality_comparable<MasteringLuminance> {
@@ -93,6 +102,10 @@ namespace KisSurfaceColorimetry
             return primaries == other.primaries &&
                    transferFunction == other.transferFunction &&
                    luminance == other.luminance;
+        }
+
+        bool isHDR() const {
+            return luminance && luminance->maxLuminance > luminance->referenceLuminance;
         }
     };
 

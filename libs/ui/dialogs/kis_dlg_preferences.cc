@@ -39,6 +39,7 @@
 #include <QFont>
 #include <QSurfaceFormat>
 #include <QColorSpace>
+#include <QTextBrowser>
 
 #include <KisApplication.h>
 #include <KisDocument.h>
@@ -53,6 +54,7 @@
 #include <KoPointerEvent.h>
 
 #include <KoFileDialog.h>
+#include "KisRootSurfaceInfoProxy.h"
 #include "KoID.h"
 #include <KoVBox.h>
 
@@ -72,12 +74,12 @@
 #include "kis_action_registry.h"
 #include <kis_image.h>
 #include <KisSqueezedComboBox.h>
+#include "kis_cie_tongue_widget.h"
 #include "kis_clipboard.h"
 #include "widgets/kis_cmb_idlist.h"
 #include "KoColorSpace.h"
 #include "KoColorSpaceRegistry.h"
 #include "kis_canvas_resource_provider.h"
-#include "kis_color_manager.h"
 #include "kis_config.h"
 #include "kis_image_config.h"
 #include "kis_preference_set_registry.h"
@@ -86,6 +88,14 @@
 #include "kis_file_name_requester.h"
 #include <KisWidgetConnectionUtils.h>
 #include <dialogs/KisFrameRateLimitModel.h>
+#include <KisPlatformPluginInterfaceFactory.h>
+#ifdef Q_OS_LINUX
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <surfacecolormanagement/KisSurfaceColorimetry.h>
+
+#endif
+#include <KoColorimetryUtils.h>
+#endif
 
 #include "slider_and_spin_box_sync.h"
 
@@ -144,7 +154,7 @@ struct WritableLocationValidator : public QValidator {
     {
         QFileInfo fi(line);
         if (!fi.isWritable()) {
-            return Invalid;
+            return Intermediate;
         }
         return Acceptable;
     }
@@ -195,6 +205,31 @@ public:
         return false;
     }
 };
+
+QIcon addDisabledStatesToIcon(const QIcon &_icon, const QSize &size) {
+
+    QIcon icon = _icon;
+    QImage imageOrig = _icon.pixmap(size).toImage();
+
+    auto makeFainter = [imageOrig] (int alphaVal) {
+        QImage image = imageOrig;
+        QImage alpha = QImage(image.size(), QImage::Format_Alpha8);
+        alpha.fill(alphaVal);
+        image.setAlphaChannel(alpha);
+        QPixmap pixmap = QPixmap();
+        pixmap.convertFromImage(image);
+        return pixmap;
+    };
+
+    QPixmap thirdOpaque = makeFainter(int(256*0.3));
+    QPixmap halfOpaque = makeFainter(int(256*0.65));
+
+    icon.addPixmap(thirdOpaque, QIcon::Mode::Disabled, QIcon::State::Off);
+    icon.addPixmap(thirdOpaque, QIcon::Mode::Disabled, QIcon::State::On);
+    icon.addPixmap(halfOpaque, QIcon::Mode::Normal, QIcon::State::Off);
+
+    return icon;
+}
 
 GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
     : WdgGeneralSettings(_parent, _name)
@@ -267,6 +302,54 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
     eraserCursorColor.fromQColor(cfg.getEraserCursorMainColor());
     eraserCursorColorButton->setColor(eraserCursorColor);
 
+    // Color sampler
+
+    setColorSamplerPreviewStyleItems(m_cmbColorSamplerPreviewStyle);
+    setColorSamplerPreviewStyleIndexByValue(m_cmbColorSamplerPreviewStyle, cfg.colorSamplerPreviewStyle());
+    connect(m_cmbColorSamplerPreviewStyle,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this,
+            &GeneralTab::colorSamplePreviewStyleChanged);
+    colorSamplePreviewStyleChanged(m_cmbColorSamplerPreviewStyle->currentIndex());
+
+    m_nmbColorSamplerPreviewSize->setRange(1, 400);
+    m_nmbColorSamplerPreviewSize->setValue(cfg.colorSamplerPreviewCircleDiameter());
+    m_lblColorSamplerPreviewSizePreview->setDiameter(cfg.colorSamplerPreviewCircleDiameter());
+    connect(m_nmbColorSamplerPreviewSize,SIGNAL(valueChanged(int)), SLOT(colorSamplePreviewSizeChanged(int)));
+
+    m_ssbColorSamplerPreviewThickness->setRange(1, 50);
+    m_ssbColorSamplerPreviewThickness->setValue(cfg.colorSamplerPreviewCircleThickness());
+    m_lblColorSamplerPreviewSizePreview->setThickness(cfg.colorSamplerPreviewCircleThickness()/100.0);
+    connect(m_ssbColorSamplerPreviewThickness,SIGNAL(valueChanged(qreal)), SLOT(colorSamplePreviewThicknessChanged(qreal)));
+
+    m_chkColorSamplerPreviewOutlineEnabled->setChecked(cfg.colorSamplerPreviewCircleOutlineEnabled());
+    m_lblColorSamplerPreviewSizePreview->setOutlineEnabled(cfg.colorSamplerPreviewCircleOutlineEnabled());
+    connect(m_chkColorSamplerPreviewOutlineEnabled,SIGNAL(stateChanged(int)), SLOT(colorSamplePreviewOutlineEnabledChanged(int)));
+
+    m_chkColorSamplerPreviewExtraCircles->setChecked(cfg.colorSamplerPreviewCircleExtraCirclesEnabled());
+
+    m_grpColorSamplerZoomPreview->setChecked(cfg.colorSamplerZoomPreviewEnabled());
+
+    m_ssbColorSamplerZoomPreviewScale->setRange(1, 50);
+    m_ssbColorSamplerZoomPreviewScale->setSingleStep(1);
+    m_ssbColorSamplerZoomPreviewScale->setValue(cfg.colorSamplerZoomPreviewScale());
+
+    m_cmbColorSamplerPreviewCirclePosition->addItem(i18n("Center"));
+    m_cmbColorSamplerPreviewCirclePosition->addItem(i18n("Top"));
+    m_cmbColorSamplerPreviewCirclePosition->addItem(i18n("Top Left"));
+    m_cmbColorSamplerPreviewCirclePosition->addItem(i18n("Top Right"));
+    m_cmbColorSamplerPreviewCirclePosition->setCurrentIndex(int(cfg.colorSamplerPreviewCirclePosition()));
+
+
+    KisSpinBoxI18nHelper::setText(m_ssbColorSamplerPreviewThickness, i18nc("{n} is the number value, % is the percent sign", "{n}%"));
+
+
+
+
+
+
+
+
     //
     // Window Tab
     //
@@ -309,7 +392,7 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
     const QString configPath = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
     QSettings kritarc(configPath + QStringLiteral("/kritadisplayrc"), QSettings::IniFormat);
     m_chkHiDPI->setChecked(kritarc.value("EnableHiDPI", true).toBool());
-#ifdef HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY
+#if defined(Q_OS_WIN) && defined(HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY)
     m_chkHiDPIFractionalScaling->setChecked(kritarc.value("EnableHiDPIFractionalScaling", false).toBool());
 #else
     m_wdgHiDPIFractionalScaling->setEnabled(false);
@@ -357,7 +440,9 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
 
     intZoomMarginSize->setValue(cfg.zoomMarginSize());
 
-    chkEnableSelectionActionBar->setChecked(cfg.selectionActionBar());
+    bool sapEnabled = cfg.selectionActionBar();
+
+    chkEnableSelectionActionBar->setChecked(sapEnabled);
 
     //
     // File handling
@@ -484,6 +569,11 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
     chkIgnoreHighFunctionKeys->setVisible(false);
 #endif
 
+    cmbIconsInMenu->addItem(i18n("Default"));
+    cmbIconsInMenu->addItem(i18n("Yes"));
+    cmbIconsInMenu->addItem(i18n("No"));
+    cmbIconsInMenu->setCurrentIndex(cfg.iconsInMenu());
+
     //
     // Resources
     //
@@ -497,7 +587,7 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
         m_urlResourceFolder->setFileName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
     }
     QValidator *writableValidator = new WritableLocationValidator(m_urlResourceFolder);
-    txtBackupFileSuffix->setValidator(writableValidator);
+    m_urlResourceFolder->setValidator(writableValidator);
     connect(m_urlResourceFolder, SIGNAL(textChanged(QString)), SLOT(checkResourcePath()));
     checkResourcePath();
 
@@ -583,7 +673,7 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
     // this should be the last item we add.
     m_resourceFolderSelector->addItem(i18n("Choose Manually"));
 
-    connect(m_resourceFolderSelector, qOverload<int>(&QComboBox::activated), [this](int index) {
+    connect(m_resourceFolderSelector, qOverload<int>(&QComboBox::activated), this, [this](int index) {
         const int previousIndex = m_resourceFolderSelector->currentIndex();
 
         // if it is the last item in the last item, then open file picker and set the name returned as the filename
@@ -662,6 +752,7 @@ GeneralTab::GeneralTab(QWidget *_parent, const char *_name)
 
         connect(grpWindowsAppData,
                 &KisWarningBlock::linkActivated,
+                qApp,
                 [userPath = appDataDir.absolutePath(),
                  privatePath = privateResourceDir.absolutePath()](const QString &link) {
                     if (link == QStringLiteral("copyuser")) {
@@ -705,6 +796,14 @@ void GeneralTab::setDefault()
     m_chkSeparateEraserCursor->setChecked(cfg.readEntry<bool>("separateEraserCursor", false));
     m_cmbEraserCursorShape->setCurrentIndex(cfg.eraserCursorStyle(true));
     m_cmbEraserOutlineShape->setCurrentIndex(cfg.eraserOutlineStyle(true));
+    setColorSamplerPreviewStyleIndexByValue(m_cmbColorSamplerPreviewStyle, cfg.colorSamplerPreviewStyle(true));
+    m_ssbColorSamplerPreviewThickness->setValue(cfg.colorSamplerPreviewCircleThickness(true));
+    m_nmbColorSamplerPreviewSize->setValue(cfg.colorSamplerPreviewCircleDiameter(true));
+    m_chkColorSamplerPreviewOutlineEnabled->setChecked(cfg.colorSamplerPreviewCircleOutlineEnabled(true));
+    m_grpColorSamplerZoomPreview->setChecked(cfg.colorSamplerZoomPreviewEnabled(true));
+    m_ssbColorSamplerZoomPreviewScale->setValue(cfg.colorSamplerZoomPreviewScale(true));
+    m_cmbColorSamplerPreviewCirclePosition->setCurrentIndex(int(cfg.colorSamplerPreviewCirclePosition(true)));
+
 
     chkShowRootLayer->setChecked(cfg.showRootLayer(true));
     m_autosaveCheckBox->setChecked(cfg.autoSaveInterval(true) > 0);
@@ -754,7 +853,7 @@ void GeneralTab::setDefault()
     m_chkTrimFramesImport->setChecked(cfg.trimFramesImport(true));
     chkZip64->setChecked(cfg.useZip64(true));
     m_chkHiDPI->setChecked(true);
-#ifdef HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY
+#if defined(Q_OS_WIN) && defined(HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY)
     m_chkHiDPIFractionalScaling->setChecked(true);
 #endif
     chkUsageLogging->setChecked(true);
@@ -812,6 +911,36 @@ void GeneralTab::showAdvancedCumulativeUndoSettings()
     }
 }
 
+void GeneralTab::colorSamplePreviewStyleChanged(int index)
+{
+    bool circleSettingsVisible = index == int(KisConfig::ColorSamplerPreviewStyle::Circle);
+    m_frmColorSamplerCircleSettings->setVisible(circleSettingsVisible);
+}
+
+void GeneralTab::colorSamplePreviewSizeChanged(int value)
+{
+    m_lblColorSamplerPreviewSizePreview->setDiameter(value);
+}
+
+void GeneralTab::colorSamplePreviewThicknessChanged(qreal value)
+{
+    m_lblColorSamplerPreviewSizePreview->setThickness(value/100.0);
+}
+
+void GeneralTab::colorSamplePreviewOutlineEnabledChanged(int value)
+{
+    m_lblColorSamplerPreviewSizePreview->setOutlineEnabled(value);
+}
+
+void GeneralTab::setButtonGroupEnabled(const QButtonGroup &buttonGroup, bool value)
+{
+    Q_FOREACH(QAbstractButton* button, buttonGroup.buttons()) {
+        if (button) {
+            button->setEnabled(value);
+        }
+    }
+}
+
 CursorStyle GeneralTab::cursorStyle()
 {
     return (CursorStyle)m_cmbCursorShape->currentIndex();
@@ -832,9 +961,55 @@ OutlineStyle GeneralTab::eraserOutlineStyle()
     return (OutlineStyle)m_cmbEraserOutlineShape->currentIndex();
 }
 
+KisConfig::ColorSamplerPreviewStyle GeneralTab::colorSamplerPreviewStyle() const
+{
+    return getColorSamplerPreviewStyleValue(m_cmbColorSamplerPreviewStyle);
+}
+
+int GeneralTab::colorSamplerPreviewCircleDiameter() const
+{
+    return m_nmbColorSamplerPreviewSize->value();
+}
+
+qreal GeneralTab::colorSamplerPreviewCircleThickness() const
+{
+    return m_ssbColorSamplerPreviewThickness->value();
+}
+
+bool GeneralTab::colorSamplerPreviewCircleOutlineEnabled() const
+{
+    return m_chkColorSamplerPreviewOutlineEnabled->isChecked();
+}
+
+bool GeneralTab::colorSamplerPreviewCircleExtraCirclesEnabled() const
+{
+    return m_chkColorSamplerPreviewExtraCircles->isChecked();
+}
+
+qreal GeneralTab::colorSamplerZoomPreviewScale() const
+{
+    return m_ssbColorSamplerZoomPreviewScale->value();
+}
+
+bool GeneralTab::colorSamplerZoomPreviewEnabled() const
+{
+    return m_grpColorSamplerZoomPreview->isChecked();
+}
+
+KisConfig::ColorSamplerPreviewCirclePosition GeneralTab::colorSamplerPreviewCirclePosition() const
+{
+    int index = m_cmbColorSamplerPreviewCirclePosition->currentIndex();
+    return KisConfig::ColorSamplerPreviewCirclePosition(index);
+}
+
 KisConfig::SessionOnStartup GeneralTab::sessionOnStartup() const
 {
     return (KisConfig::SessionOnStartup)cmbStartupSession->currentIndex();
+}
+
+KisConfig::IconsInMenu GeneralTab::iconsInMenu() const
+{
+    return (KisConfig::IconsInMenu)cmbIconsInMenu->currentIndex();
 }
 
 bool GeneralTab::saveSessionOnQuit() const
@@ -973,6 +1148,28 @@ int GeneralTab::forcedFontDpi()
     return chkForcedFontDPI->isChecked() ? intForcedFontDPI->value() : -1;
 }
 
+void GeneralTab::setColorSamplerPreviewStyleItems(QComboBox *cmb)
+{
+    // Order is synchronized with KisConfig::ColorSamplerPreviewStyle.
+    cmb->addItems({
+        i18nc("Preview option for no color sampler", "None"),
+        i18nc("Preview option for a circular/ring-shaped color sampler", "Circle"),
+        i18nc("Preview option for a rectangular color sampler left of the cursor", "Rectangle Left"),
+        i18nc("Preview option for a rectangular color sampler right of the cursor", "Rectangle Right"),
+        i18nc("Preview option for a rectangular color sampler above the cursor", "Rectangle Above"),
+    });
+}
+
+void GeneralTab::setColorSamplerPreviewStyleIndexByValue(QComboBox *cmb, KisConfig::ColorSamplerPreviewStyle style)
+{
+    cmb->setCurrentIndex(int(style));
+}
+
+KisConfig::ColorSamplerPreviewStyle GeneralTab::getColorSamplerPreviewStyleValue(const QComboBox *cmb)
+{
+    return KisConfig::ColorSamplerPreviewStyle(cmb->currentIndex());
+}
+
 bool GeneralTab::renameMergedLayers()
 {
     return chkRenameMergedLayers->isChecked();
@@ -1108,14 +1305,7 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
 
     KisConfig cfg(true);
 
-    KisMainWindow *mainWindow = KisPart::instance()->currentMainwindow();
-    m_colorManagedByOS = mainWindow->managedSurfaceProfile();
-
-    if (!m_colorManagedByOS) {
-        m_page->chkUseSystemMonitorProfile->setChecked(cfg.useSystemMonitorProfile());
-        connect(m_page->chkUseSystemMonitorProfile, SIGNAL(toggled(bool)), this, SLOT(toggleAllowMonitorProfileSelection(bool)));
-    }
-    m_page->chkUseSystemMonitorProfile->setVisible(!m_colorManagedByOS);
+    m_colorManagedByOS = KisPlatformPluginInterfaceFactory::instance()->surfaceColorManagedByOS();
 
     m_page->useDefColorSpace->setChecked(cfg.useDefaultColorSpace());
     connect(m_page->useDefColorSpace, SIGNAL(toggled(bool)), this, SLOT(toggleUseDefaultColorSpace(bool)));
@@ -1171,13 +1361,6 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
             m_monitorProfileWidgets << cmb;
         }
 
-        // disable if not Linux as KisColorManager is not yet implemented outside Linux
-#ifndef Q_OS_LINUX
-        m_page->chkUseSystemMonitorProfile->setChecked(false);
-        m_page->chkUseSystemMonitorProfile->setDisabled(true);
-        m_page->chkUseSystemMonitorProfile->setHidden(true);
-#endif
-
         refillMonitorProfiles(KoID("RGBA"));
 
         for(int i = 0; i < QApplication::screens().count(); ++i) {
@@ -1217,6 +1400,7 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
 
         monitorProfileGrid->addRow(m_chkEnableCanvasColorSpaceManagement);
 
+        // surface color space
         m_canvasSurfaceColorSpace = new KisSqueezedComboBox();
             m_canvasSurfaceColorSpace->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
         QLabel *canvasSurfaceColorSpaceLbl = new QLabel(i18n("Canvas surface color space:"), this);
@@ -1225,6 +1409,7 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
         m_canvasSurfaceColorSpace->addSqueezedItem(i18n("Preferred by operating system"), QVariant::fromValue(CanvasSurfaceMode::Preferred));
         m_canvasSurfaceColorSpace->addSqueezedItem(i18n("Rec 709 Gamma 2.2"), QVariant::fromValue(CanvasSurfaceMode::Rec709g22));
         m_canvasSurfaceColorSpace->addSqueezedItem(i18n("Rec 709 Linear"), QVariant::fromValue(CanvasSurfaceMode::Rec709g10));
+        m_canvasSurfaceColorSpace->addSqueezedItem(i18n("Rec 2020 PQ"), QVariant::fromValue(CanvasSurfaceMode::Rec2020pq));
         m_canvasSurfaceColorSpace->addSqueezedItem(i18n("Unmanaged (testing only)"), QVariant::fromValue(CanvasSurfaceMode::Unmanaged));
 
         m_canvasSurfaceColorSpace->setToolTip(
@@ -1232,71 +1417,116 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
                  "window compositor. Use \"preferred\" space unless you know "
                  "what you are doing</p>"));
 
+        // surface bit depth
+        m_canvasSurfaceBitDepth = new KisSqueezedComboBox();
+            m_canvasSurfaceBitDepth->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+        QLabel *canvasSurfaceBitDepthLbl = new QLabel(i18n("Canvas surface bit depth (needs restart):"), this);
+        monitorProfileGrid->addRow(canvasSurfaceBitDepthLbl, m_canvasSurfaceBitDepth);
+
+        m_canvasSurfaceBitDepth->addSqueezedItem(i18n("Auto"), QVariant::fromValue(CanvasSurfaceBitDepthMode::DepthAuto));
+        m_canvasSurfaceBitDepth->addSqueezedItem(i18n("8-bit"), QVariant::fromValue(CanvasSurfaceBitDepthMode::Depth8Bit));
+        m_canvasSurfaceBitDepth->addSqueezedItem(i18n("10-bit"), QVariant::fromValue(CanvasSurfaceBitDepthMode::Depth10Bit));
+
+        m_canvasSurfaceBitDepth->setToolTip(
+            i18n("<p>The bit depth of the color that is passed to the window "
+                 "compositor. You should switch into 10-bit mode if you want to use "
+                 "HDR capabilities of your display</p>"));
+
+        const QString currentBitBepthString = QSurfaceFormat::defaultFormat().redBufferSize() == 10 ? i18n("10-bit") : i18n("8-bit");
+        QLabel *currentCanvasSurfaceBitDepthLbl = new QLabel(i18n("Current canvas surface bit depth:"), this);
+        QLabel *currentCanvasSurfaceBitDepth = new QLabel(currentBitBepthString, this);
+        monitorProfileGrid->addRow(currentCanvasSurfaceBitDepthLbl, currentCanvasSurfaceBitDepth);
+
         vboxLayout->addItem(new QSpacerItem(20,20));
 
-        QLabel *preferredLbl = new QLabel(i18n("Color space preferred by the operating system:\n%1", mainWindow->osPreferredColorSpaceReport()), this);
-        vboxLayout->addWidget(preferredLbl);
+        KisMainWindow *mainWindow = KisPart::instance()->currentMainwindow();
+        QTextBrowser *preferredLbl = new QTextBrowser(this);
+        preferredLbl->setText(i18n("Color space preferred by the operating system:\n%1", KisPlatformPluginInterfaceFactory::instance()->osPreferredColorSpaceReport(mainWindow)));
+        preferredLbl->setReadOnly(true);
+
+        QHBoxLayout *colorDescriptionChoice = new QHBoxLayout();
+        vboxLayout->addLayout(colorDescriptionChoice);
+
+        QLabel *descriptionChoiceLabel =  new QLabel(i18n("Diagram:"));
+        colorDescriptionChoice->addWidget(descriptionChoiceLabel);
+
+        QRadioButton *containerSpace = new QRadioButton(i18nc("@info:radiobutton", "Preferred Space"), this);
+        colorDescriptionChoice->addWidget(containerSpace);
+        containerSpace->setToolTip(i18nc("@info:tooltip", "This is the space preferred by the operating system."));
+        m_preferredSpaceGraphicMode.addButton(containerSpace, PreferredSpace);
+
+        QRadioButton *masteringSpace = new QRadioButton(i18nc("@info:radiobutton", "Current Display"), this);
+        colorDescriptionChoice->addWidget(masteringSpace);
+        m_preferredSpaceGraphicMode.addButton(masteringSpace, MasteringSpace);
+        masteringSpace->setToolTip(i18nc("@info:tooltip", "This is the space representing the currently active display."));
+
+        QHBoxLayout *colorDescriptionLayout = new QHBoxLayout();
+        vboxLayout->addLayout(colorDescriptionLayout);
+        m_preferredSpaceGraphic = new KisCIETongueWidget(this);
+        colorDescriptionLayout->addWidget(m_preferredSpaceGraphic);
+        colorDescriptionLayout->addWidget(preferredLbl);
+
+        containerSpace->setChecked(true);
+        colorDescriptionChoice->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding));
+
+        m_preferredSpaceGraphic->setFixedSize(QSize(200, 200));
+        updatePreferredSpaceGraphic();
+        connect(&m_preferredSpaceGraphicMode, SIGNAL(buttonClicked(QAbstractButton*)), this, SLOT(updatePreferredSpaceGraphic()));
+        m_screenMigrationTracker.reset(new KisScreenMigrationTracker(this));
+        connect(m_screenMigrationTracker.data(), &KisScreenMigrationTracker::sigScreenChanged,
+                this, &ColorSettingsTab::updatePreferredSpaceGraphic);
 
         m_chkEnableCanvasColorSpaceManagement->setChecked(cfg.enableCanvasSurfaceColorSpaceManagement());
-        auto mode = cfg.canvasSurfaceColorSpaceManagementMode();
-        int index = m_canvasSurfaceColorSpace->findData(QVariant::fromValue(mode));
-        KIS_SAFE_ASSERT_RECOVER(index >= 0) {
-            index = 0;
+
+        {
+            auto mode = cfg.canvasSurfaceColorSpaceManagementMode();
+            int index = m_canvasSurfaceColorSpace->findData(QVariant::fromValue(mode));
+            KIS_SAFE_ASSERT_RECOVER(index >= 0) {
+                index = 0;
+            }
+            m_canvasSurfaceColorSpace->setCurrentIndex(index);
         }
-        m_canvasSurfaceColorSpace->setCurrentIndex(index);
+
+        {
+            auto mode = cfg.canvasSurfaceBitDepthMode();
+            int index = m_canvasSurfaceBitDepth->findData(QVariant::fromValue(mode));
+            KIS_SAFE_ASSERT_RECOVER(index >= 0) {
+                index = 0;
+            }
+            m_canvasSurfaceBitDepth->setCurrentIndex(index);
+        }
 
         connect(m_chkEnableCanvasColorSpaceManagement, &QCheckBox::toggled, m_canvasSurfaceColorSpace, &QWidget::setEnabled);
         m_canvasSurfaceColorSpace->setEnabled(m_chkEnableCanvasColorSpaceManagement->isChecked());
 
         connect(m_chkEnableCanvasColorSpaceManagement, &QCheckBox::toggled, canvasSurfaceColorSpaceLbl, &QWidget::setEnabled);
         canvasSurfaceColorSpaceLbl->setEnabled(m_chkEnableCanvasColorSpaceManagement->isChecked());
+
+        connect(m_chkEnableCanvasColorSpaceManagement, &QCheckBox::toggled, m_canvasSurfaceBitDepth, &QWidget::setEnabled);
+        m_canvasSurfaceBitDepth->setEnabled(m_chkEnableCanvasColorSpaceManagement->isChecked());
+
+        connect(m_chkEnableCanvasColorSpaceManagement, &QCheckBox::toggled, canvasSurfaceBitDepthLbl, &QWidget::setEnabled);
+        canvasSurfaceBitDepthLbl->setEnabled(m_chkEnableCanvasColorSpaceManagement->isChecked());
     }
 
     m_page->chkBlackpoint->setChecked(cfg.useBlackPointCompensation());
     m_page->chkAllowLCMSOptimization->setChecked(cfg.allowLCMSOptimization());
     m_page->chkForcePaletteColor->setChecked(cfg.forcePaletteColors());
+    m_page->cmbMonitorIntent->setCurrentIndex(cfg.monitorRenderIntent());
     KisImageConfig cfgImage(true);
 
+    /**
+     * Default proofing config
+     */
     KisProofingConfigurationSP proofingConfig = cfgImage.defaultProofingconfiguration();
+
+    m_page->wdgProofingOptions->setProofingConfig(proofingConfig);
+
     m_proofModel->data.set(*proofingConfig.data());
 
     connect(m_page->chkBlackpoint, SIGNAL(toggled(bool)), this, SLOT(updateProofingDisplayInfo()));
     connect(m_page->cmbMonitorIntent, SIGNAL(currentIndexChanged(int)), this, SLOT(updateProofingDisplayInfo()));
-    m_page->cmbMonitorIntent->setCurrentIndex(cfg.monitorRenderIntent());
     updateProofingDisplayInfo();
-
-    m_page->sldAdaptationState->setMaximum(m_proofModel->adaptationRangeMax());
-    m_page->sldAdaptationState->setMinimum(0);
-
-    m_page->proofingSpaceSelector->showDepth(false);
-
-    m_page->cmbDisplayIntent->addItem(i18nc("Color conversion intent", "Perceptual"), INTENT_PERCEPTUAL);
-    m_page->cmbDisplayIntent->addItem(i18nc("Color conversion intent", "Relative Colorimetric"), INTENT_RELATIVE_COLORIMETRIC);
-    m_page->cmbDisplayIntent->addItem(i18nc("Color conversion intent", "Saturation"), INTENT_SATURATION);
-    m_page->cmbDisplayIntent->addItem(i18nc("Color conversion intent", "Absolute Colorimetric"), INTENT_ABSOLUTE_COLORIMETRIC);
-    m_page->cmbProofingIntent->setModel(m_page->cmbDisplayIntent->model());
-
-    m_page->cmbDisplayMode->addItem(i18nc("Display Mode", "Use global display settings"), int(KisProofingConfiguration::Monitor));
-    m_page->cmbDisplayMode->addItem(i18nc("Display Mode", "Simulate paper white and black"), int(KisProofingConfiguration::Paper));
-    m_page->cmbDisplayMode->addItem(i18nc("Display Mode", "Custom"), int(KisProofingConfiguration::Custom));
-
-    const KoColorSpace *proofingSpace =  KoColorSpaceRegistry::instance()->colorSpace(m_proofModel->proofingModel(),
-                                                                                      m_proofModel->proofingDepth(),
-                                                                                      m_proofModel->proofingProfile());
-    if (proofingSpace) {
-        m_page->proofingSpaceSelector->setCurrentColorSpace(proofingSpace);
-    }
-    updateProofingWidgets();
-    connect(m_page->cmbDisplayMode, SIGNAL(currentIndexChanged(int)), this, SLOT(proofingDisplayModeUpdated()));
-    connect(m_page->cmbDisplayIntent, SIGNAL(currentIndexChanged(int)), this, SLOT(proofingDisplayIntentUpdated()));
-    connect(m_page->cmbProofingIntent, SIGNAL(currentIndexChanged(int)), this, SLOT(proofingConversionIntentUpdated()));
-    connect(m_page->chkDispBlackPoint, &QCheckBox::toggled, m_proofModel.data(), &KisProofingConfigModel::dispBlackPointCompensation);
-    connect(m_page->sldAdaptationState, &QSlider::valueChanged, m_proofModel.data(), &KisProofingConfigModel::setadaptationState);
-    KisWidgetConnectionUtils::connectControl(m_page->ckbProofBlackPoint, m_proofModel.data(), "convBlackPointCompensation");
-    KisWidgetConnectionUtils::connectControl(m_page->gamutAlarm, m_proofModel.data(), "warningColor");
-    KisWidgetConnectionUtils::connectWidgetEnabledToProperty(m_page->gbxDisplayTransform, m_proofModel.data(), "enableDisplayToggles");
-    KisWidgetConnectionUtils::connectWidgetEnabledToProperty(m_page->sldAdaptationState, m_proofModel.data(), "enableAdaptationSlider");
-    KisWidgetConnectionUtils::connectWidgetEnabledToProperty(m_page->chkDispBlackPoint, m_proofModel.data(), "enableDisplayBlackPointCompensation");
 
     m_pasteBehaviourGroup.addButton(m_page->radioPasteWeb, KisClipboard::PASTE_ASSUME_WEB);
     m_pasteBehaviourGroup.addButton(m_page->radioPasteMonitor, KisClipboard::PASTE_ASSUME_MONITOR);
@@ -1310,7 +1540,13 @@ ColorSettingsTab::ColorSettingsTab(QWidget *parent, const char *name)
     }
 
     if (!m_colorManagedByOS) {
-        toggleAllowMonitorProfileSelection(cfg.useSystemMonitorProfile());
+        refillMonitorProfiles(KoID("RGBA"));
+
+        for(int i = 0; i < QApplication::screens().count(); ++i) {
+            if (m_monitorProfileWidgets[i]->contains(cfg.monitorProfile(i))) {
+                m_monitorProfileWidgets[i]->setCurrent(cfg.monitorProfile(i));
+            }
+        }
     }
 }
 
@@ -1348,39 +1584,6 @@ void ColorSettingsTab::installProfile()
 
 }
 
-void ColorSettingsTab::toggleAllowMonitorProfileSelection(bool useSystemProfile)
-{
-    KIS_SAFE_ASSERT_RECOVER_RETURN(!m_colorManagedByOS);
-
-    KisConfig cfg(true);
-
-    if (useSystemProfile) {
-        QStringList devices = KisColorManager::instance()->devices();
-        if (devices.size() == QApplication::screens().count()) {
-            for(int i = 0; i < QApplication::screens().count(); ++i) {
-                m_monitorProfileWidgets[i]->clear();
-                QString monitorForScreen = cfg.monitorForScreen(i, devices[i]);
-                Q_FOREACH (const QString &device, devices) {
-                    m_monitorProfileLabels[i]->setText(i18nc("The number of the screen (ordinal) and shortened 'name' of the screen (model + resolution)", "Screen %1 (%2):", i + 1, shortNameOfDisplay(i)));
-                    m_monitorProfileWidgets[i]->addSqueezedItem(KisColorManager::instance()->deviceName(device), device);
-                    if (devices[i] == monitorForScreen) {
-                        m_monitorProfileWidgets[i]->setCurrentIndex(i);
-                    }
-                }
-            }
-        }
-    }
-    else {
-        refillMonitorProfiles(KoID("RGBA"));
-
-        for(int i = 0; i < QApplication::screens().count(); ++i) {
-            if (m_monitorProfileWidgets[i]->contains(cfg.monitorProfile(i))) {
-                m_monitorProfileWidgets[i]->setCurrent(cfg.monitorProfile(i));
-            }
-        }
-    }
-}
-
 void ColorSettingsTab::toggleUseDefaultColorSpace(bool useDefColorSpace)
 {
     m_page->cmbWorkingColorSpace->setEnabled(useDefColorSpace);
@@ -1400,32 +1603,34 @@ void ColorSettingsTab::setDefault()
         refillMonitorProfiles(KoID("RGBA"));
     } else {
         m_chkEnableCanvasColorSpaceManagement->setChecked(cfg.enableCanvasSurfaceColorSpaceManagement(true));
-        auto mode = cfg.canvasSurfaceColorSpaceManagementMode(true);
-        int index = m_canvasSurfaceColorSpace->findData(QVariant::fromValue(mode));
-        KIS_SAFE_ASSERT_RECOVER(index >= 0) {
-            index = 0;
+
+        {
+            auto mode = cfg.canvasSurfaceColorSpaceManagementMode(true);
+            int index = m_canvasSurfaceColorSpace->findData(QVariant::fromValue(mode));
+            KIS_SAFE_ASSERT_RECOVER(index >= 0) {
+                index = 0;
+            }
+            m_canvasSurfaceColorSpace->setCurrentIndex(index);
         }
-        m_canvasSurfaceColorSpace->setCurrentIndex(index);
+
+        {
+            auto mode = cfg.canvasSurfaceBitDepthMode(true);
+            int index = m_canvasSurfaceBitDepth->findData(QVariant::fromValue(mode));
+            KIS_SAFE_ASSERT_RECOVER(index >= 0) {
+                index = 0;
+            }
+            m_canvasSurfaceBitDepth->setCurrentIndex(index);
+        }
     }
 
     KisImageConfig cfgImage(true);
     KisProofingConfigurationSP proofingConfig =  cfgImage.defaultProofingconfiguration(true);
-    m_proofModel->data.set(*proofingConfig.data());
-    const KoColorSpace *proofingSpace =  KoColorSpaceRegistry::instance()->colorSpace(m_proofModel->proofingModel(),
-                                                                                      m_proofModel->proofingDepth(),
-                                                                                      m_proofModel->proofingProfile());
-    if (proofingSpace) {
-        m_page->proofingSpaceSelector->setCurrentColorSpace(proofingSpace);
-    }
-    updateProofingWidgets();
+    m_page->wdgProofingOptions->setProofingConfig(proofingConfig);
 
     m_page->chkBlackpoint->setChecked(cfg.useBlackPointCompensation(true));
     m_page->chkAllowLCMSOptimization->setChecked(cfg.allowLCMSOptimization(true));
     m_page->chkForcePaletteColor->setChecked(cfg.forcePaletteColors(true));
     m_page->cmbMonitorIntent->setCurrentIndex(cfg.monitorRenderIntent(true));
-    if (!m_colorManagedByOS) {
-        m_page->chkUseSystemMonitorProfile->setChecked(cfg.useSystemMonitorProfile(true));
-    }
     QAbstractButton *button = m_pasteBehaviourGroup.button(cfg.pasteBehaviour(true));
     Q_ASSERT(button);
     if (button) {
@@ -1462,36 +1667,77 @@ void ColorSettingsTab::refillMonitorProfiles(const KoID & colorSpaceId)
     }
 }
 
-void ColorSettingsTab::updateProofingWidgets() {
-    m_page->cmbDisplayIntent->setCurrentIndex(m_page->cmbDisplayIntent->findData((int)m_proofModel->effectiveDisplayIntent(), Qt::UserRole));
-    m_page->cmbProofingIntent->setCurrentIndex(m_page->cmbProofingIntent->findData((int)m_proofModel->conversionIntent(), Qt::UserRole));
-
-    m_page->cmbDisplayMode->setCurrentIndex(m_page->cmbDisplayMode->findData(int(m_proofModel->displayTransformState()), Qt::UserRole));
-    m_page->chkDispBlackPoint->setChecked(m_proofModel->effectiveDispBlackPointCompensation());
-    m_page->sldAdaptationState->setValue(m_proofModel->effectiveAdaptationState());
-}
-
-void ColorSettingsTab::proofingDisplayModeUpdated() {
-    m_proofModel->setdisplayTransformState(KisProofingConfiguration::DisplayTransformState(m_page->cmbDisplayMode->currentData(Qt::UserRole).toInt()));
-    updateProofingWidgets();
-}
-
-void ColorSettingsTab::proofingConversionIntentUpdated() {
-    m_proofModel->setconversionIntent(KoColorConversionTransformation::Intent(m_page->cmbProofingIntent->currentData(Qt::UserRole).toInt()));
-    updateProofingWidgets();
-}
-void ColorSettingsTab::proofingDisplayIntentUpdated() {
-    if (m_proofModel->displayTransformState() == KisProofingConfiguration::Custom) {
-        m_proofModel->setdisplayIntent(KoColorConversionTransformation::Intent(m_page->cmbDisplayIntent->currentData(Qt::UserRole).toInt()));
-        updateProofingWidgets();
-    }
-}
-
 void ColorSettingsTab::updateProofingDisplayInfo() {
-    KisDisplayConfig displayInfo;
-    displayInfo.intent = KoColorConversionTransformation::Intent(m_page->cmbMonitorIntent->currentIndex());
-    displayInfo.conversionFlags.setFlag(KoColorConversionTransformation::BlackpointCompensation, m_page->chkBlackpoint->isChecked());
-    m_proofModel->updateDisplayConfig(displayInfo);
+    KisDisplayConfig::Options options;
+    options.first = KoColorConversionTransformation::Intent(m_page->cmbMonitorIntent->currentIndex());
+    options.second = KoColorConversionTransformation::internalConversionFlags();
+    options.second.setFlag(KoColorConversionTransformation::BlackpointCompensation, m_page->chkBlackpoint->isChecked());
+    m_page->wdgProofingOptions->setDisplayConfigOptions(options);
+}
+
+void ColorSettingsTab::updatePreferredSpaceGraphic()
+{
+    if (!m_preferredSpaceGraphic) return;
+    if (!KisPlatformPluginInterfaceFactory::instance()->surfaceColorManagedByOS()) return;
+    KisMainWindow *mainWindow = KisPart::instance()->currentMainwindow();
+    QVector<KoColorimetryUtils::xyY> colorants;
+    KoColorimetryUtils::xyY whitePoint;
+
+#ifdef Q_OS_LINUX
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    KisRootSurfaceInfoProxy proxy(mainWindow);
+    std::optional<KisSurfaceColorimetry::SurfaceDescription> currentDescription = proxy.currentSurfaceDescription();
+    if (m_preferredSpaceGraphicMode.checkedId() == PreferredSpace) {
+        if (currentDescription) {
+            if (std::holds_alternative<KisSurfaceColorimetry::Colorimetry>(currentDescription->colorSpace.primaries)) {
+                auto col = std::get<KisSurfaceColorimetry::Colorimetry>(currentDescription->colorSpace.primaries);
+                colorants << col.red().toxyY() << col.green().toxyY() << col.blue().toxyY();
+                whitePoint = col.white().toxyY();
+                m_preferredSpaceGraphic->setRGBData(whitePoint, colorants);
+            } else {
+                bool enable = true;
+                auto named = std::get<KisSurfaceColorimetry::NamedPrimaries>(currentDescription->colorSpace.primaries);
+                KisSurfaceColorimetry::Colorimetry col = KoColorimetryUtils::Colorimetry::BT709;
+                if (named == KisSurfaceColorimetry::NamedPrimaries::primaries_srgb) {
+                    col = KoColorimetryUtils::Colorimetry::BT709;
+                } else if (named == KisSurfaceColorimetry::NamedPrimaries::primaries_adobe_rgb) {
+                    col = KoColorimetryUtils::Colorimetry::AdobeRGB;
+                } else if (named == KisSurfaceColorimetry::NamedPrimaries::primaries_bt2020) {
+                    col = KoColorimetryUtils::Colorimetry::BT2020;
+                } else if (named == KisSurfaceColorimetry::NamedPrimaries::primaries_dci_p3) {
+                    col = KoColorimetryUtils::Colorimetry::DCIP3;
+                } else if (named == KisSurfaceColorimetry::NamedPrimaries::primaries_display_p3) {
+                    col = KoColorimetryUtils::Colorimetry::DisplayP3;
+                } else {
+                    enable = false;
+                }
+
+                if (enable) {
+                    colorants << col.red().toxyY() << col.green().toxyY() << col.blue().toxyY();
+                    whitePoint = col.white().toxyY();
+                    m_preferredSpaceGraphic->setRGBData(whitePoint, colorants);
+                } else {
+                    m_preferredSpaceGraphic->setProfileDataAvailable(false);
+                }
+
+            }
+        } else {
+             m_preferredSpaceGraphic->setProfileDataAvailable(false);
+        }
+    } else if(m_preferredSpaceGraphicMode.checkedId() == MasteringSpace) {
+        if (currentDescription && currentDescription->masteringInfo) {
+            auto col = currentDescription->masteringInfo->primaries;
+            colorants << col.red().toxyY() << col.green().toxyY() << col.blue().toxyY();
+            whitePoint = col.white().toxyY();
+
+            m_preferredSpaceGraphic->setRGBData(whitePoint, colorants);
+        } else {
+            m_preferredSpaceGraphic->setProfileDataAvailable(false);
+        }
+    }
+#endif
+#endif
+    m_preferredSpaceGraphic->update();
 }
 
 //---------------------------------------------------------------------------------------------------
@@ -1499,7 +1745,7 @@ void ColorSettingsTab::updateProofingDisplayInfo() {
 void TabletSettingsTab::setDefault()
 {
     KisConfig cfg(true);
-    const KisCubicCurve curve(DEFAULT_CURVE_STRING);
+    const KisCubicCurve curve(cfg.pressureTabletCurve(true));
     m_page->pressureCurve->setCurve(curve);
 
     m_page->chkUseRightMiddleClickWorkaround->setChecked(
@@ -1510,6 +1756,20 @@ void TabletSettingsTab::setDefault()
         m_page->radioWin8PointerInput->setChecked(cfg.useWin8PointerInput(true));
 #else
         m_page->grpTabletApi->setVisible(false);
+#endif
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN
+    m_page->chkUsePageUpDownMouseButtonEmulationWorkaround->setChecked(
+        cfg.usePageUpDownMouseButtonEmulationWorkaround(true));
+#endif
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS
+    m_page->chkUseHighFunctionKeyMouseButtonEmulationWorkaround->setChecked(
+        cfg.useHighFunctionKeyMouseButtonEmulationWorkaround(true));
+#endif
+
+#if KRITA_QT_HAS_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS
+    m_page->chkUseIgnoreHistoricTabletEventsWorkaround->setChecked(cfg.useIgnoreHistoricTabletEventsWorkaround(true));
 #endif
 
     m_page->chkUseTimestampsForBrushSpeed->setChecked(false);
@@ -1561,6 +1821,26 @@ TabletSettingsTab::TabletSettingsTab(QWidget* parent, const char* name): QWidget
     m_page->chkUseTimestampsForBrushSpeed->setText(i18n("Use tablet driver timestamps for brush speed"));
 #endif
     m_page->chkUseTimestampsForBrushSpeed->setChecked(cfg.readEntry("useTimestampsForBrushSpeed", false));
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN
+    m_page->chkUsePageUpDownMouseButtonEmulationWorkaround->setChecked(
+        cfg.usePageUpDownMouseButtonEmulationWorkaround());
+#else
+    m_page->chkUsePageUpDownMouseButtonEmulationWorkaround->hide();
+#endif
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS
+    m_page->chkUseHighFunctionKeyMouseButtonEmulationWorkaround->setChecked(
+        cfg.useHighFunctionKeyMouseButtonEmulationWorkaround());
+#else
+    m_page->chkUseHighFunctionKeyMouseButtonEmulationWorkaround->hide();
+#endif
+
+#if KRITA_QT_HAS_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS
+    m_page->chkUseIgnoreHistoricTabletEventsWorkaround->setChecked(cfg.useIgnoreHistoricTabletEventsWorkaround());
+#else
+    m_page->chkUseIgnoreHistoricTabletEventsWorkaround->hide();
+#endif
 
     m_page->intMaxAllowedBrushSpeed->setRange(1, 100);
     m_page->intMaxAllowedBrushSpeed->setValue(cfg.readEntry("maxAllowedSpeedValue", 30));
@@ -2032,6 +2312,37 @@ DisplaySettingsTab::DisplaySettingsTab(QWidget *parent, const char *name)
         }
     }
 
+    {
+        std::optional<KisOpenGL::XcbGLProviderProtocol> currentXcbGlProvider = KisOpenGL::xcbGlProviderProtocol();
+
+        lblPreferredXcbGlApi->setVisible(currentXcbGlProvider.has_value());
+        cmbPreferredXcbGlApi->setVisible(currentXcbGlProvider.has_value());
+
+        if (currentXcbGlProvider.has_value()) {
+            const QString glxCurrent = i18nc("@item:inlistbox", "GLX (current)");
+            const QString glxNotCurrent = i18nc("@item:inlistbox", "GLX");
+            const QString eglCurrent = i18nc("@item:inlistbox", "EGL (current)");
+            const QString eglNotCurrent = i18nc("@item:inlistbox", "EGL");
+
+            cmbPreferredXcbGlApi->addItem(*currentXcbGlProvider == KisOpenGL::XCB_GLX ? glxCurrent : glxNotCurrent, KisOpenGL::XCB_GLX);
+            cmbPreferredXcbGlApi->addItem(*currentXcbGlProvider == KisOpenGL::XCB_EGL ? eglCurrent : eglNotCurrent, KisOpenGL::XCB_EGL);
+
+            cmbPreferredXcbGlApi->setToolTip(i18nc("@info:tooltip",
+                "<p>If you are using Krita on X11 or XWayland and experience slowness, "
+                "try switching between EGL and GLX</p>"));
+
+            KisOpenGL::XcbGLProviderProtocol preferredValue =
+                cfg.preferXcbEglProvider() ? KisOpenGL::XCB_EGL : KisOpenGL::XCB_GLX;
+
+            int index = cmbPreferredXcbGlApi->findData(preferredValue);
+
+            KIS_SAFE_ASSERT_RECOVER(index >= 0) {
+                index = 0;
+            }
+            cmbPreferredXcbGlApi->setCurrentIndex(index);
+        }
+    }
+
     lblCurrentDisplayFormat->setText("");
     lblCurrentRootSurfaceFormat->setText("");
     grpHDRWarning->setVisible(false);
@@ -2088,14 +2399,27 @@ DisplaySettingsTab::DisplaySettingsTab(QWidget *parent, const char *name)
     }
 
 #ifndef HAVE_HDR
-    tabHDR->setEnabled(false);
+    HDR->setEnabled(false);
+
+    /**
+     * We hide the HDR page in Wayland mode, because the mode is managed
+     * by a different page. We still keep the disabled tab visible on other
+     * systems just to promote the existence of this feature.
+     */
+    if (KisPlatformPluginInterfaceFactory::instance()->surfaceColorManagedByOS()) {
+        const int hdrTabIndex = tabWidget->indexOf(HDR);
+        KIS_SAFE_ASSERT_RECOVER_NOOP(hdrTabIndex >= 0);
+        if (hdrTabIndex >= 0) {
+            tabWidget->setTabVisible(hdrTabIndex, false);
+        }
+    }
 #endif
 
     const QStringList openglWarnings = KisOpenGL::getOpenGLWarnings();
     if (openglWarnings.isEmpty()) {
         grpOpenGLWarnings->setVisible(false);
     } else {
-        QString text = QString("<p><b>%1</b>").arg(i18n("Warning(s):"));
+        QString text = QString("<p><b>%1</b>").arg(i18np("Warning:", "Warnings:", openglWarnings.size()));
         text.append("<ul>");
         Q_FOREACH (const QString &warning, openglWarnings) {
             text.append("<li>");
@@ -2283,6 +2607,7 @@ PopupPaletteTab::PopupPaletteTab(QWidget *parent, const char *name)
 
     connect(chkShowColorHistory, SIGNAL(toggled(bool)), cmbColorHistorySorting, SLOT(setEnabled(bool)));
     connect(chkShowColorHistory, SIGNAL(toggled(bool)), lblColorHistorySorting, SLOT(setEnabled(bool)));
+    connect(cmbSelectorType, SIGNAL(currentIndexChanged(int)), this, SLOT(slotSelectorTypeChanged(int)));
     KIS_SAFE_ASSERT_RECOVER_NOOP(cmbColorHistorySorting->count() == allowedColorHistorySortingValues.size());
 }
 
@@ -2298,6 +2623,8 @@ void PopupPaletteTab::load()
     chkShowColorHistory->setChecked(config.readEntry("popuppalette/showColorHistory", true));
     chkShowRotationTrack->setChecked(config.readEntry("popuppalette/showRotationTrack", true));
     chkUseDynamicSlotCount->setChecked(config.readEntry("popuppalette/useDynamicSlotCount", true));
+    grpFixTriangleRotation->setChecked(config.readEntry("popuppalette/fixTriangleRotation", false));
+    sbTriangleRotationAngle->setValue(config.readEntry("popuppalette/triangleRotationAngle", 0));
 
     QString currentSorting = config.readEntry("popuppalette/colorHistorySorting", QString("hsv"));
     if (!allowedColorHistorySortingValues.contains(currentSorting)) {
@@ -2306,6 +2633,7 @@ void PopupPaletteTab::load()
     cmbColorHistorySorting->setCurrentIndex(allowedColorHistorySortingValues.indexOf(currentSorting));
     cmbColorHistorySorting->setEnabled(chkShowColorHistory->isChecked());
     lblColorHistorySorting->setEnabled(chkShowColorHistory->isChecked());
+    grpFixTriangleRotation->setEnabled(!cmbSelectorType->currentIndex());
 }
 
 void PopupPaletteTab::save()
@@ -2322,6 +2650,8 @@ void PopupPaletteTab::save()
     config.writeEntry<bool>("popuppalette/useDynamicSlotCount", chkUseDynamicSlotCount->isChecked());
     config.writeEntry("popuppalette/colorHistorySorting",
                       allowedColorHistorySortingValues[cmbColorHistorySorting->currentIndex()]);
+    config.writeEntry<bool>("popuppalette/fixTriangleRotation", grpFixTriangleRotation->isChecked());
+    config.writeEntry("popuppalette/triangleRotationAngle", sbTriangleRotationAngle->value());
 }
 
 void PopupPaletteTab::setDefault()
@@ -2336,6 +2666,12 @@ void PopupPaletteTab::setDefault()
     chkUseDynamicSlotCount->setChecked(true);
     cmbColorHistorySorting->setEnabled(chkShowColorHistory->isChecked());
     lblColorHistorySorting->setEnabled(chkShowColorHistory->isChecked());
+    grpFixTriangleRotation->setChecked(false);
+    sbTriangleRotationAngle->setValue(0);
+}
+
+void PopupPaletteTab::slotSelectorTypeChanged(int index) {
+    grpFixTriangleRotation->setEnabled(!index);
 }
 
 //---------------------------------------------------------------------------------------------------
@@ -2554,9 +2890,146 @@ void KisDlgPreferences::slotDefault()
     }
 }
 
-bool KisDlgPreferences::editPreferences()
+KPageWidgetItem *KisDlgPreferences::getPage(Page page_enum)
+{
+    QString name = "";
+    switch (page_enum) {
+    case General:
+        name = "general";
+        break;
+    case Shortucts:
+        name = "shortcuts";
+        break;
+    case Color:
+        name = "colormanagement";
+        break;
+    case Performance:
+        name = "performance";
+        break;
+    case Display:
+        name = "display";
+        break;
+    case Tablet:
+        name = "tablet";
+        break;
+    case Fullscreen:
+        name = "canvasonly";
+        break;
+    case Input:
+        name = "canvasinput";
+        break;
+    case PopupPalette:
+        name = "popuppalette";
+        break;
+    }
+
+    Q_FOREACH (KPageWidgetItem *page, m_pages) {
+        if (page->objectName() == name) {
+            return page;
+        }
+    }
+    return nullptr;
+}
+
+void KisDlgPreferences::switchTab(PageDesc page)
+{
+    switch (page.page) {
+    case General: {
+        QWidget *tab = nullptr;
+        switch (page.tab) {
+        case File:
+            tab = m_general->File;
+            break;
+        case Pasting:
+            tab = m_general->Pasting;
+            break;
+        case Window:
+            tab = m_general->Window;
+            break;
+        case Cursor:
+            tab = m_general->Cursor;
+            break;
+        case Tools:
+            tab = m_general->Tools;
+            break;
+        case Animation:
+            tab = m_general->Animation;
+            break;
+        case Resources:
+            tab = m_general->Resources;
+            break;
+        case MiscellaneousGeneral:
+            tab = m_general->Miscellaneous;
+            break;
+        }
+        m_general->tabWidget->setCurrentWidget(tab);
+    } break;
+    case Color: {
+        QWidget *tab = nullptr;
+        switch (page.tab) {
+        case GeneralColor:
+            tab = m_colorSettings->m_page->General;
+            break;
+        case DisplayTab:
+            tab = m_colorSettings->m_page->Display;
+            break;
+        case SoftProofing:
+            tab = m_colorSettings->m_page->SoftProofing;
+            break;
+        }
+        m_colorSettings->m_page->tabWidget->setCurrentWidget(tab);
+    } break;
+    case Performance: {
+        QWidget *tab = nullptr;
+        switch (page.tab) {
+        case GeneralPerformance:
+            tab = m_performanceSettings->General;
+            break;
+        case Advanced:
+            tab = m_performanceSettings->Advanced;
+            break;
+        case AnimationCache:
+            tab = m_performanceSettings->AnimationCache;
+            break;
+        case InstantPreview:
+            tab = m_performanceSettings->InstantPreview;
+            break;
+        }
+        m_performanceSettings->tabWidget->setCurrentWidget(tab);
+    } break;
+    case Display: {
+        QWidget *tab = nullptr;
+        switch (page.tab) {
+        case CanvasAcceleration:
+            tab = m_displaySettings->CanvasAcceleration;
+            break;
+        case HDR:
+            tab = m_displaySettings->HDR;
+            break;
+        case CanvasDecoration:
+            tab = m_displaySettings->CanvasDecoration;
+            break;
+        case MiscellaneousDisplay:
+            tab = m_displaySettings->Miscellaneous;
+            break;
+        }
+        m_displaySettings->tabWidget->setCurrentWidget(tab);
+    } break;
+
+    default:
+        break;
+    }
+}
+
+bool KisDlgPreferences::editPreferences(std::optional<PageDesc>page)
 {
     connect(this->buttonBox(), SIGNAL(clicked(QAbstractButton*)), this, SLOT(slotButtonClicked(QAbstractButton*)));
+
+    if (page.has_value()) {
+        PageDesc page_val = page.value();
+        setCurrentPage(getPage(page_val.page));
+        switchTab(page_val);
+    }
 
     int retval = exec();
     Q_UNUSED(retval);
@@ -2571,6 +3044,15 @@ bool KisDlgPreferences::editPreferences()
         cfg.setSeparateEraserCursor(m_general->m_chkSeparateEraserCursor->isChecked());
         cfg.setEraserCursorStyle(m_general->eraserCursorStyle());
         cfg.setEraserOutlineStyle(m_general->eraserOutlineStyle());
+        cfg.setColorSamplerPreviewStyle(m_general->colorSamplerPreviewStyle());
+        cfg.setColorSamplerPreviewCircleDiameter(m_general->colorSamplerPreviewCircleDiameter());
+        cfg.setColorSamplerPreviewCircleThickness(m_general->colorSamplerPreviewCircleThickness());
+        cfg.setColorSamplerPreviewCircleOutlineEnabled(m_general->colorSamplerPreviewCircleOutlineEnabled());
+        cfg.setColorSamplerPreviewCircleExtraCirclesEnabled(m_general->colorSamplerPreviewCircleExtraCirclesEnabled());
+        cfg.setColorSamplerZoomPreviewEnabled(m_general->colorSamplerZoomPreviewEnabled());
+        cfg.setColorSamplerZoomPreviewScale(m_general->colorSamplerZoomPreviewScale());
+        cfg.setColorSamplerPreviewCirclePosition(m_general->colorSamplerPreviewCirclePosition());
+
         cfg.setShowRootLayer(m_general->showRootLayer());
         cfg.setShowOutlineWhilePainting(m_general->showOutlineWhilePainting());
         cfg.setForceAlwaysFullSizedOutline(!m_general->m_changeBrushOutline->isChecked());
@@ -2578,6 +3060,7 @@ bool KisDlgPreferences::editPreferences()
         cfg.setForceAlwaysFullSizedEraserOutline(!m_general->m_changeEraserBrushOutline->isChecked());
         cfg.setSessionOnStartup(m_general->sessionOnStartup());
         cfg.setSaveSessionOnQuit(m_general->saveSessionOnQuit());
+        cfg.setIconsInMenu(m_general->iconsInMenu());
 
         KConfigGroup group = KSharedConfig::openConfig()->group("File Dialogs");
         group.writeEntry("DontUseNativeFileDialog", !m_general->m_chkNativeFileDialog->isChecked());
@@ -2619,7 +3102,7 @@ bool KisDlgPreferences::editPreferences()
         const QString configPath = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
         QSettings kritarc(configPath + QStringLiteral("/kritadisplayrc"), QSettings::IniFormat);
         kritarc.setValue("EnableHiDPI", m_general->m_chkHiDPI->isChecked());
-#ifdef HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY
+#if defined(Q_OS_WIN) && defined(HAVE_HIGH_DPI_SCALE_FACTOR_ROUNDING_POLICY)
         kritarc.setValue("EnableHiDPIFractionalScaling", m_general->m_chkHiDPIFractionalScaling->isChecked());
 #endif
         kritarc.setValue("LogUsage", m_general->chkUsageLogging->isChecked());
@@ -2644,6 +3127,7 @@ bool KisDlgPreferences::editPreferences()
         cfg.setActivateTransformToolAfterPaste(m_general->chkEnableTransformToolAfterPaste->isChecked());
         cfg.setZoomHorizontal(m_general->chkZoomHorizontally->isChecked());
         cfg.setSelectionActionBar(m_general->chkEnableSelectionActionBar->isChecked());
+
         cfg.setConvertToImageColorspaceOnImport(m_general->convertToImageColorspaceOnImport());
         cfg.setUndoStackLimit(m_general->undoStackSize());
         cfg.setCumulativeUndoRedo(m_general->chkCumulativeUndo->isChecked());
@@ -2668,22 +3152,18 @@ bool KisDlgPreferences::editPreferences()
         KisImageConfig(true).setRenameDuplicatedLayers(m_general->renameDuplicatedLayers());
 
         // Color settings
-        if (!m_colorSettings->m_colorManagedByOS) {
-            cfg.setUseSystemMonitorProfile(m_colorSettings->m_page->chkUseSystemMonitorProfile->isChecked());
+        if (m_colorSettings->m_colorManagedByOS) {
+            cfg.setEnableCanvasSurfaceColorSpaceManagement(
+                m_colorSettings->m_chkEnableCanvasColorSpaceManagement->isChecked());
+            cfg.setCanvasSurfaceColorSpaceManagementMode(
+                m_colorSettings->m_canvasSurfaceColorSpace->currentData().value<ColorSettingsTab::CanvasSurfaceMode>());
+            cfg.setCanvasSurfaceBitDepthMode(m_colorSettings->m_canvasSurfaceBitDepth->currentData()
+                                                 .value<ColorSettingsTab::CanvasSurfaceBitDepthMode>());
+        }
+        else {
             for (int i = 0; i < QApplication::screens().count(); ++i) {
-                if (m_colorSettings->m_page->chkUseSystemMonitorProfile->isChecked()) {
-                    int currentIndex = m_colorSettings->m_monitorProfileWidgets[i]->currentIndex();
-                    QString monitorid = m_colorSettings->m_monitorProfileWidgets[i]->itemData(currentIndex).toString();
-                    cfg.setMonitorForScreen(i, monitorid);
-                } else {
-                    cfg.setMonitorProfile(i,
-                                          m_colorSettings->m_monitorProfileWidgets[i]->currentUnsqueezedText(),
-                                          m_colorSettings->m_page->chkUseSystemMonitorProfile->isChecked());
-                }
+                cfg.setMonitorProfile(i, m_colorSettings->m_monitorProfileWidgets[i]->currentUnsqueezedText());
             }
-        } else {
-            cfg.setEnableCanvasSurfaceColorSpaceManagement(m_colorSettings->m_chkEnableCanvasColorSpaceManagement->isChecked());
-            cfg.setCanvasSurfaceColorSpaceManagementMode(m_colorSettings->m_canvasSurfaceColorSpace->currentData().value<ColorSettingsTab::CanvasSurfaceMode>());
         }
         cfg.setUseDefaultColorSpace(m_colorSettings->m_page->useDefColorSpace->isChecked());
         if (cfg.useDefaultColorSpace())
@@ -2696,14 +3176,7 @@ bool KisDlgPreferences::editPreferences()
 
         cfg.writeEntry("ExrDefaultColorProfile", m_colorSettings->m_page->cmbColorProfileForEXR->currentText());
 
-        cfgImage.setDefaultProofingConfig(m_colorSettings->m_page->proofingSpaceSelector->currentColorSpace(),
-                                          int(m_colorSettings->m_proofModel->conversionIntent()),
-                                          m_colorSettings->m_proofModel->convBlackPointCompensation(),
-                                          m_colorSettings->m_proofModel->warningColor(),
-                                          m_colorSettings->m_proofModel->adaptationState()*0.05,
-                                          m_colorSettings->m_proofModel->dispBlackPointCompensation(),
-                                          int(m_colorSettings->m_proofModel->displayIntent()),
-                                          m_colorSettings->m_proofModel->displayTransformState());
+        cfgImage.setDefaultProofingConfig(*m_colorSettings->m_page->wdgProofingOptions->currentProofingConfig());
         cfg.setUseBlackPointCompensation(m_colorSettings->m_page->chkBlackpoint->isChecked());
         cfg.setAllowLCMSOptimization(m_colorSettings->m_page->chkAllowLCMSOptimization->isChecked());
         cfg.setForcePaletteColors(m_colorSettings->m_page->chkForcePaletteColor->isChecked());
@@ -2727,6 +3200,22 @@ bool KisDlgPreferences::editPreferences()
 #  endif
 #endif
         cfg.writeEntry<bool>("useTimestampsForBrushSpeed", m_tabletSettings->m_page->chkUseTimestampsForBrushSpeed->isChecked());
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN
+        cfg.setUsePageUpDownMouseButtonEmulationWorkaround(
+            m_tabletSettings->m_page->chkUsePageUpDownMouseButtonEmulationWorkaround->isChecked());
+#endif
+
+#if KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS
+        cfg.setUseHighFunctionKeyMouseButtonEmulationWorkaround(
+            m_tabletSettings->m_page->chkUseHighFunctionKeyMouseButtonEmulationWorkaround->isChecked());
+#endif
+
+#if KRITA_QT_HAS_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS
+        cfg.setUseIgnoreHistoricTabletEventsWorkaround(
+            m_tabletSettings->m_page->chkUseIgnoreHistoricTabletEventsWorkaround->isChecked());
+#endif
+
         cfg.writeEntry<int>("maxAllowedSpeedValue", m_tabletSettings->m_page->intMaxAllowedBrushSpeed->value());
         cfg.writeEntry<int>("speedValueSmoothing", m_tabletSettings->m_page->intBrushSpeedSmoothing->value());
         // the angle is saved in clockwise direction to be consistent with Drawing Angle, so negate
@@ -2744,6 +3233,10 @@ bool KisDlgPreferences::editPreferences()
             KisOpenGL::setUserPreferredOpenGLRendererConfig(renderer);
         } else {
             KisOpenGL::setUserPreferredOpenGLRendererConfig(KisOpenGL::RendererNone);
+        }
+
+        if (KisOpenGL::xcbGlProviderProtocol().has_value()) {
+            cfg.setPreferXcbEglProvider(m_displaySettings->cmbPreferredXcbGlApi->currentData().value<KisOpenGL::XcbGLProviderProtocol>() == KisOpenGL::XCB_EGL);
         }
 
         cfg.setUseOpenGLTextureBuffer(m_displaySettings->chkUseTextureBuffer->isChecked());

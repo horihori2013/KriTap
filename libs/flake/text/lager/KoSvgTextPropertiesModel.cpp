@@ -146,7 +146,7 @@ auto hangPunctuationProp = [](KoSvgText::HangingPunctuation flag) {
     return variant_to<KoSvgText::HangingPunctuations> | hangPunctuationPropImpl(flag);
 };
 
-auto hangingPunactuationCommaPropImpl = lager::lenses::getset(
+auto hangingPunctuationCommaPropImpl = lager::lenses::getset(
             [] (const KoSvgText::HangingPunctuations &value) -> KoSvgTextPropertiesModel::HangComma {
                 if (value.testFlag(KoSvgText::HangEnd)) {
                     return value.testFlag(KoSvgText::HangForce) ?
@@ -174,21 +174,10 @@ auto hangingPunactuationCommaPropImpl = lager::lenses::getset(
             }
         );
 
-auto hangingPunactuationCommaProp =
-        variant_to<KoSvgText::HangingPunctuations> | hangingPunactuationCommaPropImpl;
+auto hangingPunctuationCommaProp =
+        variant_to<KoSvgText::HangingPunctuations> | hangingPunctuationCommaPropImpl;
 
 }
-
-auto propertyState = [](const KoSvgTextProperties::PropertyId &propId) { return [propId] (const KoSvgTextPropertyData &value) -> KoSvgTextPropertiesModel::PropertyState {
-    if (value.commonProperties.hasProperty(propId)) {
-        return KoSvgTextPropertiesModel::PropertySet;
-    } else if (value.tristate.contains(propId) || value.inheritedProperties.hasProperty(propId)) {
-        return KoSvgTextPropertiesModel::PropertyTriState;
-    }
-    return KoSvgTextPropertiesModel::PropertyUnset;
-
-};
-};
 
 KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextPropertyData> _textData)
     : textData(_textData)
@@ -205,6 +194,8 @@ KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextProper
     , fontVariantLigaturesData(textData.zoom(createTextProperty(KoSvgTextProperties::FontVariantLigatureId)).zoom(variant_to<KoSvgText::FontFeatureLigatures>))
     , fontVariantNumericData(textData.zoom(createTextProperty(KoSvgTextProperties::FontVariantNumericId)).zoom(variant_to<KoSvgText::FontFeatureNumeric>))
     , fontVariantEastAsianData(textData.zoom(createTextProperty(KoSvgTextProperties::FontVariantEastAsianId)).zoom(variant_to<KoSvgText::FontFeatureEastAsian>))
+    , shapePaddingData(textData.zoom(createTextProperty(KoSvgTextProperties::ShapePaddingId)).zoom(variant_to<KoSvgText::CssLengthPercentage>))
+    , shapeMarginData(textData.zoom(createTextProperty(KoSvgTextProperties::ShapeMarginId)).zoom(variant_to<KoSvgText::CssLengthPercentage>))
     , fontSizeModel(fontSizeData)
     , lineHeightModel(lineHeightData)
     , letterSpacingModel(letterSpacingData)
@@ -217,6 +208,8 @@ KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextProper
     , fontVariantLigaturesModel(fontVariantLigaturesData)
     , fontVariantNumericModel(fontVariantNumericData)
     , fontVariantEastAsianModel(fontVariantEastAsianData)
+    , shapePaddingModel(shapePaddingData)
+    , shapeMarginModel(shapeMarginData)
     , LAGER_QT(fontSizeState) {textData.zoom(propertyModifyState(KoSvgTextProperties::FontSizeId))}
     , LAGER_QT(lineHeightState) {textData.zoom(propertyModifyState(KoSvgTextProperties::LineHeightId))}
     , LAGER_QT(letterSpacingState) {textData.zoom(propertyModifyState(KoSvgTextProperties::LetterSpacingId))}
@@ -259,7 +252,7 @@ KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextProper
     , LAGER_QT(textDecorationUnderlinePosVertical){textData.zoom(createTextProperty(KoSvgTextProperties::TextDecorationPositionId)).zoom(textDecorPosProp(false))}
     , LAGER_QT(textDecorationUnderlinePositionState){textData.zoom(propertyModifyState(KoSvgTextProperties::TextDecorationPositionId))}
     , LAGER_QT(hangingPunctuationFirst){textData.zoom(createTextProperty(KoSvgTextProperties::HangingPunctuationId)).zoom(hangPunctuationProp(KoSvgText::HangFirst))}
-    , LAGER_QT(hangingPunctuationComma){textData.zoom(createTextProperty(KoSvgTextProperties::HangingPunctuationId)).zoom(hangingPunactuationCommaProp)}
+    , LAGER_QT(hangingPunctuationComma){textData.zoom(createTextProperty(KoSvgTextProperties::HangingPunctuationId)).zoom(hangingPunctuationCommaProp)}
     , LAGER_QT(hangingPunctuationLast){textData.zoom(createTextProperty(KoSvgTextProperties::HangingPunctuationId)).zoom(hangPunctuationProp(KoSvgText::HangLast))}
     , LAGER_QT(hangingPunctuationState) {textData.zoom(propertyModifyState(KoSvgTextProperties::HangingPunctuationId))}
     , LAGER_QT(alignmentBaseline){textData.zoom(createTextProperty(KoSvgTextProperties::AlignmentBaselineId)).zoom(variant_to<int>)}
@@ -297,7 +290,10 @@ KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextProper
     , LAGER_QT(textWrapState) {textData.zoom(propertyModifyState(KoSvgTextProperties::TextWrapId))}
     , LAGER_QT(textRendering){textData.zoom(createTextProperty(KoSvgTextProperties::TextRenderingId)).zoom(variant_to<int>)}
     , LAGER_QT(textRenderingState) {textData.zoom(propertyModifyState(KoSvgTextProperties::TextRenderingId))}
+    , LAGER_QT(shapePaddingState) {textData.zoom(propertyModifyState(KoSvgTextProperties::ShapePaddingId))}
+    , LAGER_QT(shapeMarginState) {textData.zoom(propertyModifyState(KoSvgTextProperties::ShapeMarginId))}
     , LAGER_QT(spanSelection) {textData[&KoSvgTextPropertyData::spanSelection]}
+    , LAGER_QT(enabled) {textData[&KoSvgTextPropertyData::enabled]}
 {
     lager::watch(textData, std::bind(&KoSvgTextPropertiesModel::textPropertyChanged, this));
     lager::watch(fontSizeData, std::bind(&KoSvgTextPropertiesModel::fontSizeChanged, this));
@@ -316,6 +312,9 @@ KoSvgTextPropertiesModel::KoSvgTextPropertiesModel(lager::cursor<KoSvgTextProper
     lager::watch(fontVariantLigaturesData, std::bind(&KoSvgTextPropertiesModel::fontVariantLigaturesChanged, this));
     lager::watch(fontVariantNumericData, std::bind(&KoSvgTextPropertiesModel::fontVariantNumericChanged, this));
     lager::watch(fontVariantEastAsianData, std::bind(&KoSvgTextPropertiesModel::fontVariantEastAsianChanged, this));
+
+    lager::watch(shapePaddingData, std::bind(&KoSvgTextPropertiesModel::shapePaddingChanged, this));
+    lager::watch(shapeMarginData, std::bind(&KoSvgTextPropertiesModel::shapeMarginChanged, this));
 }
 
 CssLengthPercentageModel *KoSvgTextPropertiesModel::fontSize()
@@ -376,6 +375,16 @@ FontVariantNumericModel *KoSvgTextPropertiesModel::fontVariantNumeric()
 FontVariantEastAsianModel *KoSvgTextPropertiesModel::fontVariantEastAsian()
 {
     return &this->fontVariantEastAsianModel;
+}
+
+CssLengthPercentageModel *KoSvgTextPropertiesModel::shapePadding()
+{
+    return &this->shapePaddingModel;
+}
+
+CssLengthPercentageModel *KoSvgTextPropertiesModel::shapeMargin()
+{
+    return &this->shapeMarginModel;
 }
 
 qreal KoSvgTextPropertiesModel::resolvedFontSize(bool fontSize)

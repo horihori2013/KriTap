@@ -120,7 +120,7 @@ struct FontFamilyNode {
     /**
      * @brief sizeInfo
      * This is only really used to ensure that sizes get sorted into different WWS families, as otherwise they're unselectable.
-     * We could take them into account when searching, but the CSS-WG hasn't explicitely requested or provided any guidance therein.
+     * We could take them into account when searching, but the CSS-WG hasn't explicitly requested or provided any guidance therein.
      */
     FontFamilySizeInfo sizeInfo;
 
@@ -146,7 +146,7 @@ struct FontFamilyNode {
     static FontFamilyNode createWWSFamilyNode(const FontFamilyNode &child, const FontFamilyNode &typographic, QStringList existingWWSNames) {
         FontFamilyNode wwsFamily;
         if (child.type != KoSvgText::OpenTypeFontType) {
-            if (child.fontStyle.toLower() == "regular") {
+            if (child.fontStyle.compare("regular", Qt::CaseInsensitive) == 0) {
                 wwsFamily.fontFamily = child.fontFamily;
             } else {
                 wwsFamily.fontFamily = child.fontFamily + " " + child.fontStyle;
@@ -192,6 +192,7 @@ QStringList FontFamilyNode::debugInfo() const
     const QString fullname = localizedFullName.empty()? "": localizedFullName.values().first();
     QStringList debug = {QString("\'%1\' \'%2\', style: %3, type:%4, full name: %5").arg(fontFamily, fontStyle, style).arg(type).arg(fullname)};
     debug.append(QString("Index: %1, File: %2").arg(fileIndex).arg(fileName));
+    debug.append(QString("Last Modified: %1").arg(lastModified.toString(Qt::ISODateWithMs)));
     for (int i=0; i< axes.size(); i++) {
         KoSvgText::FontFamilyAxis axis = axes.value(axes.keys().at(i));
         debug.append(axis.debugInfo());
@@ -361,9 +362,16 @@ bool KoFFWWSConverter::addFontFromFile(const QString &filename, const int index,
     fontFamily.fontFamily = face->family_name;
     fontFamily.fontStyle = face->style_name;
     fontFamily.lastModified = QFileInfo(fontFamily.fileName).lastModified();
+    if (!fontFamily.lastModified.isValid()) {
+        QDateTime time = QFileInfo(fontFamily.fileName).birthTime();
+        if (time.isValid()) {
+            fontFamily.lastModified = time;
+        } else {
+            fontFamily.lastModified = QDateTime::fromMSecsSinceEpoch(0);
+        }
+    }
     FontFamilyNode typographicFamily;
     FontFamilyNode wwsFamily;
-    bool isWWSFamilyWithoutName = false;
 
     if (!FT_IS_SFNT(face.data())) {
         fontFamily.type = FT_IS_SCALABLE(face.data())? KoSvgText::Type1FontType: KoSvgText::BDFFontType;
@@ -411,7 +419,8 @@ bool KoFFWWSConverter::addFontFromFile(const QString &filename, const int index,
                 sizeInfo.isSet = true;
                 fontFamily.sizeInfo = sizeInfo;
             }
-            isWWSFamilyWithoutName = (os2Table->fsSelection & OS2_WWS);
+            /// (os2Table->fsSelection & OS2_WWS) indicates WWS-family, but Krita has no use for it. It infact breaks
+            /// some font handling, because fonts can be mixed in whether they have this flag set. See BUG:518874.
         }
 
 
@@ -578,10 +587,6 @@ bool KoFFWWSConverter::addFontFromFile(const QString &filename, const int index,
             }
         }
         if (it != d->fontFamilyCollection.childEnd()) {
-
-            if (isWWSFamilyWithoutName) {
-                wwsFamily.fontFamily = fontFamily.fontFamily;
-            }
             if (!wwsFamily.fontFamily.isEmpty()) {
                 // sort into wws family
                 auto wws = childBegin(it);
@@ -619,9 +624,6 @@ bool KoFFWWSConverter::addFontFromFile(const QString &filename, const int index,
             }
         } else {
             auto typographic = d->fontFamilyCollection.insert(d->fontFamilyCollection.childEnd(), typographicFamily);
-            if (isWWSFamilyWithoutName) {
-                wwsFamily.fontFamily = fontFamily.fontFamily;
-            }
             if (!wwsFamily.fontFamily.isEmpty()) {
                 auto wwsNew = d->fontFamilyCollection.insert(childEnd(typographic), wwsFamily);
                 d->fontFamilyCollection.insert(childEnd(wwsNew), fontFamily);
@@ -666,6 +668,7 @@ void KoFFWWSConverter::addSupportedLanguagesByFile(const QString &filename, cons
 void KoFFWWSConverter::sortIntoWWSFamilies()
 {
     QStringList wwsNames;
+    QStringList wwsNamesDuplicates;
     // Some font families have predefined wws families, others don't. This function sorts out everything so that each font file has
     // a wws family in between the typographic and font-file nodes, this is important, because the wws family will be the one presented
     // as the font-family resource.
@@ -699,6 +702,19 @@ void KoFFWWSConverter::sortIntoWWSFamilies()
             KIS_ASSERT_RECOVER_NOOP(childBegin(child) == childEnd(child));
             d->fontFamilyCollection.erase(child);
         }
+
+        QVector<KisForest<FontFamilyNode>::child_iterator> moveToFront;
+        for (auto font = tempList.childBegin(); font != tempList.childEnd(); font++) {
+            // prioritize the font with the name closest to the typographic family, so other fonts get sorted into it.
+            if(font->fontFamily == typographic->fontFamily && font != tempList.childBegin()) {
+                moveToFront.append(font);
+            }
+        }
+        while (!moveToFront.isEmpty()) {
+            auto font = moveToFront.takeLast();
+            tempList.move(font, tempList.childBegin());
+        }
+
         if (KisForestDetail::size(tempList) > 0) {
             //Do most regular first...
             KoSvgText::FontFormatType testType = types.contains(KoSvgText::OpenTypeFontType)? KoSvgText::OpenTypeFontType: types.first();
@@ -742,12 +758,12 @@ void KoFFWWSConverter::sortIntoWWSFamilies()
                     if (font->type != KoSvgText::OpenTypeFontType && font->type != KoSvgText::Type1FontType) {
                         // Hack for really old fonts.
                         // It's questionable whether this is wise, given that it is not the family name,
-                        // but it seems CSS is explicitely vague about what the family name is, because
+                        // but it seems CSS is explicitly vague about what the family name is, because
                         // of the varying ways a font can be assigned a family name.
                         // Like, it is technically correct, because it allows us to select fonts with CSS
                         // that would otherwise be unselectable, but this does mean that other applications
                         // would need to have our exact idea of a CSS family name.
-                        if (wws->fontStyle.toLower() != "regular"
+                        if (wws->fontStyle.compare("regular", Qt::CaseInsensitive) != 0
                                 && !font->fontStyle.contains(wws->fontStyle)) {
                             continue;
                         }
@@ -839,6 +855,60 @@ void KoFFWWSConverter::sortIntoWWSFamilies()
                         break;
                     }
                 }
+            }
+        }
+
+        // One final deduplication check.
+
+        for (auto child = childBegin(typographic); child != childEnd(typographic); child++) {
+            if (childBegin(child) != childEnd(child)) {
+                if (wwsNamesDuplicates.contains(child->fontFamily)) {
+                    // Here, we try to avoid duplicates in the same typographic family.
+                    QVector<KisForest<FontFamilyNode>::child_iterator> moveList;
+                    auto child2 = childBegin(typographic);
+                    for (; child2 != childEnd(typographic); child2++) {
+                        if (child2->fontFamily == child->fontFamily) {
+                            break;
+                        }
+                    }
+                    if (child2 != childEnd(typographic)) {
+                        for (auto ribbi = childBegin(child); ribbi != childEnd(child); ribbi++) {
+                            auto ribbi2 = childBegin(child2);
+                            for (; ribbi2 != childEnd(child2); ribbi2++) {
+                                if (ribbi->fontFamily == ribbi2->fontFamily && ribbi->fontStyle == ribbi2->fontStyle) {
+
+                                    break;
+                                }
+                            }
+                            if (ribbi2 != childEnd(child2)) {
+                                ribbi2->otherFiles.append(ribbi->otherFiles);
+                                ribbi2->otherFiles.append(ribbi->fileName);
+                                ribbi2->pixelSizes.insert(ribbi->pixelSizes);
+                                deleteList.append(ribbi);
+                            } else {
+                                moveList.append(ribbi);
+                            }
+                        }
+                        while (!moveList.isEmpty()) {
+                            auto move = moveList.takeFirst();
+                            d->fontFamilyCollection.move(move, childEnd(child2));
+                        }
+                    } else {
+                        // Give up when it doesn't share the same typographic family, and just delete the node.
+                        QVector<KisForest<FontFamilyNode>::child_iterator> deleteList2;
+                        for (auto ribbi = childBegin(child); ribbi != childEnd(child); ribbi++) {
+                            deleteList.append(ribbi);
+                        }
+                    }
+                    deleteList.append(child);
+                } else {
+                    wwsNamesDuplicates.append(child->fontFamily);
+                }
+            }
+            while (!deleteList.isEmpty()) {
+                auto del = deleteList.takeFirst();
+                KIS_ASSERT_RECOVER_NOOP(childBegin(del) == childEnd(del));
+                d->fontFamilyCollection.erase(del);
             }
         }
     }
@@ -947,6 +1017,7 @@ QList<KoFontFamilyWWSRepresentation> KoFFWWSConverter::collectFamilies() const
     QList<KoFontFamilyWWSRepresentation> collection;
     for (auto typographic = d->fontFamilyCollection.childBegin(); typographic != d->fontFamilyCollection.childEnd(); typographic++) {
         auto counter = childBegin(typographic);
+        if (counter == childEnd(typographic)) continue;
         counter++;
         bool singleFamily = childBegin(typographic) != childEnd(typographic) && std::next(childBegin(typographic)) == childEnd(typographic);
 
@@ -959,46 +1030,73 @@ QList<KoFontFamilyWWSRepresentation> KoFFWWSConverter::collectFamilies() const
 }
 
 KisForest<FontFamilyNode>::composition_iterator searchNodes (KisForest<FontFamilyNode>::composition_iterator it, KisForest<FontFamilyNode>::composition_iterator endIt, const QString family) {
-    QString familySimplified = family;
-    QString familyLower = family.toLower();
+    QString familySimplified;
     // Qt's fontdatabase would add the vendor in [] behind the font name, when there were duplicates,
     // though sometimes there was no such explanation, so we should check against that...
     if (family.endsWith("]") && family.contains("[")) {
-        familySimplified = family.split("[", Qt::SkipEmptyParts).first().trimmed().toLower();
+        familySimplified = family.split("[", Qt::SkipEmptyParts).first().trimmed();
     }
+
+    auto partialMatch = endIt;
+
+    auto presentInLocalizedNames = [&familySimplified, &family](const QHash<QLocale, QString> &localizedFontFamilies, bool partialMatch) {
+        auto matchingLocalizedFamilyIt = partialMatch? std::find_if(
+            localizedFontFamilies.begin(),
+            localizedFontFamilies.end(),
+            [&](const QString &localizedFamily) {
+                return localizedFamily.contains(family, Qt::CaseInsensitive)
+                    || (!familySimplified.isEmpty() && localizedFamily.contains(familySimplified, Qt::CaseInsensitive));
+            }) : std::find_if(
+            localizedFontFamilies.begin(),
+            localizedFontFamilies.end(),
+            [&](const QString &localizedFamily) {
+                return localizedFamily.compare(family, Qt::CaseInsensitive) == 0
+                || (!familySimplified.isEmpty() && localizedFamily.compare(familySimplified, Qt::CaseInsensitive) == 0);
+            });
+
+        return matchingLocalizedFamilyIt != localizedFontFamilies.end();
+    };
+
     for (; it != endIt; it++) {
         if (it.state() == KisForestDetail::Enter) {
             continue;
         }
 
         if (childBegin(it) == childEnd(it)) {
-            // For the lowest nodes, we only want to test the full name.
-            QStringList local = it->localizedFullName.values();
-            if (local.contains(familySimplified, Qt::CaseInsensitive)
-                    || local.contains(familyLower, Qt::CaseInsensitive)) {
+            if (
+                // For the lowest nodes, we only want to test the full name.
+                presentInLocalizedNames(it->localizedFullName, false)
+
+                // For some fonts, the full name is the exact same as the typographic family name,
+                // in which case, we want to ignore the full name.
+                || presentInLocalizedNames(it->localizedFontFamilies, false)) {
+
+
                 break;
             } else {
                 continue;
             }
         }
 
-        QStringList local = it->localizedFontFamilies.values();
-        QString itFamilyLower = QString(it->fontFamily).toLower();
-        if (itFamilyLower == familySimplified
-                || itFamilyLower == familyLower
-                || local.contains(familySimplified, Qt::CaseInsensitive)
-                || local.contains(familyLower, Qt::CaseInsensitive)) {
+        if (it->fontFamily.compare(family, Qt::CaseInsensitive) == 0
+            || (!familySimplified.isEmpty() && it->fontFamily.compare(familySimplified, Qt::CaseInsensitive) == 0)
+            || presentInLocalizedNames(it->localizedFontFamilies, false)) {
             break;
+        } else if (it->fontFamily.compare(family, Qt::CaseInsensitive) == 0
+                   || (!familySimplified.isEmpty() && it->fontFamily.compare(familySimplified, Qt::CaseInsensitive) == 0)
+                   || presentInLocalizedNames(it->localizedFontFamilies, true)) {
+                partialMatch = it;
+            continue;
         }
-
     }
-    return it;
+    return it != endIt? it: partialMatch != endIt? partialMatch: it;
 }
 
 std::optional<KoFontFamilyWWSRepresentation> KoFFWWSConverter::representationByFamilyName(const QString &familyName) const
 {
     for (auto typographic = d->fontFamilyCollection.childBegin(); typographic != d->fontFamilyCollection.childEnd(); typographic++) {
         auto counter = childBegin(typographic);
+        if (counter == childEnd(typographic)) continue;
         counter++;
         bool singleFamily = counter == childEnd(typographic);
 

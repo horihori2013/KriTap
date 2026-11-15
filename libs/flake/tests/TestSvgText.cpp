@@ -112,7 +112,7 @@ void TestSvgText::initTestCase()
              "fonts/testFontsCozens/BaselineTest-Regular-with-BASE.otf",
          }) {
         QString fileName = TestUtil::fetchDataFileLazy(fontFile);
-        bool res = KoFontRegistry::instance()->addFontFilePathToRegistery(fileName);
+        bool res = KoFontRegistry::instance()->addFontFilePathToRegistry(fileName);
 
         QVERIFY2(res, QString("KoFontRegistry could not add the test font %1").arg(fontFile).toLatin1());
     }
@@ -123,7 +123,7 @@ void TestSvgText::initTestCase()
              "fonts/testFontNames",
          }) {
         QString fileName = TestUtil::fetchDataFileLazy(fontDir);
-        bool res = KoFontRegistry::instance()->addFontFileDirectoryToRegistery(fileName);
+        bool res = KoFontRegistry::instance()->addFontFileDirectoryToRegistry(fileName);
         QVERIFY2(res, QString("KoFontRegistry could not add the directory of test fonts %1").arg(fontDir).toLatin1());
     }
 }
@@ -490,7 +490,7 @@ void TestSvgText::testComplexText()
         bool dummy = false;
         QVector<SubChunk> subChunks = KoSvgTextShape::Private::collectSubChunks(child, KoSvgTextProperties::defaultProperties(), false, dummy);
 
-        QCOMPARE(subChunks.size(), 1); // used to be 7, but we got rid of aggresive subchunking.
+        QCOMPARE(subChunks.size(), 1); // used to be 7, but we got rid of aggressive subchunking.
         QCOMPARE(subChunks[0].text.size(), 20);
     }
     child ++;
@@ -1379,7 +1379,7 @@ void TestSvgText::testTextFontSize()
 /**
  * @brief TestSvgText::testAddingTestFont
  *
- * This test tests whether we can add a font to the font registery
+ * This test tests whether we can add a font to the font registry
  * and retrieve it afterwards. Without this, we won't be able to
  * write reliable machine tests given how much of text rendering is
  * font specific.
@@ -2100,7 +2100,7 @@ void TestSvgText::testFontSizeRender()
 /**
  * @brief TestSvgText::testFontOpenTypeVariationsConfiguration
  *
- * test whether we can succefully confgiure the axes for an opentype
+ * test whether we can successfully configure the axes for an opentype
  * variation font. This test is an adaptation of web-platform-test
  * style-ranges-over-weight-direction.html
  */
@@ -2124,7 +2124,7 @@ void TestSvgText::testFontOpenTypeVariationsConfiguration()
 /**
  * Testing color font rendering.
  *
- * This right now only tests COLRv0 fonts, beecause we don't support COLRv1 and SVG-in-opentype yet,
+ * This right now only tests COLRv0 fonts, because we don't support COLRv1 and SVG-in-opentype yet,
  * and I have no idea what to expect from SBX.
  *
  * TODO: Still searching for a CBDT font.
@@ -2159,7 +2159,7 @@ void TestSvgText::testFontColorRender()
 /**
  * @brief TestSvgText::testCssFontVariants
  *
- * This tests css 3 font-variants, which are equivelant to opentype features,
+ * This tests css 3 font-variants, which are equivalent to opentype features,
  * and should not be confused with opentype variations
  * (or with unicode variation selectors for that matter).
  */
@@ -2381,7 +2381,7 @@ void TestSvgText::testCssTextTransform()
              QString("Greek tonos tailor test number 3 is failing.").toLatin1());
 
     // Adapted from web platform test text-transform-tailoring-004.html
-    // "[Exploratory] the brower tailors text-transform: capitalize such that a stressed vowel that is the first syllable of a Greek sentence keeps its tonos
+    // "[Exploratory] the browser tailors text-transform: capitalize such that a stressed vowel that is the first syllable of a Greek sentence keeps its tonos
     // diacritic."
 
     /* This needs someone who can actually read greek, because I am unsure what 'tonos' means, like, is it all diacritics or just a few unicode values?
@@ -2412,7 +2412,7 @@ void TestSvgText::testCssTextTransform()
 /*
  * This is a basic test of inline-size with different teext-anchors,
  * directions and writing modes. These interact in very fundamental
- * ways, so it doesn't make sense to test them seperately.
+ * ways, so it doesn't make sense to test them separately.
  */
 void TestSvgText::testTextInlineSize()
 {
@@ -2458,7 +2458,7 @@ void TestSvgText::testTextInlineSize()
 void TestSvgText::testTextWrap()
 {
     QMap<QString, QRect> testFiles;
-    // Tests differrent line-height configurations.
+    // Tests different line-height configurations.
     testFiles.insert("textWrap-test-css-line-height", QRect(0, 0, 120, 180));
     // Tests overflow wrap behaviour options.
     testFiles.insert("textWrap-test-css-overflow-wrap", QRect(0, 0, 120, 220));
@@ -2998,7 +2998,7 @@ void TestSvgText::testTextSplit()
     // test split text path
     forest.erase(forest.childBegin(), forest.childEnd());
     KoSvgTextContentElement textPath = el;
-    textPath.textPath.reset(new KoPathShape());
+    textPath.textPathId = "textPath";
     auto root = forest.insert(forest.childEnd(), KoSvgTextContentElement());
     forest.insert(childEnd(root), textPath);
     KoSvgTextShape::Private::splitContentElement(forest, 10);
@@ -3348,6 +3348,102 @@ void TestSvgText::testSetTransformsFromLayout()
 
     QVERIFY(caret.p1().toPoint() == caretp1);
     QVERIFY2(textShape->plainText() == result, QString("Insert newlines result is incorrect: \"%1\"").arg(textShape->plainText()).toLatin1());
+}
+
+void TestSvgText::testSvgCssHelper_data()
+{
+    QTest::addColumn<QString>("textClass");
+    QTest::addColumn<QStringList>("expectedStyles");
+
+    QTest::addRow("highlight")
+        << "highlight"
+        << QStringList({"fill: blue; font-family: Arial;", "fill: red; font-weight: bold;"});
+    QTest::addRow("small")
+        << "small"
+        << QStringList({"fill: blue; font-family: Arial;", "font-size: 10px;"});
+
+    QTest::addRow("huge")
+        << "huge"
+        << QStringList({"fill: blue; font-family: Arial;", "font-size: 50px;"});
+
+}
+
+void TestSvgText::testSvgCssHelper()
+{
+    /**
+     * This test case tests direct methods of SvgCssHelper.
+     * But since its API is not exported from a DLL, we
+     * just request that via SvgLoadingContext.
+     */
+
+    QFETCH(QString, textClass);
+    QFETCH(QStringList, expectedStyles);
+
+    const QString data =
+    R"---(
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+  <defs>
+    <style type="text/css">
+      /* This is a CSS comment that should be removed */
+      text {
+        fill: blue;
+        font-family: Arial;
+      }
+
+      /* Another comment */
+
+      /*
+       Commented out highlight section!
+      .highlight {
+        fill: green;
+      }
+      */
+
+      .highlight {
+        fill: red;
+        font-weight: bold;
+      }
+
+      /*
+       One more commented out highlight section!
+      .highlight {
+        fill: pink;
+      }
+      */
+
+      /* Inline comment */ .small { font-size: 10px; }
+      /* Inline multiline
+      comment */ .huge { font-size: 50px; }
+    </style>
+  </defs>
+  <text x="10" y="30" class="highlight">Highlighted Text</text>
+  <text x="10" y="60" class="small">Small Text</text>
+  <text x="10" y="60" class="huge">Huge Text</text>
+</svg>
+    )---";
+
+    QDomDocument doc;
+    QVERIFY(doc.setContent(data.toLatin1()));
+    QDomElement root = doc.documentElement();
+    QDomElement defsEl = root.firstChildElement("defs");
+    QDomElement styleEl = defsEl.firstChildElement("style");
+    QVERIFY(!styleEl.isNull());
+
+    KoDocumentResourceManager resourceManager;
+    SvgLoadingContext context(&resourceManager);
+
+    context.addStyleSheet(styleEl);
+
+    QDomElement text = root.firstChildElement("text");
+    while(!text.isNull() && text.attribute("class") != textClass) {
+        text = text.nextSiblingElement("text");
+    }
+
+    QVERIFY(!text.isNull());
+    QCOMPARE(text.attribute("class"), textClass);
+
+    const QStringList styles = context.matchingCssStyles(text);
+    QCOMPARE(styles, expectedStyles);
 }
 
 #include "kistest.h"

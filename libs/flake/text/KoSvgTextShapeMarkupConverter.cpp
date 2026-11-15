@@ -14,16 +14,16 @@
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 
-#include <text/KoFontRegistry.h>
-
-#include <QBuffer>
-#include <QStringList>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <QBuffer>
+#include <QTextCodec>
+#include <QtMath>
 
 #include <QTextBlock>
 #include <QTextLayout>
 #include <QTextLine>
+
 #include <QFont>
 
 #include <QStack>
@@ -37,7 +37,8 @@
 #include <KoSvgTextShape.h>
 #include <KoXmlWriter.h>
 #include <KoDocumentResourceManager.h>
-#include <KoMarker.h>
+
+#include <KoColor.h>
 
 #include <SvgParser.h>
 #include <SvgWriter.h>
@@ -218,6 +219,10 @@ bool KoSvgTextShapeMarkupConverter::convertFromHtml(const QString &htmlText, QSt
     //previous style string is for keeping formatting proper on linebreaks and appendstyle is for specific tags
     QString previousStyleString;
     QString appendStyle;
+
+    const QStringList spanLikes = {
+        "span", "font", "b", "strong", "em", "i", "pre", "u"
+    };
     bool firstElement = true;
 
     while (!htmlReader.atEnd()) {
@@ -308,7 +313,7 @@ bool KoSvgTextShapeMarkupConverter::convertFromHtml(const QString &htmlText, QSt
                 textAlign = attributes.value("align").toString();
             }
 
-            if (attributes.hasAttribute("style")) {
+            if (attributes.hasAttribute("style") || !appendStyle.isEmpty()) {
                 QString filteredStyles;
                 QStringList svgStyles = QString("font-family font-size font-weight font-variant word-spacing text-decoration font-style font-size-adjust font-stretch direction letter-spacing").split(" ");
                 QStringList styles = attributes.value("style").toString().split(";");
@@ -369,7 +374,7 @@ bool KoSvgTextShapeMarkupConverter::convertFromHtml(const QString &htmlText, QSt
         case QXmlStreamReader::EndElement:
         {
             if (htmlReader.name() == "br") break;
-            if (elementName == "p" || elementName == "span" || elementName == "body") {
+            if (elementName == "p" || spanLikes.contains(elementName) || elementName == "body") {
                 debugFlake << "\tEndElement" <<  htmlReader.name() << "(" << elementName << ")";
                 svgWriter.writeEndElement();
             }
@@ -1115,6 +1120,8 @@ bool KoSvgTextShapeMarkupConverter::convertSvgToDocument(const QString &svgText,
     return true;
 }
 
+
+
 QStringList KoSvgTextShapeMarkupConverter::errors() const
 {
     return d->errors;
@@ -1419,7 +1426,7 @@ QVector<QTextFormat> KoSvgTextShapeMarkupConverter::stylesFromString(QStringList
             QString value = style.at(1).trimmed();
 
             if (property == "font-family") {
-                charFormat.setFontFamily(value);
+                charFormat.setFontFamilies(QStringList(value));
             }
 
             if (property == "font-size") {
@@ -1558,8 +1565,7 @@ QVector<QTextFormat> KoSvgTextShapeMarkupConverter::stylesFromString(QStringList
 
             if (property == "stroke") {
                 QPen pen = charFormat.textOutline();
-                QColor color;
-                color.setNamedColor(value);
+                QColor color(value);
                 pen.setColor(color);
                 charFormat.setTextOutline(pen);
             }
@@ -1571,8 +1577,7 @@ QVector<QTextFormat> KoSvgTextShapeMarkupConverter::stylesFromString(QStringList
             }
 
             if (property == "fill") {
-                QColor color;
-                color.setNamedColor(value);
+                QColor color(value);
 
                 // avoid assertion failure in `KoColor` later
                 if (!color.isValid()) {

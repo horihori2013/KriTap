@@ -86,6 +86,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (APPLE)
     add_subdirectory(packaging/macos)
+
+    if(NOT CMAKE_GENERATOR MATCHES "Xcode")
+      execute_process(COMMAND
+        xcodebuild -version -sdk macosx ProductVersion
+        OUTPUT_VARIABLE XCODE_VERSION)
+    endif()
+    message(STATUS "XCode version: ${XCODE_VERSION}")
     set(MACOSX_RPATH TRUE)
     set(APPLE_SUPPRESS_X11_WARNING TRUE)
     set(KDE_SKIP_RPATH_SETTINGS TRUE)
@@ -94,9 +101,9 @@ if (APPLE)
     set(BUILD_WITH_INSTALL_RPATH 1)
     set(MACOS_GUI_TEST "GUI")
     if (BUILD_WITH_QT6)
-        set(MACOS_MINIMUM_VERSION 12)
+        set(MACOS_MINIMUM_VERSION 13)
     else()
-        set(MACOS_MINIMUM_VERSION 10.14)
+        set(MACOS_MINIMUM_VERSION 12)
     endif()
     add_definitions(-mmacosx-version-min=${MACOS_MINIMUM_VERSION} -Wno-macro-redefined -Wno-deprecated-register)
     if (CMAKE_OSX_ARCHITECTURES)
@@ -124,17 +131,17 @@ endif()
 #######################
 ######################
 if (BUILD_WITH_QT6)
-set(KRITA_VERSION_STRING "6.0.0-prealpha")
+set(KRITA_VERSION_STRING "6.1.0-prealpha")
 set(KRITA_STABLE_VERSION_MAJOR 6)
-set(KRITA_STABLE_VERSION_MINOR 0)
+set(KRITA_STABLE_VERSION_MINOR 1)
 else()
 # define common versions of Krita applications, used to generate kritaversion.h
 # update these version for every release:
-set(KRITA_VERSION_STRING "5.3.0-prealpha")
+set(KRITA_VERSION_STRING "5.4.0-prealpha")
 # Major version: 3 for 3.x, 4 for 4.x, etc.
 set(KRITA_STABLE_VERSION_MAJOR 5)
 # Minor version: 0 for 4.0, 1 for 4.1, etc.
-set(KRITA_STABLE_VERSION_MINOR 3)
+set(KRITA_STABLE_VERSION_MINOR 4)
 endif()
 
 # Bugfix release version, or 0 for before the first stable release
@@ -144,6 +151,21 @@ set(KRITA_VERSION_RELEASE 0)
 # - Beta: Starts from 50, increment 1 per release
 # - Stable: Set to 100, bump to 101 if emergency update is needed
 set(KRITA_VERSION_REVISION 0)
+
+# This version does **not** correspond to the patch version
+# of Krita. Instead, it is just incremented for every public
+# (including alpha and beta) release of KRITA_STABLE_VERSION_MINOR
+# branch
+set(KRITA_APK_VERSION_TRANSITIONAL 0)
+
+# In MSI packages we cannot use the fourth digit for release numbering,
+# since this digit is used by Microsoft Store internally. Hence we cannot
+# release hotfix releases (like 6.0.1.1, 6.0.1.2) on Windows. Therefore we
+# use the same approach as on Android, we just number all the official
+# releases in the same X.Y.* branch sequentially. We use a simple formula
+# for that, e.g. 5.4.2.3 will be released as 5.4.10203.0.
+math(EXPR KRITA_MSI_VERSION_RELEASE_TRANSITIONAL "10000 + 100 * ${KRITA_VERSION_RELEASE} + ${KRITA_VERSION_REVISION}")
+
 # Uncomment the following if this is currently in the "stable" branch.
 # Do not uncomment for master branch.
 #set(KRITA_STABLE_BRANCH 1)
@@ -347,6 +369,23 @@ endif()
 
 add_feature_info("ASAN address sanitizer" ADDRESS_SANITIZER_ENABLED "crash Krita if it violates address access rules (-DECM_ENABLE_SANITIZERS=address)")
 
+# We don't want people to accidentally build unstable Krita versions if they
+# didn't mean to do so. This serves as an extra confirmation. You will get
+# errors during the configure step if you enable an unstable option.
+set(ALLOW_UNSTABLE "" CACHE STRING
+    "Semicolon-separated set of features that make Krita unstable, but you want to build with them anyway")
+string(TOUPPER "${ALLOW_UNSTABLE}" ALLOW_UNSTABLE)
+add_feature_info("Unstable features allowed" ON "${ALLOW_UNSTABLE}")
+
+if(BUILD_WITH_QT6 AND NOT "QT6" IN_LIST ALLOW_UNSTABLE)
+    message(FATAL_ERROR
+        "Building Krita with Qt6 is not yet production-ready. Please don't "
+        "package this and ship it as a stable version of the software.\n"
+        "If you want to continue regardless, pass:\n"
+        "    -DALLOW_UNSTABLE=QT6"
+    )
+endif()
+
 # Branding. Available options: default, Beta, Plus, Next. Can be set from command line
 if ("${BRANDING}" STREQUAL "")
     if (DEFINED KRITA_STABLE)
@@ -361,6 +400,12 @@ if ("${BRANDING}" STREQUAL "")
         set(BRANDING "Next")
     endif ()
 endif()
+
+# Qt6 isn't stable, don't make it look like it is.
+if(BRANDING STREQUAL "default" AND BUILD_WITH_QT6)
+    set(BRANDING "Beta")
+endif()
+
 message(STATUS "Branding selected: ${BRANDING}")
 
 include(MacroJPEG)
@@ -390,6 +435,17 @@ int main(int argc, char *argv[]) {
     Py_InitializeEx(0);
 }" ${OUTPUT_VARNAME})
 endfunction()
+
+if(NOT WIN32)
+    # On Unix systems we ship our own version of Python and manually set PATH
+    # pointing to that. This version of Python may differ from the one installed
+    # in the system, so we should make sure that the version of Python mentioned
+    # in VIRTUAL_ENV does **not** take precedence over the one we ship ourselves.
+    if(DEFINED ENV{VIRTUAL_ENV})
+        message(WARNING "VIRTUAL_ENV environment variable is set! It may cause clashes with our own Python version. Instructing CMake to ignore the virtual environment...")
+        set (Python_FIND_VIRTUALENV STANDARD)
+    endif()
+endif()
 
 if(WIN32)
     set(Python_FIND_STRATEGY LOCATION)
@@ -502,9 +558,7 @@ find_package(KF${KF_MAJOR} ${MIN_FRAMEWORKS_VERSION} REQUIRED COMPONENTS
         CoreAddons
         GuiAddons
         I18n
-        ItemModels
         ItemViews
-        WindowSystem
 )
 
 find_package(Qt${QT_MAJOR_VERSION} ${MIN_QT_VERSION}
@@ -639,8 +693,6 @@ option(KRITA_QT_HAS_UPDATE_COMPRESSION_PATCH "Qt has a custom patch for limiting
 add_feature_info("Qt: Compressed updates patch" KRITA_QT_HAS_UPDATE_COMPRESSION_PATCH "Krita will compress the screen updates to the maximum FPS of available displays")
 
 
-configure_file(config-qt-patches-present.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-qt-patches-present.h)
-
 #
 # Check for the presence the Wintab switch in Qt5
 #
@@ -748,6 +800,83 @@ QWindowsWindowFunctions::setHasBorderInFullScreenDefault(true);
 
 endif (WIN32)
 
+CHECK_CXX_SOURCE_COMPILES("
+#include <QCoreApplication>
+int main(int argc, char *argv[]) {
+QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN);
+}
+"
+KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_PAGE_UP_DOWN
+)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <QCoreApplication>
+int main(int argc, char *argv[]) {
+QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS);
+}
+"
+KRITA_QT_HAS_ANDROID_IGNORE_HISTORIC_TABLET_EVENTS
+)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <QCoreApplication>
+int main(int argc, char *argv[]) {
+QCoreApplication::setKritaAttribute(KRITA_QATTRIBUTE_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS);
+}
+"
+KRITA_QT_HAS_ANDROID_EMULATE_MOUSE_BUTTONS_FOR_HIGH_FUNCTION_KEYS
+)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <QScroller>
+#ifndef KRITA_QSCROLLER_PATCH
+#error \"QScroller filter patch not present\"
+#endif
+int main(int argc, char *argv[]) {}
+"
+KRITA_QT_HAS_QSCROLLER_FILTER
+)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <QCoreApplication>
+int main(int argc, char *argv[]) {
+return Qt::ANDROID_INPUT_PLATFORM_DATA_SOFT_INPUT_ADJUST_NOTHING;
+}
+"
+KRITA_QT_HAS_ANDROID_INPUT_PLATFORM_DATA_SOFT_INPUT_ADJUST_NOTHING
+)
+
+
+set(CMAKE_REQUIRED_INCLUDES ${Qt${QT_MAJOR_VERSION}Gui_INCLUDE_DIRS} ${Qt${QT_MAJOR_VERSION}Gui_PRIVATE_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_LIBRARIES ${Qt${QT_MAJOR_VERSION}Gui_LIBRARIES})
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <qpa/qplatformscreen.h>
+int main(int argc, char *argv[]) {
+QPlatformScreen *screen = nullptr;
+screen->setDensityAdjustment(1.0);
+return screen->densityAdjustment();
+}
+"
+KRITA_QT_HAS_ANDROID_QPLATFORMSCREEN_DENSITY_ADJUSTMENT
+)
+
+set(CMAKE_REQUIRED_INCLUDES ${Qt${QT_MAJOR_VERSION}Widgets_INCLUDE_DIRS})
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <QHeaderView>
+#ifndef KRITA_HEADER_VIEW_MEMORY_MODE_INITIALIZATION_FIX
+#error \"patch is missing\"
+#endif
+int main(int argc, char *argv[]) {
+return 0;
+}
+"
+KRITA_QT_HEADER_VIEW_MEMORY_MODE_INITIALIZATION_FIX
+)
+
+configure_file(config-qt-patches-present.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-qt-patches-present.h)
+
 unset(CMAKE_REQUIRED_INCLUDES)
 unset(CMAKE_REQUIRED_LIBRARIES)
 
@@ -798,15 +927,15 @@ if (NOT WIN32 AND NOT APPLE AND NOT ANDROID AND NOT HAIKU)
     endif()
 
     find_package(Qt${QT_MAJOR_VERSION}DBus ${MIN_QT_VERSION})
-    set_package_properties(Qt5DBus PROPERTIES
+    set_package_properties(Qt${QT_MAJOR_VERSION}DBus PROPERTIES
         DESCRIPTION "Qt DBUS integration"
         URL "https://www.qt.io/"
         TYPE OPTIONAL
         PURPOSE "Optionally used to provide a dbus api on Linux")
-    macro_bool_to_01(Qt${QT_MAJOR_VERSION}DBUS_FOUND HAVE_QT_DBUS)
+    macro_bool_to_01(Qt${QT_MAJOR_VERSION}DBus_FOUND HAVE_DBUS)
 
     find_package(KF${KF_MAJOR}Crash ${MIN_FRAMEWORKS_VERSION})
-    macro_bool_to_01(KF5Crash_FOUND HAVE_KCRASH)
+    macro_bool_to_01(KF${KF_MAJOR}Crash_FOUND HAVE_KCRASH)
     set_package_properties(KF${KF_MAJOR}Crash PROPERTIES
         DESCRIPTION "KDE's Crash Handler"
         URL "https://api.kde.org/kcrash-index.html"
@@ -814,14 +943,11 @@ if (NOT WIN32 AND NOT APPLE AND NOT ANDROID AND NOT HAIKU)
         PURPOSE "Optionally used to provide crash reporting on Linux")
 
     find_package(X11 REQUIRED COMPONENTS Xinput)
-    set(HAVE_X11 TRUE)
-    add_definitions(-DHAVE_X11)
-
 else()
     set(HAVE_DBUS FALSE)
-    set(HAVE_X11 FALSE)
 endif()
 
+set (HAVE_X11 ${X11_FOUND})
 
 add_definitions(
   -DQT_USE_QSTRINGBUILDER
@@ -830,6 +956,12 @@ add_definitions(
   -DQT_USE_FAST_CONCATENATION 
   -DQT_USE_FAST_OPERATOR_PLUS
 )
+
+if (QT_MAJOR_VERSION STREQUAL "6")
+    add_definitions(
+        -DQT_NO_CONTEXTLESS_CONNECT
+    )
+endif()
 
 # MSVC is unable to disambiguate between definitions of QVector<QPointF> 
 # and QPolygonF. This is a known upstream bug e.g.:
@@ -1035,7 +1167,7 @@ if (ANDROID)
     find_package(unwindstack REQUIRED)
 endif()
 
-find_package(PNG REQUIRED "1.2.6")
+find_package(PNG REQUIRED "1.6.0")
 
 if (APPLE)
     # this is not added correctly on OSX -- see https://forum.kde.org/viewtopic.php?f=139&t=101867&p=221242#p221242
@@ -1199,16 +1331,13 @@ if (FFTW3_FOUND)
     find_library(FFTW3_THREADS_LIB fftw3_threads PATHS ${FFTW3_LIBRARY_DIRS})
 endif()
 
-find_package(OpenColorIO 1.1.1)
+find_package(OpenColorIO 2.0.0)
 set_package_properties(OpenColorIO PROPERTIES
     DESCRIPTION "The OpenColorIO Library"
     URL "https://www.opencolorio.org"
     TYPE OPTIONAL
     PURPOSE "Required by the Krita LUT docker")
 macro_bool_to_01(OpenColorIO_FOUND HAVE_OCIO)
-if (OPENCOLORIO_VERSION VERSION_GREATER_EQUAL "2.0.0")
-    set(HAVE_OCIO_V2 TRUE)
-endif()
 configure_file(config-ocio.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-ocio.h)
 
 set_package_properties(PythonLibrary PROPERTIES
@@ -1344,7 +1473,7 @@ endif()
 ## set_package_properties report the lowest one if no
 ## xsimd is found
 ##
-foreach(xsimd_version 13 12 11 10 9 8.1.0)
+foreach(xsimd_version 14 13 12 11 10 9 8.1.0)
     if(NOT xsimd_FOUND)
         find_package(xsimd ${xsimd_version})
     endif()
@@ -1400,6 +1529,45 @@ set_package_properties(Poppler PROPERTIES
     URL "https://poppler.freedesktop.org/"
     TYPE OPTIONAL
     PURPOSE "Required by the Krita PDF filter.")
+
+##
+## Test for libav on Android
+##
+if(ANDROID)
+    find_package(PkgConfig REQUIRED)
+    set_package_properties(PkgConfig PROPERTIES
+        DESCRIPTION "pkg-config"
+        URL "https://www.freedesktop.org/wiki/Software/pkg-config/"
+        TYPE REQUIRED
+        PURPOSE "Needed to find ffmpeg libraries on Android."
+    )
+
+    pkg_check_modules(LibAV REQUIRED IMPORTED_TARGET GLOBAL
+        libavcodec
+        libavfilter
+        libavformat
+        libavutil
+        libswscale
+    )
+    if(TARGET PkgConfig::LibAV)
+        add_library(LibAV ALIAS PkgConfig::LibAV)
+    endif()
+
+    # The PkgConfig and FeatureSummary modules don't play nice with each other
+    # on their own, so this has to be set manually for the summary to show up.
+    if(TARGET LibAV)
+        set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND LibAV)
+    else()
+        set_property(GLOBAL APPEND PROPERTY PACKAGES_NOT_FOUND LibAV)
+    endif()
+
+    set_package_properties(LibAV PROPERTIES
+        DESCRIPTION "FFmpeg libraries"
+        URL "https://ffmpeg.org/"
+        TYPE REQUIRED
+        PURPOSE "Needed to render animations and timelapses on Android."
+    )
+endif()
 
 ##
 ## Test for quazip
@@ -1515,6 +1683,7 @@ include(CheckAtomic)
 #############################
 ############################
 
+include(KritaAddBrokenUnitTest)
 include(MacroKritaAddBenchmark)
 
  ####################
@@ -1564,7 +1733,7 @@ feature_summary(WHAT ALL FATAL_ON_MISSING_REQUIRED_PACKAGES)
 
 if (ANDROID)
   # ECM passes this to Qt, which was already capable of detecting it..
-  set (ANDROID_SDK_COMPILE_API "35")
+  set (ANDROID_SDK_COMPILE_API "36")
 
   # To assist stdcpp-path in deployment.json file
   set(ANDROID_SYSROOT_PREFIX "${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr" CACHE STRING "" FORCE)
@@ -1584,6 +1753,12 @@ if (ANDROID)
 endif()
 
 if(DEFINED QTANDROID_EXPORTED_TARGET AND NOT TARGET "create-apk")
+    # we don't need to add an explicit dependency to create-apk-krita,
+    # because ecm_androiddeployqt repopulates the project directory
+    # every time unconditionally
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/android/apk/version.properties.in
+                   ${CMAKE_BINARY_DIR}/version.properties)
+
     set (_CMAKE_ANDROID_DIR "${ECM_DIR}/../toolchain")
     list(LENGTH QTANDROID_EXPORTED_TARGET targetsCount)
     include(${_CMAKE_ANDROID_DIR}/ECMAndroidDeployQt.cmake)
@@ -1600,7 +1775,26 @@ if(DEFINED QTANDROID_EXPORTED_TARGET AND NOT TARGET "create-apk")
         endif()
 
         ecm_androiddeployqt("${exportedTarget}" "${ECM_ADDITIONAL_FIND_ROOT_PATH}")
-        set_target_properties(create-apk-${exportedTarget} PROPERTIES ANDROID_APK_DIR "${APK_DIR}")
+
+        set(VERSIONED_BUILD_DIR "${CMAKE_BINARY_DIR}/${QTANDROID_EXPORTED_TARGET}_build_apk.in/")
+
+        # `ecm_androiddeployqt` unconditionally recopies the entire apk folder
+        # on every run. Therefore we have two options: 1) write `version.properties`
+        # in the **source** tree (which is ugly), or 2) make another copy of the folder in
+        # the build tree (not very pretty also).
+        #
+        # The code below uses the second approach and just copies the apk-source folder
+        # into the build tree under a custom name (`*_build_apk.in`). This folder will
+        # later be used by `ecm_androiddeployqt` for building the actual apk.
+        add_custom_target(prepare-versioned-apk-build-dir-${exportedTarget}
+            COMMAND ${CMAKE_COMMAND} -E echo "Prepare a versioned build directory for $<TARGET_NAME:${QTANDROID_EXPORTED_TARGET}>"
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "${VERSIONED_BUILD_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${APK_DIR}" "${VERSIONED_BUILD_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/version.properties "${VERSIONED_BUILD_DIR}"
+        )
+
+        add_dependencies(create-apk-${exportedTarget} prepare-versioned-apk-build-dir-${exportedTarget})
+        set_target_properties(create-apk-${exportedTarget} PROPERTIES ANDROID_APK_DIR "${VERSIONED_BUILD_DIR}")
     endforeach()
 elseif(ANDROID)
     message(STATUS "You can export a target by specifying -DQTANDROID_EXPORTED_TARGET=<targetname> and -DANDROID_APK_DIR=<paths>")

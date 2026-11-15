@@ -1,9 +1,9 @@
 set(kritasurfacecolormanagementapi_LIB_SRCS
-    KisColorimetryUtils.cpp
     surfacecolormanagement/KisOutputColorInfoInterface.cpp
     surfacecolormanagement/KisSurfaceColorimetry.cpp
     surfacecolormanagement/KisSurfaceColorimetryIccUtils.cpp
     surfacecolormanagement/KisSurfaceColorManagerInterface.cpp
+    surfacecolormanagement/KisSurfaceColorManagementInfo.cpp
 )
 
 kis_add_library(kritasurfacecolormanagementapi SHARED ${kritasurfacecolormanagementapi_LIB_SRCS})

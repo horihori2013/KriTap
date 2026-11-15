@@ -12,12 +12,14 @@
 
 #include <klocalizedstring.h>
 
+#include "LcmsRGBP2020PQColorSpace.h"
 #include "compositeops/KoCompositeOps.h"
 #include "compositeops/RgbCompositeOps.h"
 #include "dithering/KisRgbDitherOpFactory.h"
 #include <KoColorConversions.h>
 #include <KoColorSpacePreserveLightnessUtils.h>
 #include <KoColorSpaceRegistry.h>
+#include <KoColorProfileQuery.h>
 #include <KoIntegerMaths.h>
 #include <kis_dom_utils.h>
 
@@ -126,4 +128,36 @@ void RgbU8ColorSpace::fillGrayBrushWithColorAndLightnessWithStrength(quint8* dst
 void RgbU8ColorSpace::modulateLightnessByGrayBrush(quint8 *dst, const QRgb *brush, qreal strength, qint32 nPixels) const
 {
     modulateLightnessByGrayBrushRGB<KoBgrU8Traits>(dst, brush, strength, nPixels);
+}
+
+QList<KoColorProfileQuery> RgbU8ColorSpaceFactory::requiredConnectionProfiles(const KoColorProfile *profile) const
+{
+    if (profile->getTransferCharacteristics() == TRC_ITU_R_BT_2100_0_PQ
+        && profile->getColorPrimaries() != PRIMARIES_UNSPECIFIED) {
+        return {KoColorProfileQuery(profile->getColorPrimaries(), TRC_LINEAR)};
+    }
+    return {};
+}
+
+QList<KoColorConversionTransformationFactory*> RgbU8ColorSpaceFactory::colorConversionLinksFromProfile(const KoColorProfile *profile) const
+{
+    if (profile->getTransferCharacteristics() == TRC_ITU_R_BT_2100_0_PQ
+        && profile->getColorPrimaries() != PRIMARIES_UNSPECIFIED) {
+
+        KoColorSpaceRegistry *registry = KoColorSpaceRegistry::instance();
+        KoColorProfileQuery query(profile->getColorPrimaries(), TRC_LINEAR);
+
+        /// we cannot generate a profile at this stage, it should have been generated
+        /// by the registry thanks to the call to requiredConnectionProfiles()
+        const KoColorProfile *connectionProfile = registry->profileFor(query, false);
+        KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(connectionProfile, QList<KoColorConversionTransformationFactory *>());
+
+        LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbU8ColorSpaceFactory> factory(profile->name(), connectionProfile->name());
+        return factory.colorConversionLinks();
+    } else if (profile->name() == "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF") {
+        KoColorSpaceRegistry *registry = KoColorSpaceRegistry::instance();
+        LcmsRGBP2020PQColorSpaceFactoryWrapper<RgbU8ColorSpaceFactory> factory(profile->name(), registry->p2020G10Profile()->name());
+        return factory.colorConversionLinks();
+    }
+    return QList<KoColorConversionTransformationFactory*>();
 }

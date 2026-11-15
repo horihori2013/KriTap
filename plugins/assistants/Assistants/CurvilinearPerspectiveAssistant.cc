@@ -20,17 +20,20 @@
 #include <kis_canvas2.h>
 #include <kis_coordinates_converter.h>
 #include <kis_algebra_2d.h>
+#include <KoColorDisplayRendererInterface.h>
 
 #include <math.h>
 #include <limits>
 
 CurvilinearPerspectiveAssistant::CurvilinearPerspectiveAssistant()
-    : KisPaintingAssistant("curvilinear-perspective", i18n("Curvilinear Perspective assistant"))
+    : KisAbstractPerspectiveGrid()
+    , KisPaintingAssistant("curvilinear-perspective", i18n("Curvilinear Perspective assistant"))
 {
 }
 
 CurvilinearPerspectiveAssistant::CurvilinearPerspectiveAssistant(const CurvilinearPerspectiveAssistant &rhs, QMap<KisPaintingAssistantHandleSP, KisPaintingAssistantHandleSP> &handleMap)
-    : KisPaintingAssistant(rhs, handleMap)
+    : KisAbstractPerspectiveGrid(rhs.parent())
+    , KisPaintingAssistant(rhs, handleMap)
 {
 }
 
@@ -45,13 +48,15 @@ void CurvilinearPerspectiveAssistant::adjustLine(QPointF &point, QPointF &stroke
     strokeBegin = QPointF();
 }
 
-void CurvilinearPerspectiveAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, bool cached, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
+void CurvilinearPerspectiveAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, const KoColorDisplayRendererInterface *displayRenderInterface, bool cached, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
 {
     Q_UNUSED(cached);
     Q_UNUSED(updateRect);
 
     gc.save();
     gc.resetTransform();
+
+    const QColor canvasAssistantColor = displayRenderInterface->convertColorToDisplayColorSpace(KoColor(effectiveAssistantColor(), KoColorSpaceRegistry::instance()->rgb8()));
     
     if (isSnappingActive()) {
 
@@ -88,15 +93,15 @@ void CurvilinearPerspectiveAssistant::drawAssistant(QPainter& gc, const QRectF& 
         // Copied from Two-Point Perspective's fading effect for approaching vanishing points.
         // Set up the fading effect for the grid lines
         // Needed so the grid density doesn't look distracting
-        QColor color = effectiveAssistantColor();
+        QColor color = canvasAssistantColor;
         QGradient fade = QLinearGradient(
             QPointF(p1.x() - deltaY, p1.y() + deltaX), 
             QPointF(p1.x() + deltaY, p1.y() - deltaX));
         
         color.setAlphaF(0.0);
-        fade.setColorAt(0.42, effectiveAssistantColor());
+        fade.setColorAt(0.42, canvasAssistantColor);
         fade.setColorAt(0.5, color);
-        fade.setColorAt(0.58, effectiveAssistantColor());
+        fade.setColorAt(0.58, canvasAssistantColor);
         const QPen pen = gc.pen();
         const QBrush new_brush = QBrush(fade);
         int width = 0;
@@ -169,11 +174,12 @@ void CurvilinearPerspectiveAssistant::drawAssistant(QPainter& gc, const QRectF& 
 
 }
 
-void CurvilinearPerspectiveAssistant::drawCache(QPainter& gc, const KisCoordinatesConverter *converter, bool assistantVisible)
+void CurvilinearPerspectiveAssistant::drawCache(QPainter& gc, const KisCoordinatesConverter *converter, const KoColorDisplayRendererInterface *displayRenderInterface, bool assistantVisible)
 {
     Q_UNUSED(gc);
     Q_UNUSED(converter);
     Q_UNUSED(assistantVisible);
+    Q_UNUSED(displayRenderInterface);
 }
 
 QLineF CurvilinearPerspectiveAssistant::identifyCircle(const QPointF thirdPoint) {
@@ -240,6 +246,62 @@ QPointF CurvilinearPerspectiveAssistant::getDefaultEditorPosition() const
 bool CurvilinearPerspectiveAssistant::isAssistantComplete() const
 {
     return handles().size() >= 2;
+}
+
+bool CurvilinearPerspectiveAssistant::perspectiveData(const QPointF &point, qreal *signedDepth) const
+{
+    if (!isAssistantComplete()) {
+        return false;
+    }
+
+    const QPointF p1 = *handles()[0];
+    const QPointF p2 = *handles()[1];
+    const QPointF delta = p2 - p1;
+    const qreal handleDistance = KisAlgebra2D::norm(delta);
+    const qreal halfHandleDist = handleDistance / 2.0;
+
+    if (!std::isfinite(halfHandleDist) || halfHandleDist <= 0.0) {
+        return false;
+    }
+
+    const QPointF midpoint = (p1 + p2) * 0.5;
+    const QPointF normal(-delta.y() / handleDistance, delta.x() / handleDistance);
+    const qreal depth = QPointF::dotProduct(point - midpoint, normal) / halfHandleDist;
+
+    if (!std::isfinite(depth)) {
+        return false;
+    }
+
+    if (signedDepth) {
+        *signedDepth = depth;
+    }
+
+    return true;
+}
+
+bool CurvilinearPerspectiveAssistant::contains(const QPointF &point) const
+{
+    qreal signedDepth = 0.0;
+    return perspectiveData(point, &signedDepth);
+}
+
+qreal CurvilinearPerspectiveAssistant::distance(const QPointF &point) const
+{
+    qreal signedDepth = 0.0;
+
+    if (!perspectiveData(point, &signedDepth)) {
+        return 0.0;
+    }
+
+    const qreal normalizedDepth = qAbs(signedDepth);
+    // The handle line is the "infinite distance" horizon. Moving away from it
+    // increases closeness monotonically, while remaining bounded in [0, 1).
+    return normalizedDepth / (1.0 + normalizedDepth);
+}
+
+bool CurvilinearPerspectiveAssistant::isActive() const
+{
+    return isSnappingActive();
 }
 
 

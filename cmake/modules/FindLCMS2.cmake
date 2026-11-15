@@ -16,7 +16,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 
-include(UsePkgConfig)
+find_package(PkgConfig QUIET)
 pkg_check_modules(LCMS2_PKGCONF QUIET lcms2)
 
 find_path(LCMS2_INCLUDE_DIR
@@ -64,7 +64,6 @@ endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(LCMS2
-  FOUND_VAR LCMS2_FOUND
   REQUIRED_VARS
     LCMS2_LIBRARY
     LCMS2_INCLUDE_DIR

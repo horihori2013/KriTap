@@ -163,7 +163,7 @@
       <statusTip/>
     </Action>
     <Action name="buginfo">
-      <icon/>
+      <icon>krita_log</icon>
       <text>Show Krita log for bug reports.</text>
       <whatsThis/>
       <toolTip>Show Krita log for bug reports.</toolTip>
@@ -173,7 +173,7 @@
       <statusTip/>
     </Action>
     <Action name="sysinfo">
-      <icon/>
+      <icon>system-information</icon>
       <text>Show system information for bug reports.</text>
       <whatsThis/>
       <toolTip>Show system information for bug reports.</toolTip>
@@ -193,7 +193,7 @@
       <statusTip/>
     </Action>
     <Action name="logcatdump">
-      <icon/>
+      <icon>show_android_log</icon>
       <text>Show Android log for bug reports.</text>
       <whatsThis/>
       <toolTip>Show Android log for bug reports.</toolTip>
@@ -203,7 +203,7 @@
       <statusTip/>
     </Action>
     <Action name="crashlog">
-      <icon/>
+      <icon>show_crash_log</icon>
       <text>Show crash log for bug reports.</text>
       <whatsThis/>
       <toolTip>Show crash log for bug reports.</toolTip>
@@ -213,7 +213,7 @@
       <statusTip/>
     </Action>
     <Action name="command_bar_open">
-      <icon/>
+      <icon>search-actions</icon>
       <text>Search Actions</text>
       <whatsThis/>
       <toolTip>Open the command bar to search through actions.</toolTip>
@@ -366,7 +366,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_saturated">
-      <icon/>
+      <icon>saturation-increase</icon>
       <text>Make brush color more saturated</text>
       <whatsThis/>
       <toolTip>Make brush color more saturated</toolTip>
@@ -376,7 +376,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_desaturated">
-      <icon/>
+      <icon>saturation-decrease</icon>
       <text>Make brush color more desaturated</text>
       <whatsThis/>
       <toolTip>Make brush color more desaturated</toolTip>
@@ -386,7 +386,7 @@
       <statusTip/>
     </Action>
     <Action name="shift_brush_color_clockwise">
-      <icon/>
+      <icon>hue-shift-CW</icon>
       <text>Shift brush color hue clockwise</text>
       <whatsThis/>
       <toolTip>Shift brush color hue clockwise</toolTip>
@@ -396,7 +396,7 @@
       <statusTip/>
     </Action>
     <Action name="shift_brush_color_counter_clockwise">
-      <icon/>
+      <icon>hue-shift-CCW</icon>
       <text>Shift brush color hue counter-clockwise</text>
       <whatsThis/>
       <toolTip>Shift brush color hue counter-clockwise</toolTip>
@@ -406,7 +406,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_redder">
-      <icon/>
+      <icon>more-red</icon>
       <text>Make brush color more red</text>
       <whatsThis/>
       <toolTip>Make brush color more red</toolTip>
@@ -416,7 +416,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_greener">
-      <icon/>
+      <icon>more-green</icon>
       <text>Make brush color more green</text>
       <whatsThis/>
       <toolTip>Make brush color more green</toolTip>
@@ -426,7 +426,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_bluer">
-      <icon/>
+      <icon>more-blue</icon>
       <text>Make brush color more blue</text>
       <whatsThis/>
       <toolTip>Make brush color more blue</toolTip>
@@ -436,7 +436,7 @@
       <statusTip/>
     </Action>
     <Action name="make_brush_color_yellower">
-      <icon/>
+      <icon>more-yellow</icon>
       <text>Make brush color more yellow</text>
       <whatsThis/>
       <toolTip>Make brush color more yellow</toolTip>
@@ -470,7 +470,7 @@
       <statusTip/>
     </Action>
     <Action name="increase_flow">
-      <icon></icon>
+      <icon>flow-increase</icon>
       <text>Increase Flow</text>
       <whatsThis/>
       <toolTip>Increase brush Flow</toolTip>
@@ -482,7 +482,7 @@
       <statusTip/>
     </Action>
     <Action name="decrease_flow">
-      <icon></icon>
+      <icon>flow-decrease</icon>
       <text>Decrease Flow</text>
       <whatsThis/>
       <toolTip>Decrease brush Flow</toolTip>
@@ -494,7 +494,7 @@
       <statusTip/>
     </Action>
     <Action name="increase_fade">
-      <icon></icon>
+      <icon>fade-increase</icon>
       <text>Increase Fade</text>
       <whatsThis/>
       <toolTip>Increase brush Fade</toolTip>
@@ -506,7 +506,7 @@
       <statusTip/>
     </Action>
     <Action name="decrease_fade">
-      <icon></icon>
+      <icon>fade-decrease</icon>
       <text>Decrease Fade</text>
       <whatsThis/>
       <toolTip>Decrease brush Fade</toolTip>
@@ -518,7 +518,7 @@
       <statusTip/>
     </Action>
     <Action name="increase_scatter">
-      <icon></icon>
+      <icon>scatter-increase</icon>
       <text>Increase Scatter</text>
       <whatsThis/>
       <toolTip>Increase brush Scatter strength</toolTip>
@@ -530,7 +530,7 @@
       <statusTip/>
     </Action>
     <Action name="decrease_scatter">
-      <icon></icon>
+      <icon>scatter-decrease</icon>
       <text>Decrease Scatter</text>
       <whatsThis/>
       <toolTip>Decrease brush Scatter strength</toolTip>
@@ -793,7 +793,7 @@
       <statusTip/>
     </Action>
     <Action name="selection_tool_mode_add">
-      <icon/>
+      <icon>selection_add</icon>
       <text>Selection Mode: Add</text>
       <whatsThis/>
       <toolTip>Selection Mode: Add</toolTip>
@@ -803,7 +803,7 @@
       <statusTip/>
     </Action>
     <Action name="selection_tool_mode_subtract">
-      <icon/>
+      <icon>selection_subtract</icon>
       <text>Selection Mode: Subtract</text>
       <whatsThis/>
       <toolTip>Selection Mode: Subtract</toolTip>
@@ -813,7 +813,7 @@
       <statusTip/>
     </Action>
     <Action name="selection_tool_mode_intersect">
-      <icon/>
+      <icon>selection_intersect</icon>
       <text>Selection Mode: Intersect</text>
       <whatsThis/>
       <toolTip>Selection Mode: Intersect</toolTip>
@@ -823,7 +823,7 @@
       <statusTip/>
     </Action>
     <Action name="selection_tool_mode_replace">
-      <icon/>
+      <icon>selection_replace</icon>
       <text>Selection Mode: Replace</text>
       <whatsThis/>
       <toolTip>Selection Mode: Replace</toolTip>
@@ -873,7 +873,7 @@
       <statusTip/>
     </Action>
     <Action name="decrease_brush_size">
-      <icon>brushsize-decrease</icon>
+      <icon>brush-size-decrease</icon>
       <text>Decrease Brush Size</text>
       <whatsThis/>
       <toolTip>Decrease Brush Size</toolTip>
@@ -895,7 +895,7 @@
       <statusTip/>
     </Action>
     <Action name="increase_brush_size">
-      <icon>brushsize-increase</icon>
+      <icon>brush-size-increase</icon>
       <text>Increase Brush Size</text>
       <whatsThis/>
       <toolTip>Increase Brush Size</toolTip>
@@ -907,7 +907,7 @@
       <statusTip/>
     </Action>
     <Action name="rotate_brush_tip_clockwise">
-      <icon/>
+      <icon>rotate-brush-CW</icon>
       <text>Rotate brush tip clockwise</text>
       <whatsThis/>
       <toolTip>Rotate brush tip clockwise</toolTip>
@@ -919,7 +919,7 @@
       <statusTip/>
     </Action>
     <Action name="rotate_brush_tip_clockwise_precise">
-      <icon/>
+      <icon>rotate-brush-CW-precise</icon>
       <text>Rotate brush tip clockwise (precise)</text>
       <whatsThis/>
       <toolTip>Rotate brush tip clockwise (precise)</toolTip>
@@ -931,7 +931,7 @@
       <statusTip/>
     </Action>
     <Action name="rotate_brush_tip_counter_clockwise">
-      <icon/>
+      <icon>rotate-brush-CCW</icon>
       <text>Rotate brush tip counter-clockwise</text>
       <whatsThis/>
       <toolTip>Rotate brush tip counter-clockwise</toolTip>
@@ -943,17 +943,17 @@
       <statusTip/>
     </Action>
     <Action name="rotate_brush_tip_counter_clockwise_precise">
-    <icon/>
-    <text>Rotate brush tip counter-clockwise (precise)</text>
-    <whatsThis/>
-    <toolTip>Rotate brush tip counter-clockwise (precise)</toolTip>
-    <iconText>Rotate brush tip counter-clockwise (precise)</iconText>
-    <activationFlags>0</activationFlags>
-    <activationConditions>0</activationConditions>
-    <shortcut/>
-    <isCheckable>false</isCheckable>
-    <statusTip/>
-  </Action>
+      <icon>rotate-brush-CCW-precise</icon>
+      <text>Rotate brush tip counter-clockwise (precise)</text>
+      <whatsThis/>
+      <toolTip>Rotate brush tip counter-clockwise (precise)</toolTip>
+      <iconText>Rotate brush tip counter-clockwise (precise)</iconText>
+      <activationFlags>0</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
     <Action name="toggle_assistant">
       <icon/>
       <text>Toggle Snap To Assistants</text>
@@ -1011,7 +1011,7 @@
       <statusTip/>
     </Action>
     <Action name="convert_selection_to_shape">
-      <icon/>
+      <icon>convert_to_shape</icon>
       <text>Convert &amp;to Shape</text>
       <whatsThis/>
       <toolTip>Convert to Shape</toolTip>
@@ -2024,7 +2024,7 @@
       <statusTip/>
     </Action>
     <Action name="add_blank_frame">
-      <icon>addblankframe</icon>
+      <icon>addblankframe-16</icon>
       <text>Create Blank Frame</text>
       <whatsThis/>
       <toolTip>Add blank frame</toolTip>
@@ -2036,7 +2036,7 @@
       <statusTip/>
     </Action>
     <Action name="add_duplicate_frame">
-      <icon>addduplicateframe</icon>
+      <icon>duplicate-frame-16</icon>
       <text>Create Duplicate Frame</text>
       <whatsThis/>
       <toolTip>Add duplicate frame</toolTip>
@@ -2104,7 +2104,7 @@
       <statusTip/>
     </Action>
     <Action name="pin_to_timeline">
-      <icon/>
+      <icon>krita_tool_reference_images</icon>
       <text>Pin to Timeline</text>
       <whatsThis/>
       <toolTip>If checked, layer becomes pinned to the timeline, making it visible even when inactive.</toolTip>
@@ -2115,7 +2115,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_keyframe_left">
-      <icon/>
+      <icon>insert-frame-left</icon>
       <text>Insert Keyframe Left</text>
       <whatsThis/>
       <toolTip>Insert keyframes to the left of selection, moving the tail of animation to the right.</toolTip>
@@ -2127,7 +2127,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_keyframe_right">
-      <icon/>
+      <icon>insert-frame-right</icon>
       <text>Insert Keyframe Right</text>
       <whatsThis/>
       <toolTip>Insert keyframes to the right of selection, moving the tail of animation to the right.</toolTip>
@@ -2139,7 +2139,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_multiple_keyframes">
-      <icon/>
+      <icon>add-multiple-frames</icon>
       <text>Insert Multiple Keyframes</text>
       <whatsThis/>
       <toolTip>Insert several keyframes based on user parameters.</toolTip>
@@ -2151,7 +2151,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_frames_and_pull">
-      <icon/>
+      <icon>remove-frame-and-pull</icon>
       <text>Remove Frame and Pull</text>
       <whatsThis/>
       <toolTip>Remove keyframes moving the tail of animation to the left</toolTip>
@@ -2163,7 +2163,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_frames">
-      <icon>deletekeyframe</icon>
+      <icon>remove-frame-16</icon>
       <text>Remove Keyframe</text>
       <whatsThis/>
       <toolTip>Remove keyframes without moving anything around</toolTip>
@@ -2175,7 +2175,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_column_left">
-      <icon/>
+      <icon>column-insert-left</icon>
       <text>Insert Column Left</text>
       <whatsThis/>
       <toolTip>Insert column to the left of selection, moving the tail of animation to the right</toolTip>
@@ -2187,7 +2187,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_column_right">
-      <icon/>
+      <icon>column-insert-right</icon>
       <text>Insert Column Right</text>
       <whatsThis/>
       <toolTip>Insert column to the right of selection, moving the tail of animation to the right</toolTip>
@@ -2199,7 +2199,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_multiple_columns">
-      <icon/>
+      <icon>column-insert-multiple</icon>
       <text>Insert Multiple Columns</text>
       <whatsThis/>
       <toolTip>Insert several columns based on user parameters.</toolTip>
@@ -2211,7 +2211,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_columns_and_pull">
-      <icon/>
+      <icon>column-remove-and-pull</icon>
       <text>Remove Column and Pull</text>
       <whatsThis/>
       <toolTip>Remove columns moving the tail of animation to the left</toolTip>
@@ -2223,7 +2223,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_columns">
-      <icon/>
+      <icon>column-remove</icon>
       <text>Remove Column</text>
       <whatsThis/>
       <toolTip>Remove columns without moving anything around</toolTip>
@@ -2235,7 +2235,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_hold_frame">
-      <icon/>
+      <icon>insert-hold-frame</icon>
       <text>Insert Hold Frame</text>
       <whatsThis/>
       <toolTip>Insert a hold frame after every keyframe</toolTip>
@@ -2247,7 +2247,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_multiple_hold_frames">
-      <icon/>
+      <icon>add-multiple-hold-frames</icon>
       <text>Insert Multiple Hold Frames</text>
       <whatsThis/>
       <toolTip>Insert N hold frames after every keyframe</toolTip>
@@ -2259,7 +2259,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_hold_frame">
-      <icon/>
+      <icon>remove-hold-frame</icon>
       <text>Remove Hold Frame</text>
       <whatsThis/>
       <toolTip>Remove a hold frame after every keyframe</toolTip>
@@ -2271,7 +2271,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_multiple_hold_frames">
-      <icon/>
+      <icon>remove-multiple-hold-frames</icon>
       <text>Remove Multiple Hold Frames</text>
       <whatsThis/>
       <toolTip>Remove N hold frames after every keyframe</toolTip>
@@ -2283,7 +2283,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_hold_column">
-      <icon/>
+      <icon>column-insert-hold</icon>
       <text>Insert Hold Column</text>
       <whatsThis/>
       <toolTip>Insert a hold column into the frame at the current position</toolTip>
@@ -2295,7 +2295,7 @@
       <statusTip/>
     </Action>
     <Action name="insert_multiple_hold_columns">
-      <icon/>
+      <icon>column-insert-hold-multiple</icon>
       <text>Insert Multiple Hold Columns</text>
       <whatsThis/>
       <toolTip>Insert N hold columns into the frame at the current position</toolTip>
@@ -2307,7 +2307,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_hold_column">
-      <icon/>
+      <icon>column-remove-hold</icon>
       <text>Remove Hold Column</text>
       <whatsThis/>
       <toolTip>Remove a hold column from the frame at the current position</toolTip>
@@ -2319,7 +2319,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_multiple_hold_columns">
-      <icon/>
+      <icon>column-remove-hold-multiple</icon>
       <text>Remove Multiple Hold Columns</text>
       <whatsThis/>
       <toolTip>Remove N hold columns from the frame at the current position</toolTip>
@@ -2331,7 +2331,7 @@
       <statusTip/>
     </Action>
     <Action name="add_scalar_keyframes">
-      <icon></icon>
+      <icon>keyframe-add</icon>
       <text>Add scalar keyframes</text>
       <whatsThis></whatsThis>
       <toolTip>Adds keyframe to control scalar property</toolTip>
@@ -2343,7 +2343,7 @@
       <statusTip/>
     </Action>
     <Action name="remove_scalar_keyframe">
-      <icon></icon>
+      <icon>keyframe-remove</icon>
       <text>Remove scalar keyframe</text>
       <whatsThis></whatsThis>
       <toolTip>Removes the selected scalar keyframe</toolTip>
@@ -2355,7 +2355,7 @@
       <statusTip/>
     </Action>
     <Action name="mirror_frames">
-      <icon/>
+      <icon>mirror-frames</icon>
       <text>Mirror Frames</text>
       <whatsThis/>
       <toolTip>Mirror frames' position</toolTip>
@@ -2367,7 +2367,7 @@
       <statusTip/>
     </Action>
     <Action name="mirror_columns">
-      <icon/>
+      <icon>column-mirror</icon>
       <text>Mirror Columns</text>
       <whatsThis/>
       <toolTip>Mirror columns' position</toolTip>
@@ -2379,7 +2379,7 @@
       <statusTip/>
     </Action>
     <Action name="clear_animation_cache">
-        <icon/>
+        <icon>clear-cache</icon>
         <text>Clear Cache</text>
         <whatsThis/>
         <toolTip>Clear entire animation cache. Useful for debugging.</toolTip>
@@ -2391,7 +2391,7 @@
         <statusTip/>
     </Action>
     <Action name="copy_frames">
-      <icon/>
+      <icon>copy-keyframes</icon>
       <text>Copy Keyframes</text>
       <whatsThis/>
       <toolTip>Copy frames to clipboard</toolTip>
@@ -2403,7 +2403,7 @@
       <statusTip/>
     </Action>
     <Action name="copy_frames_as_clones">
-      <icon/>
+      <icon>add-clone-frame</icon>
       <text>Clone Keyframes</text>
       <whatsThis/>
       <toolTip>Clone frames to clipboard</toolTip>
@@ -2427,7 +2427,7 @@
       <statusTip/>
     </Action>
     <Action name="cut_frames">
-      <icon/>
+      <icon>cut-keyframes</icon>
       <text>Cut Keyframes</text>
       <whatsThis/>
       <toolTip>Cut frames to clipboard</toolTip>
@@ -2439,7 +2439,7 @@
       <statusTip/>
     </Action>
     <Action name="paste_frames">
-      <icon/>
+      <icon>paste-keyframes</icon>
       <text>Paste Keyframes</text>
       <whatsThis/>
       <toolTip>Paste frames from clipboard</toolTip>
@@ -2451,7 +2451,7 @@
       <statusTip/>
     </Action>
     <Action name="copy_columns_to_clipboard">
-      <icon/>
+      <icon>copy-columns</icon>
       <text>Copy Columns</text>
       <whatsThis/>
       <toolTip>Copy columns to clipboard</toolTip>
@@ -2463,7 +2463,7 @@
       <statusTip/>
     </Action>
     <Action name="cut_columns_to_clipboard">
-      <icon/>
+      <icon>cut-columns</icon>
       <text>Cut Columns</text>
       <whatsThis/>
       <toolTip>Cut columns to clipboard</toolTip>
@@ -2475,7 +2475,7 @@
       <statusTip/>
     </Action>
     <Action name="paste_columns_from_clipboard">
-      <icon/>
+      <icon>paste-columns</icon>
       <text>Paste Columns</text>
       <whatsThis/>
       <toolTip>Paste columns from clipboard</toolTip>
@@ -2487,7 +2487,7 @@
       <statusTip/>
     </Action>
     <Action name="set_start_time">
-      <icon/>
+      <icon>time-set-start</icon>
       <text>Set Start Time</text>
       <whatsThis/>
       <toolTip/>
@@ -2499,7 +2499,7 @@
       <statusTip/>
     </Action>
     <Action name="set_end_time">
-      <icon/>
+      <icon>time-set-end</icon>
       <text>Set End Time</text>
       <whatsThis/>
       <toolTip/>
@@ -2515,6 +2515,90 @@
       <text>Update Playback Range</text>
       <whatsThis/>
       <toolTip/>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="interpolation_constant">
+      <icon>interpolation_constant</icon>
+      <text>Interpolate Constant</text>
+      <whatsThis/>
+      <toolTip>Hold constant value. No interpolation.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="interpolation_linear">
+      <icon>interpolation_linear</icon>
+      <text>Interpolate Linear</text>
+      <whatsThis/>
+      <toolTip>Linear interpolation.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="interpolation_bezier">
+      <icon>interpolation_bezier</icon>
+      <text>Interpolate Bezier</text>
+      <whatsThis/>
+      <toolTip>Bezier curve interpolation.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="tangents_sharp">
+      <icon>interpolation_sharp</icon>
+      <text>Interpolate Sharp</text>
+      <whatsThis/>
+      <toolTip>Sharp interpolation tangents.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="tangents_smooth">
+      <icon>interpolation_smooth</icon>
+      <text>Interpolate Smooth</text>
+      <whatsThis/>
+      <toolTip>Smooth interpolation tangents.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="zoom_to_fit_range">
+      <icon>zoom-fit</icon>
+      <text>Zoom to Fit Range</text>
+      <whatsThis/>
+      <toolTip>Zoom view to fit channel range.</toolTip>
+      <iconText/>
+      <activationFlags>1</activationFlags>
+      <activationConditions>0</activationConditions>
+      <shortcut/>
+      <isCheckable>false</isCheckable>
+      <statusTip/>
+    </Action>
+    <Action name="zoom_to_fit_curve">
+      <icon>zoom-fit-curve</icon>
+      <text>Zoom to Fit Curve</text>
+      <whatsThis/>
+      <toolTip>Zoom view to fit curve.</toolTip>
       <iconText/>
       <activationFlags>1</activationFlags>
       <activationConditions>0</activationConditions>
@@ -2730,7 +2814,7 @@
       <statusTip/>
     </Action>
     <Action name="isolate_active_layer">
-      <icon>view-filter</icon>
+      <icon>isolate-layer</icon>
       <text>&amp;Isolate Active Layer</text>
       <whatsThis/>
       <toolTip>Isolate Active Layer</toolTip>
@@ -2742,7 +2826,7 @@
       <statusTip/>
     </Action>
     <Action name="isolate_active_group">
-      <icon>view-filter</icon>
+      <icon>isolate-group</icon>
       <text>&amp;Isolate Active Group</text>
       <whatsThis/>
       <toolTip>Isolate Active Group</toolTip>
@@ -2850,7 +2934,7 @@
       <statusTip/>
     </Action>
     <Action name="cut_selection_to_new_layer">
-      <icon/>
+      <icon>cut-to-new-layer</icon>
       <text>&amp;Cut Selection to New Layer</text>
       <whatsThis/>
       <toolTip>Cut Selection to New Layer</toolTip>
@@ -2862,7 +2946,7 @@
       <statusTip/>
     </Action>
     <Action name="copy_selection_to_new_layer">
-      <icon/>
+      <icon>copy-to-new-layer</icon>
       <text>Copy &amp;Selection to New Layer</text>
       <whatsThis/>
       <toolTip>Copy Selection to New Layer</toolTip>
@@ -2874,7 +2958,7 @@
       <statusTip/>
     </Action>
     <Action name="copy_layer_clipboard">
-      <icon/>
+      <icon>copy-layers</icon>
       <text>Copy Layer</text>
       <whatsThis/>
       <toolTip>Copy layer to clipboard</toolTip>
@@ -2886,7 +2970,7 @@
       <statusTip/>
     </Action>
     <Action name="cut_layer_clipboard">
-      <icon/>
+      <icon>cut-layers</icon>
       <text>Cut Layer</text>
       <whatsThis/>
       <toolTip>Cut layer to clipboard</toolTip>
@@ -2898,7 +2982,7 @@
       <statusTip/>
     </Action>
     <Action name="paste_layer_from_clipboard">
-      <icon/>
+      <icon>paste-layers</icon>
       <text>Paste Layer</text>
       <whatsThis/>
       <toolTip>Paste layer from clipboard</toolTip>
@@ -2910,11 +2994,11 @@
       <statusTip/>
     </Action>
     <Action name="create_quick_group">
-      <icon/>
-      <text>Quick Group</text>
+      <icon>quick_group</icon>
+      <text>Group layers</text>
       <whatsThis/>
       <toolTip>Create a group layer containing selected layers</toolTip>
-      <iconText>Quick Group</iconText>
+      <iconText>Group layers</iconText>
       <activationFlags>1000</activationFlags>
       <activationConditions>0</activationConditions>
       <shortcut>Ctrl+G</shortcut>
@@ -2922,11 +3006,11 @@
       <statusTip/>
     </Action>
     <Action name="quick_ungroup">
-      <icon/>
-      <text>Quick Ungroup</text>
+      <icon>quick_ungroup</icon>
+      <text>Ungroup layers</text>
       <whatsThis/>
       <toolTip>Remove grouping of the layers or remove one layer out of the group</toolTip>
-      <iconText>Quick Ungroup</iconText>
+      <iconText>Ungroup layers</iconText>
       <activationFlags>100000</activationFlags>
       <activationConditions>0</activationConditions>
       <shortcut>Ctrl+Alt+G</shortcut>
@@ -2934,7 +3018,7 @@
       <statusTip/>
     </Action>
     <Action name="create_quick_clipping_group">
-      <icon/>
+      <icon>quick_clipping</icon>
       <text>Quick Clipping Group</text>
       <whatsThis/>
       <toolTip>Group selected layers and add a layer with clipped alpha channel</toolTip>
@@ -2946,7 +3030,7 @@
       <statusTip/>
     </Action>
     <Action name="select_all_layers">
-      <icon/>
+      <icon>layers-select-all</icon>
       <text>All Layers</text>
       <whatsThis/>
       <toolTip>Select all layers</toolTip>
@@ -2958,7 +3042,7 @@
       <statusTip/>
     </Action>
     <Action name="select_visible_layers">
-      <icon/>
+      <icon>layers-select-visible</icon>
       <text>Visible Layers</text>
       <whatsThis/>
       <toolTip>Select all visible layers</toolTip>
@@ -2970,7 +3054,7 @@
       <statusTip/>
     </Action>
     <Action name="select_locked_layers">
-      <icon/>
+      <icon>layers-select-locked</icon>
       <text>Locked Layers</text>
       <whatsThis/>
       <toolTip>Select all locked layers</toolTip>
@@ -2982,7 +3066,7 @@
       <statusTip/>
     </Action>
     <Action name="select_invisible_layers">
-      <icon/>
+      <icon>layers-select-invisible</icon>
       <text>Invisible Layers</text>
       <whatsThis/>
       <toolTip>Select all invisible layers</toolTip>
@@ -2994,7 +3078,7 @@
       <statusTip/>
     </Action>
     <Action name="select_unlocked_layers">
-      <icon/>
+      <icon>layers-select-unlocked</icon>
       <text>Unlocked Layers</text>
       <whatsThis/>
       <toolTip>Select all unlocked layers</toolTip>
@@ -3006,7 +3090,7 @@
       <statusTip/>
     </Action>
     <Action name="save_node_as_image">
-      <icon>document-save</icon>
+      <icon>save-layers</icon>
       <text>&amp;Save Layer/Mask...</text>
       <whatsThis/>
       <toolTip>Save Layer/Mask</toolTip>
@@ -3018,7 +3102,7 @@
       <statusTip/>
     </Action>
     <Action name="save_vector_node_to_svg">
-      <icon>document-save</icon>
+      <icon>save-as-vector</icon>
       <text>Save Vector Layer as SVG...</text>
       <whatsThis/>
       <toolTip>Save Vector Layer as SVG</toolTip>
@@ -3030,7 +3114,7 @@
       <statusTip/>
     </Action>
     <Action name="save_groups_as_images">
-      <icon>document-save</icon>
+      <icon>save-group-layers</icon>
       <text>Save &amp;Group Layers...</text>
       <whatsThis/>
       <toolTip>Save Group Layers</toolTip>
@@ -3042,23 +3126,11 @@
       <statusTip/>
     </Action>
     <Action name="convert_group_to_animated">
-      <icon/>
+      <icon>group_to_animated</icon>
       <text>Convert Group to &amp;Animated Layer</text>
       <whatsThis/>
       <toolTip>Converts the child layers of a group into a single layer with multiple frames of animation</toolTip>
       <iconText>Convert child layers into animation frames</iconText>
-      <activationFlags>100000</activationFlags>
-      <activationConditions>0</activationConditions>
-      <shortcut/>
-      <isCheckable>false</isCheckable>
-      <statusTip/>
-    </Action>
-    <Action name="convert_to_animated">
-      <icon/>
-      <text>Convert to &amp;Animated Layer</text>
-      <whatsThis/>
-      <toolTip>Convert layer into animation frames</toolTip>
-      <iconText>Convert layer into animation frames</iconText>
       <activationFlags>100000</activationFlags>
       <activationConditions>0</activationConditions>
       <shortcut/>
@@ -3078,7 +3150,7 @@
       <statusTip/>
     </Action>
     <Action name="import_layer_from_file">
-      <icon/>
+      <icon>import-layer</icon>
       <text>I&amp;mport Layer...</text>
       <whatsThis/>
       <toolTip>Import Layer</toolTip>
@@ -3210,7 +3282,7 @@
       <statusTip/>
     </Action>
     <Action name="split_alpha_save_merged">
-      <icon>document-save</icon>
+      <icon>save-merged</icon>
       <text>&amp;Save Merged...</text>
       <whatsThis/>
       <toolTip>Save Merged</toolTip>
@@ -3638,10 +3710,10 @@
       <statusTip/>
     </Action>
     <Action name="set-copy-from">
-      <icon/>
+      <icon>set-copy-from</icon>
       <text>Set Copy F&amp;rom...</text>
       <whatsThis/>
-      <toolTip>Set the source for the selected clone layer(s).</toolTip>
+      <toolTip>Set the source for the selected clone layers</toolTip>
       <iconText>Set Copy From</iconText>
       <activationFlags>1000</activationFlags>
       <activationConditions>1</activationConditions>

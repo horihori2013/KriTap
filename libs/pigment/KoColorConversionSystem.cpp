@@ -13,6 +13,7 @@
 #include "KoColorConversionAlphaTransformation.h"
 #include "KoColorConversionTransformation.h"
 #include "KoColorProfile.h"
+#include "KoColorProfileQuery.h"
 #include "KoColorSpace.h"
 #include "KoCopyColorConversionTransformation.h"
 #include "KoMultipleColorConversionTransformation.h"
@@ -52,6 +53,26 @@ KoColorConversionSystem::Node* KoColorConversionSystem::insertEngine(const KoCol
     return n;
 }
 
+QList<KoColorProfileQuery> KoColorConversionSystem::requiredConnectionProfilesFor(const KoColorSpaceFactory* csf)
+{
+    QList<KoColorProfileQuery> profileQueries;
+
+    const QList<const KoColorProfile*> existingProfiles = d->registryInterface->profilesFor(csf);
+    Q_FOREACH (const KoColorProfile* profile, existingProfiles) {
+        profileQueries.append(csf->requiredConnectionProfiles(profile));
+    }
+
+    // TODO: make a better 'unique' function without sorting
+    QList<KoColorProfileQuery> uniqueProfileQueries;
+    std::copy_if(profileQueries.begin(),
+                 profileQueries.end(),
+                 std::back_inserter(uniqueProfileQueries),
+                 [&](const KoColorProfileQuery &query) {
+                     return !uniqueProfileQueries.contains(query);
+                 });
+
+    return uniqueProfileQueries;
+}
 
 void KoColorConversionSystem::insertColorSpace(const KoColorSpaceFactory* csf)
 {
@@ -59,6 +80,7 @@ void KoColorConversionSystem::insertColorSpace(const KoColorSpaceFactory* csf)
     const QList<const KoColorProfile*> profiles = d->registryInterface->profilesFor(csf);
     QString modelId = csf->colorModelId().id();
     QString depthId = csf->colorDepthId().id();
+    QList<KoColorConversionTransformationFactory*> cctfs;
     if (profiles.isEmpty()) { // There is no profile for this CS, create a node without profile name if the color engine isn't icc-based
         if (csf->colorSpaceEngine() != "icc") {
             Node* n = nodeFor(modelId, depthId, "default");
@@ -71,6 +93,7 @@ void KoColorConversionSystem::insertColorSpace(const KoColorSpaceFactory* csf)
         // Initialise the nodes
         Q_FOREACH (const KoColorProfile* profile, profiles) {
             Node* n = nodeFor(modelId, depthId, profile->name());
+            cctfs.append(csf->colorConversionLinksFromProfile(profile));
             n->init(csf);
             if (!csf->colorSpaceEngine().isEmpty()) {
                 KoColorSpaceEngine* engine = KoColorSpaceEngineRegistry::instance()->get(csf->colorSpaceEngine());
@@ -91,7 +114,7 @@ void KoColorConversionSystem::insertColorSpace(const KoColorSpaceFactory* csf)
         }
     }
     // Construct a link for "custom" transformation
-    const QList<KoColorConversionTransformationFactory*> cctfs = csf->colorConversionLinks();
+    cctfs.append(csf->colorConversionLinks());
     Q_FOREACH (KoColorConversionTransformationFactory* cctf, cctfs) {
         Node* srcNode = nodeFor(cctf->srcColorModelId(), cctf->srcColorDepthId(), cctf->srcProfile());
         Q_ASSERT(srcNode);
@@ -113,6 +136,27 @@ void KoColorConversionSystem::insertColorSpace(const KoColorSpaceFactory* csf)
     }
 }
 
+QList<KoColorProfileQuery> KoColorConversionSystem::requiredConnectionProfilesFor(const KoColorProfile* profile)
+{
+    QList<KoColorProfileQuery> profileQueries;
+
+    const QList< const KoColorSpaceFactory* >& factories = d->registryInterface->colorSpacesFor(profile);
+    Q_FOREACH (const KoColorSpaceFactory* factory, factories) {
+        profileQueries.append(factory->requiredConnectionProfiles(profile));
+    }
+
+    // TODO: make a better 'unique' function without sorting
+    QList<KoColorProfileQuery> uniqueProfileQueries;
+    std::copy_if(profileQueries.begin(),
+                 profileQueries.end(),
+                 std::back_inserter(uniqueProfileQueries),
+                 [&](const KoColorProfileQuery &query) {
+                     return !uniqueProfileQueries.contains(query);
+                 });
+
+    return uniqueProfileQueries;
+}
+
 void KoColorConversionSystem::insertColorProfile(const KoColorProfile* _profile)
 {
     dbgPigmentCCS << _profile->name();
@@ -132,7 +176,8 @@ void KoColorConversionSystem::insertColorProfile(const KoColorProfile* _profile)
                 connectToEngine(n, engineNode);
             }
         }
-        const QList<KoColorConversionTransformationFactory*> cctfs = factory->colorConversionLinks();
+        QList<KoColorConversionTransformationFactory*> cctfs = factory->colorConversionLinks();
+        cctfs.append(factory->colorConversionLinksFromProfile(_profile));
         Q_FOREACH (KoColorConversionTransformationFactory* cctf, cctfs) {
             Node* srcNode = nodeFor(cctf->srcColorModelId(), cctf->srcColorDepthId(), cctf->srcProfile());
             Q_ASSERT(srcNode);

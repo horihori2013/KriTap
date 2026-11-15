@@ -38,20 +38,29 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
 
 protected Q_SLOTS:
-    void updateToolBoxOrientation(Qt::DockWidgetArea area);
+    void updateToolBoxOrientation(Qt::DockWidgetArea);
     void updateFloating(bool);
 
 private:
-    void setToolBoxOrientation(Qt::Orientation orientation);
+    enum Orientation {
+        Horizontal = Qt::Horizontal,
+        Vertical = Qt::Vertical,
+        Auto = -1,
+    };
+
+    void setToolBoxOrientation(Qt::Orientation);
     void updateLayoutDir();
     void changeLayoutDir(Qt::LayoutDirection);
+    void changeOrientation(Orientation);
+    void changeCompact(bool);
 
 private:
     KoToolBox *m_toolBox;
     KoToolBoxScrollArea *m_scrollArea;
     QMenu *m_contextMenu {nullptr};
     Qt::DockWidgetArea m_dockArea {Qt::NoDockWidgetArea};
-    Qt::LayoutDirection m_layoutDir;
+    Qt::LayoutDirection m_layoutDir {Qt::LayoutDirectionAuto};
+    Orientation m_orientation {Auto};
 };
 
 #endif // _KO_TOOLBOX_DOCKER_H_

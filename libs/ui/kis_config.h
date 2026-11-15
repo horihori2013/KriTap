@@ -25,6 +25,7 @@ class KisSnapConfig;
 class QSettings;
 class KisOcioConfiguration;
 struct KisCumulativeUndoData;
+class QSurfaceFormat;
 
 class KRITAUI_EXPORT KisConfig
 {
@@ -134,8 +135,46 @@ public:
     OutlineStyle eraserOutlineStyle(bool defaultValue = false) const;
     void setEraserOutlineStyle(OutlineStyle style);
 
-    QRect colorPreviewRect() const;
-    void setColorPreviewRect(const QRect &rect);
+    enum class ColorSamplerPreviewStyle {
+        None,
+        Circle,
+        RectangleLeft,
+        RectangleRight,
+        RectangleAbove,
+        Count,
+    };
+
+    ColorSamplerPreviewStyle colorSamplerPreviewStyle(bool defaultValue = false) const;
+    void setColorSamplerPreviewStyle(ColorSamplerPreviewStyle style);
+
+    int colorSamplerPreviewCircleDiameter(bool defaultValue = false) const;
+    void setColorSamplerPreviewCircleDiameter(int style);
+
+    qreal colorSamplerPreviewCircleThickness(bool defaultValue = false) const;
+    void setColorSamplerPreviewCircleThickness(qreal thickness);
+
+    bool colorSamplerPreviewCircleOutlineEnabled(bool defaultValue = false) const;
+    void setColorSamplerPreviewCircleOutlineEnabled(bool enabled);
+
+    bool colorSamplerPreviewCircleExtraCirclesEnabled(bool defaultValue = false) const;
+    void setColorSamplerPreviewCircleExtraCirclesEnabled(bool enabled);
+
+    bool colorSamplerZoomPreviewEnabled(bool defaultValue = false) const;
+    void setColorSamplerZoomPreviewEnabled(bool enabled);
+
+    qreal colorSamplerZoomPreviewScale(bool defaultValue = false) const;
+    void setColorSamplerZoomPreviewScale(qreal scale);
+
+    enum class ColorSamplerPreviewCirclePosition {
+        Center,
+        Top,
+        TopLeft,
+        TopRight,
+        Count,
+    };
+
+    ColorSamplerPreviewCirclePosition colorSamplerPreviewCirclePosition(bool defaultValue = false) const;
+    void setColorSamplerPreviewCirclePosition(ColorSamplerPreviewCirclePosition position);
 
     /**
      * Controls if the canvas should have a separate color managed surface.
@@ -148,10 +187,19 @@ public:
     bool enableCanvasSurfaceColorSpaceManagement(bool defaultValue = false) const;
     void setEnableCanvasSurfaceColorSpaceManagement(bool value);
 
+    /**
+     * \return if a native surface should be used for the canvas
+     *
+     * The function encodes the logic of checking user config and environment
+     * variable for calculating the option for the native canvas surface
+     */
+    bool effectiveShouldUseNativeSurfaceForCanvas(bool osManagedSurfacePresent) const;
+
     enum class CanvasSurfaceMode {
         Preferred = 0,
         Rec709g22,
         Rec709g10,
+        Rec2020pq,
         Unmanaged
     };
 
@@ -163,12 +211,23 @@ public:
     CanvasSurfaceMode canvasSurfaceColorSpaceManagementMode(bool defaultValue = false) const;
     void setCanvasSurfaceColorSpaceManagementMode(CanvasSurfaceMode value);
 
+    enum class CanvasSurfaceBitDepthMode {
+        DepthAuto = 0,
+        Depth8Bit,
+        Depth10Bit
+    };
+
+    static CanvasSurfaceBitDepthMode canvasSurfaceBitDepthMode(QSettings *settings, bool defaultValue = false);
+    static void setCanvasSurfaceBitDepthMode(QSettings *settings, CanvasSurfaceBitDepthMode value);
+
+    CanvasSurfaceBitDepthMode canvasSurfaceBitDepthMode(bool defaultValue = false) const;
+    void setCanvasSurfaceBitDepthMode(CanvasSurfaceBitDepthMode value);
+
+    CanvasSurfaceBitDepthMode effectiveCanvasSurfaceBitDepthMode(const QSurfaceFormat &format) const;
+
     /// get the profile the user has selected for the given screen
     QString monitorProfile(int screen) const;
-    void setMonitorProfile(int screen, const QString & monitorProfile, bool override) const;
-
-    QString monitorForScreen(int screen, const QString &defaultMonitor, bool defaultValue = true) const;
-    void setMonitorForScreen(int screen, const QString& monitor);
+    void setMonitorProfile(int screen, const QString & monitorProfile) const;
 
     /// Get the actual profile to be used for the given screen, which is
     /// either the screen profile set by the color management system or
@@ -238,6 +297,10 @@ public:
 
     bool useOpenGLTextureBuffer(bool defaultValue = false) const;
     void setUseOpenGLTextureBuffer(bool useBuffer);
+
+    static bool preferXcbEglProvider(const QSettings *settings, bool defaultValue = false);
+    bool preferXcbEglProvider(bool defaultValue = false) const;
+    void setPreferXcbEglProvider(bool value);
 
     bool forceOpenGLFenceWorkaround(bool defaultValue = false) const;
 
@@ -333,6 +396,14 @@ public:
     SessionOnStartup sessionOnStartup(bool defaultValue = false) const;
     void setSessionOnStartup(SessionOnStartup value);
 
+    enum IconsInMenu {
+        IIM_Default,
+        IIM_Yes,
+        IIM_No
+    };
+    IconsInMenu iconsInMenu(bool defaultValue = false) const;
+    void setIconsInMenu(IconsInMenu value);
+
     bool saveSessionOnQuit(bool defaultValue) const;
     void setSaveSessionOnQuit(bool value);
 
@@ -378,6 +449,26 @@ public:
 
     bool useRightMiddleTabletButtonWorkaround(bool defaultValue = false) const;
     void setUseRightMiddleTabletButtonWorkaround(bool value);
+
+#ifdef Q_OS_ANDROID
+    bool usePageUpDownMouseButtonEmulationWorkaround(bool defaultValue = false) const;
+    void setUsePageUpDownMouseButtonEmulationWorkaround(bool value);
+
+    bool useHighFunctionKeyMouseButtonEmulationWorkaround(bool defaultValue = false) const;
+    void setUseHighFunctionKeyMouseButtonEmulationWorkaround(bool value);
+
+    bool useIgnoreHistoricTabletEventsWorkaround(bool defaultValue = false) const;
+    void setUseIgnoreHistoricTabletEventsWorkaround(bool value);
+
+    qreal androidScalingLastInitialScale(bool defaultValue = false) const;
+    void setAndroidScalingLastInitialScale(qreal value);
+
+    qreal androidScalingTargetScale(bool defaultValue = false) const;
+    void setAndroidScalingTargetScale(qreal value);
+
+    bool androidScalingAskOnStartup(bool defaultValue = false) const;
+    void setAndroidScalingAskOnStartup(bool value);
+#endif
 
     qreal vastScrolling(bool defaultValue = false) const;
     void setVastScrolling(const qreal factor) const;
@@ -468,9 +559,6 @@ public:
     bool ocioLockColorVisualRepresentation(bool defaultValue = false) const;
     void setOcioLockColorVisualRepresentation(bool value);
 
-    bool useSystemMonitorProfile(bool defaultValue = false) const;
-    void setUseSystemMonitorProfile(bool _useSystemMonitorProfile) const;
-
     QString defaultPalette(bool defaultValue = false) const;
     void setDefaultPalette(const QString& name) const;
 
@@ -503,14 +591,14 @@ public:
     bool hidePopups(bool defaultValue = false) const;
     void setHidePopups(bool hidePopups);
 
-    int numDefaultLayers(bool defaultValue = false) const;
-    void setNumDefaultLayers(int num);
+    int numDefaultLayers(const QLatin1String &dialogType, bool defaultValue = false) const;
+    void setNumDefaultLayers(const QLatin1String &dialogType, int num);
 
-    quint8 defaultBackgroundOpacity(bool defaultValue = false) const;
-    void setDefaultBackgroundOpacity(quint8 value);
+    quint8 defaultBackgroundOpacity(const QLatin1String &dialogType, bool defaultValue = false) const;
+    void setDefaultBackgroundOpacity(const QLatin1String &dialogType, quint8 value);
 
-    QColor defaultBackgroundColor(bool defaultValue = false) const;
-    void setDefaultBackgroundColor(const QColor &value);
+    QColor defaultBackgroundColor(const QLatin1String &dialogType, bool defaultValue = false) const;
+    void setDefaultBackgroundColor(const QLatin1String &dialogType, const QColor &value);
 
     enum BackgroundStyle {
         RASTER_LAYER = 0,
@@ -518,8 +606,8 @@ public:
         FILL_LAYER = 2
     };
 
-    BackgroundStyle defaultBackgroundStyle(bool defaultValue = false) const;
-    void setDefaultBackgroundStyle(BackgroundStyle value);
+    BackgroundStyle defaultBackgroundStyle(const QLatin1String &dialogType, bool defaultValue = false) const;
+    void setDefaultBackgroundStyle(const QLatin1String &dialogType, BackgroundStyle value);
 
     int lineSmoothingType(bool defaultValue = false) const;
     void setLineSmoothingType(int value);
@@ -710,7 +798,38 @@ public:
 
     bool selectionActionBar(bool defaultValue = false) const;
     void setSelectionActionBar(bool value);
-    
+
+    enum SelectionActionsBarBehavior {
+        FreeFloating = 0,
+        Fixed
+    };
+
+    enum SelectionActionsBarPosition {
+        Bottom = 0,
+        BottomLeft,
+        BottomRight,
+        Left,
+        Right,
+        Top,
+        TopLeft,
+        TopRight
+    };
+
+    enum SelectionActionsBarOrientation {
+        Horizontal = 0,
+        Vertical
+    };
+
+    SelectionActionsBarBehavior
+    selectionActionBarBehavior(bool defaultValue = false) const;
+    void setSelectionActionBarBehavior(SelectionActionsBarBehavior value);
+
+    SelectionActionsBarPosition selectionActionBarPosition(bool defaultValue = false) const;
+    void setSelectionActionBarPosition(SelectionActionsBarPosition value);
+
+    SelectionActionsBarOrientation selectionActionBarOrientation(bool defaultValue = false) const;
+    void setSelectionActionBarOrientation(SelectionActionsBarOrientation value);
+
     enum RootSurfaceFormat {
         BT709_G22 = 0,
         BT709_G10,
@@ -760,6 +879,15 @@ public:
     bool longPressEnabled(bool defaultValue = false) const;
     void setLongPressEnabled(bool value);
 
+    /**
+     * The timeout for the layer thumbnail generation after which
+     * the thumbnail algorithm will be switched to an imprecise one.
+     *
+     * Measured in milliseconds.
+     */
+    int layerThumbnailGenerationTimeout(bool defaultValue = false) const;
+    void setLayerThumbnailGenerationTimeout(int value);
+
     template<class T>
     void writeEntry(const QString& name, const T& value) {
         m_cfg.writeEntry(name, value);
@@ -780,10 +908,6 @@ public:
         return m_cfg.readEntry(name, defaultValue);
     }
 
-
-    /// get the profile the color management system has stored for the given screen
-    static const KoColorProfile* getScreenProfile(int screen);
-
 private:
     KisConfig(const KisConfig&);
     KisConfig& operator=(const KisConfig&) const;
@@ -794,5 +918,12 @@ private:
 };
 
 Q_DECLARE_METATYPE(KisConfig::CanvasSurfaceMode)
+Q_DECLARE_METATYPE(KisConfig::CanvasSurfaceBitDepthMode)
 
 #endif // KIS_CONFIG_H_
+
+KRITAUI_EXPORT
+QDebug operator<<(QDebug debug, const KisConfig::CanvasSurfaceMode &mode);
+
+KRITAUI_EXPORT
+QDebug operator<<(QDebug debug, const KisConfig::CanvasSurfaceBitDepthMode &mode);

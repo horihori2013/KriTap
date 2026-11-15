@@ -155,6 +155,7 @@ public:
     }
 
 
+    KisResourceStorage(const QString &location, KisResourceStorage::StorageType storageType);
     KisResourceStorage(const QString &location);
     ~KisResourceStorage();
     KisResourceStorage(const KisResourceStorage &rhs);
@@ -273,6 +274,7 @@ private:
     friend class KisResourceLocator;
     friend class KisResourceCacheDb;
     friend class TestResourceLocator;
+    friend class TestStorageWrapper;
 
     KisStoragePlugin* testingGetStoragePlugin();
 
@@ -292,7 +294,7 @@ inline QDebug operator<<(QDebug dbg, const KisResourceStorageSP storage)
     }
     else {
         dbg.nospace() << "[RESOURCESTORAGE] Name: " << storage->name()
-                      << " Version: " << storage->location()
+                      << " Location: " << storage->location()
                       << " Valid: " << storage->valid()
                       << " Storage: " << KisResourceStorage::storageTypeToString(storage->type())
                       << " Timestamp: " << storage->timestamp()

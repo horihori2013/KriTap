@@ -14,6 +14,7 @@ class QByteArray;
 class QString;
 class KoColorProfile;
 class KoColorSpaceFactory;
+struct KoColorProfileQuery;
 
 /**
  * @brief The KoColorProfileStorage class is a "composite subclass" of
@@ -63,8 +64,17 @@ public:
     /**
      * Create an alias to a profile with a different name. Then @ref profileByName
      * will return the profile @p to when passed @p name as a parameter.
+     *
+     * Aliases are considered 'weak'. If a real profile with the name \p name
+     * is present (or added), it shadows the existing alias. If such an explicit
+     * profile gets removed, then the alias takes its place again.
      */
     void addProfileAlias(const QString& name, const QString& to);
+
+    /**
+     * Remove a profile \p name if exists
+     */
+    void removeProfileAlias(const QString &name);
 
     /**
      * @return the profile alias, or name if not aliased
@@ -110,10 +120,8 @@ public:
      * @param error the margin of error with which the colorants get compared.
      * @return list of available profiles.
      */
-    QList<const KoColorProfile *> profilesFor(const QVector<double>& colorants,
-                                              ColorPrimaries colorantType,
-                                              TransferCharacteristics transferType,
-                                              double error = 0.00001);
+    QList<const KoColorProfile *> profilesFor(const KoColorProfileQuery &query,
+                                              double error = 0.0001);
 
 private:
     struct Private;

@@ -1,9 +1,8 @@
-macos-build:
+.macos-base:
   stage: build
   tags:
     - macOS
   extends:
-    - .ci-manual-job-mixin
     - .ci-artifacts-with-packages-mixin
   variables:
     KDECI_BUILD_TYPE: Release
@@ -13,8 +12,8 @@ macos-build:
     KDECI_PACKAGE_PROJECT: teams/ci-artifacts/krita-macos
     EXTERNALS_DOWNLOAD_DIR: /Users/gitlab/caches/krita-macos/downloads
     KDECI_REPO_METADATA_PATH: $CI_PROJECT_DIR/krita-deps-management/repo-metadata
-    MACOSX_DEPLOYMENT_TARGET: "10.14"
-    QMAKE_MACOSX_DEPLOYMENT_TARGET: "10.14"
+    MACOSX_DEPLOYMENT_TARGET: "12"
+    QMAKE_MACOSX_DEPLOYMENT_TARGET: "12"
     CMAKE_TOOLCHAIN_FILE: $CI_PROJECT_DIR/krita-deps-management/tools/macos-toolchain-krita.cmake
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=OFF
@@ -33,6 +32,7 @@ macos-build:
 
     EFFECTIVE_DEPS_REPO_BRANCH_NAME: $DEPS_REPO_BRANCH_NAME_MACOS
     EFFECTIVE_DEPS_BRANCH_NAME: $DEPS_BRANCH_NAME_MACOS
+    EFFECTIVE_PUBLISH_PLATFORM_NAME: macos-universal-qt5
 
   interruptible: true
   before_script:
@@ -42,6 +42,8 @@ macos-build:
 
     - python3 -m venv venv --upgrade-deps
     - . venv/bin/activate
+    # make sure venv doesn't take precedence over normal PATH search
+    - unset VIRTUAL_ENV
     - pip install -r krita-deps-management/requirements.txt
 
     # framework for signing, notarization and package upload
@@ -59,70 +61,84 @@ macos-build:
     - python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project $CI_PROJECT_NAME --branch $CI_COMMIT_REF_NAME --platform MacOS/Qt5/Shared --skip-publishing 2>&1 | tee build-krita.log
 
     # firstly, build .app bundle and sign it
-    - env BUILDROOT=$CI_PROJECT_DIR ONLY_APP=1 $CI_PROJECT_DIR/packaging/macos/osxdeploy.sh | tee build-app.log
-    # TODO: add a note about absolute paths if they were actually the problem
-    # TODO: temporarily disable macos signing and notarization since it doesn't work
-    #- python3 ci-notary-service/signmacapp.py --config upstream-ci-utilities/signing/signmacapp.ini $CI_PROJECT_DIR/_dmg/*.app 2>&1 | tee app-sign.log
-    #- python3 ci-notary-service/notarizemacapp.py --config upstream-ci-utilities/signing/notarizemacapp.ini $CI_PROJECT_DIR/_dmg/*.app 2>&1 | tee app-notarize.log
-    
+    - python3 -u packaging/macos/macos-deploy.py --install-dir ./_install --output-dir $CI_PROJECT_DIR/_dmg --krita-source ./ | tee build-app.log
+
+    - python3 -u ci-notary-service/signmacapp.py --config upstream-ci-utilities/signing/signmacapp.ini $CI_PROJECT_DIR/_dmg/*.app 2>&1 | tee app-sign.log
+    - python3 -u build-tools/ci-scripts/move-signing-logs.py --prefix app-sign_ --directory _dmg
+    - python3 -u ci-notary-service/notarizemacapp.py --config upstream-ci-utilities/signing/notarizemacapp.ini $CI_PROJECT_DIR/_dmg/*.app 2>&1 | tee app-notarize.log
+    - python3 -u build-tools/ci-scripts/move-signing-logs.py --prefix app-notarize_ --directory _dmg
+
     # secondly, build .dmg image and sign it as well
-    - env BUILDROOT=$CI_PROJECT_DIR ONLY_DMG=1 $CI_PROJECT_DIR/packaging/macos/osxdeploy.sh | tee build-dmg.log
-    # TODO: add a note about absolute paths if they were actually the problem
-    # TODO: temporarily disable macos signing and notarization since it doesn't work
-    #- python3 ci-notary-service/signmacapp.py --config upstream-ci-utilities/signing/signmacapp.ini $CI_PROJECT_DIR/_packaging/*.dmg 2>&1 | tee dmg-sign.log
-    #- python3 ci-notary-service/notarizemacapp.py --config upstream-ci-utilities/signing/notarizemacapp.ini $CI_PROJECT_DIR/_packaging/*.dmg 2>&1 | tee dmg-notarize.log
-    - python3 -u build-tools/ci-scripts/upload-nightly-packages.py --platform macos-universal --folder $CI_PROJECT_DIR/_packaging 2>&1 | tee dmg-publish.log
+    - python3 -u packaging/macos/macos-apptodmg.py $CI_PROJECT_DIR/_dmg/*.app --media-path ./packaging/macos/ 2>&1 | tee build-dmg.log
+
+    - python3 -u ci-notary-service/signmacapp.py --config upstream-ci-utilities/signing/signmacapp.ini $CI_PROJECT_DIR/_packaging/*.dmg 2>&1 | tee dmg-sign.log
+    - python3 -u build-tools/ci-scripts/move-signing-logs.py --prefix dmg-sign_ --directory _packaging
+    - python3 -u ci-notary-service/notarizemacapp.py --config upstream-ci-utilities/signing/notarizemacapp.ini $CI_PROJECT_DIR/_packaging/*.dmg 2>&1 | tee dmg-notarize.log
+    - python3 -u build-tools/ci-scripts/move-signing-logs.py --prefix dmg-notarize_ --directory _packaging
+    - python3 -u build-tools/ci-scripts/upload-nightly-packages.py --platform $EFFECTIVE_PUBLISH_PLATFORM_NAME --folder _packaging 2>&1 | tee dmg-publish.log
+
   after_script:
     # try to fetch signing errors from the task log
     - if [[ -e /tmp/task-debug.log ]]; then mv /tmp/task-debug.log $CI_PROJECT_DIR/; fi
   coverage: '/^TOTAL.*\s+(\d+\%)$/'
 
-macos-build-qt6-nightly:
+.macos-qt6-base:
   extends:
-  - macos-build
-  - .nightly-job-mixin
-  interruptible: false
+  - .macos-base
   variables:
-    # TODO: Gmic still doesn't build for Qt6
-    KRITACI_SKIP_BUILD_3RDPARTY_PLUGINS: True
-    KRITACI_ALLOW_NO_PYQT: True
-    EFFECTIVE_DEPS_REPO_BRANCH_NAME: transition.now/qt6
-    EFFECTIVE_DEPS_BRANCH_NAME: transition.now/qt6
-    MACOSX_DEPLOYMENT_TARGET: "12"
-    QMAKE_MACOSX_DEPLOYMENT_TARGET: "12"
+    EFFECTIVE_DEPS_REPO_BRANCH_NAME: $DEPS_QT6_REPO_BRANCH_NAME_MACOS
+    EFFECTIVE_DEPS_BRANCH_NAME: $DEPS_QT6_BRANCH_NAME_MACOS
+    EFFECTIVE_PUBLISH_PLATFORM_NAME: macos-universal
+    MACOSX_DEPLOYMENT_TARGET: "13"
+    QMAKE_MACOSX_DEPLOYMENT_TARGET: "13"
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=OFF
       -DBUILD_TESTING=ON
       -DBUILD_WITH_QT6=ON
-
-macos-build-qt6-manual:
-  extends:
-  - macos-build-qt6-nightly
-  - .ci-manual-job-mixin
-
-macos-nightly:
-  extends:
-  - macos-build
-  - .nightly-job-mixin
-  - .ci-artifacts-without-packages-mixin
-  interruptible: false
-  variables:
-    # still run the tests, since we don't run them for every commit!
+      -DALLOW_UNSTABLE=QT6
     # TODO: temporarily disable unittests runs on MacOS, since they flood the logs on GitLab
     KDECI_ONLY_BUILD: True
-    KDECI_EXTRA_CMAKE_ARGS: >
-      -DHIDE_SAFE_ASSERTS=OFF
-      -DBUILD_TESTING=ON
-    KRITACI_SKIP_UPLOAD_NIGHTLY_PACKAGE: False
 
-macos-release:
+macos-build-qt5:
   extends:
-  - macos-build
+  - .macos-base
+  - .ci-manual-job-mixin
+
+macos-build-qt6:
+  extends:
+  - .macos-qt6-base
+  - .ci-manual-job-mixin
+
+macos-build-qt5-nightly:
+  extends:
+  - .macos-base
+  - .weekly-job-mixin
+  - .upload-packages-to-cdn-base-mixin
+
+macos-build-qt6-nightly:
+  extends:
+  - .macos-qt6-base
+  - .weekly-job-mixin
+  - .upload-packages-to-cdn-base-mixin
+
+macos-release-qt5:
+  extends:
+  - .macos-base
   - .ci-release-job-mixin
-  interruptible: false
   variables:
     KRITACI_RELEASE_PACKAGE_NAMING: True
-    KDECI_ONLY_BUILD: True
     KDECI_EXTRA_CMAKE_ARGS: >
       -DHIDE_SAFE_ASSERTS=ON
       -DBUILD_TESTING=OFF
+
+macos-release-qt6:
+  extends:
+  - .macos-qt6-base
+  - .ci-release-job-mixin
+  variables:
+    KRITACI_RELEASE_PACKAGE_NAMING: True
+    KDECI_EXTRA_CMAKE_ARGS: >
+      -DHIDE_SAFE_ASSERTS=ON
+      -DBUILD_TESTING=OFF
+      -DBUILD_WITH_QT6=ON
+      -DALLOW_UNSTABLE=QT6

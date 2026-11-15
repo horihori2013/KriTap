@@ -27,7 +27,7 @@ public:
     QVector<KisReferenceImage*> referenceImages() const;
 
     QRectF boundingImageRect() const;
-    QColor getPixel(QPointF position) const;
+    KoColor getPixelForDocPoint(QPointF docPosition) const;
 
     void paintReferences(QPainter &painter);
 

@@ -10,7 +10,7 @@
 #include <QSharedDataPointer>
 
 #include <KoColor.h>
-#include <KoTosContainer.h>
+#include <KoShape.h>
 #include <kis_types.h>
 #include <kritaui_export.h>
 #include <kundo2command.h>
@@ -26,7 +26,7 @@ class KisCanvas2;
 /**
  * @brief The KisReferenceImage class represents a single reference image
  */
-class KRITAUI_EXPORT KisReferenceImage : public KoTosContainer
+class KRITAUI_EXPORT KisReferenceImage : public KoShape
 {
 public:
     struct KRITAUI_EXPORT SetSaturationCommand : public KUndo2Command {
@@ -74,7 +74,10 @@ public:
 
     void paint(QPainter &gc) const override;
 
-    QColor getPixel(QPointF position);
+    KoColor getPixel(QPointF position);
+
+    QPointF documentToPixel(const QPointF &docPoint);
+    QPoint documentToPixelFloored(const QPointF &docPoint);
 
     void saveXml(QDomDocument &document, QDomElement &parentElement, int id);
     bool saveImage(KoStore *store) const;
@@ -83,6 +86,7 @@ public:
     bool loadImage(KoStore *store);
 
     QImage getImage();
+    QImage getCachedImage();
 
 private:
     struct Private;

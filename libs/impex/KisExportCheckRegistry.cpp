@@ -20,6 +20,7 @@
 #include <CompositionsCheck.h>
 #include <ExifCheck.h>
 #include <FillLayerTypeCheck.h>
+#include <HdrMetaDataCheck.h>
 #include <ImageSizeCheck.h>
 #include <IntegralFrameDuration.h>
 #include <LayerOpacityCheck.h>
@@ -28,6 +29,7 @@
 #include <NodeTypeCheck.h>
 #include <PSDLayerStylesCheck.h>
 #include <sRGBProfileCheck.h>
+#include <ShapeLayerTypeCheck.h>
 
 #include <QGlobalStatic>
 
@@ -86,6 +88,9 @@ KisExportCheckRegistry::KisExportCheckRegistry ()
     chkFactory = new LayerOpacityCheckFactory();
     add(chkFactory->id(), chkFactory);
 
+    chkFactory = new HdrMetaDataCheckFactory();
+    add(chkFactory->id(), chkFactory);
+
     QList<KoID> allColorModels = KoColorSpaceRegistry::instance()->colorModelsList(KoColorSpaceRegistry::AllColorSpaces);
     Q_FOREACH(const KoID &colorModelID, allColorModels) {
         QList<KoID> allColorDepths = KoColorSpaceRegistry::instance()->colorDepthList(colorModelID.id(), KoColorSpaceRegistry::AllColorSpaces);
@@ -133,6 +138,24 @@ KisExportCheckRegistry::KisExportCheckRegistry ()
         chkFactory = new FillLayerTypeCheckFactory(generatorId);
         add(chkFactory->id(), chkFactory);
     }
+
+    // Vector shapes
+    chkFactory = new ShapeLayerTypeCheckFactory("KoPathShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoPathShape", "RectangleShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoPathShape", "EllipseShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoPathShape", "StarShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoPathShape", "SpiralShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("ImageShape");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoShapeGroup");
+    add(chkFactory->id(), chkFactory);
+    chkFactory = new ShapeLayerTypeCheckFactory("KoSvgTextShapeID");
+    add(chkFactory->id(), chkFactory);
 }
 
 KisExportCheckRegistry::~KisExportCheckRegistry ()

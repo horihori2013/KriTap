@@ -21,8 +21,6 @@ bool KisTextureOptionData::read(const KisPropertiesConfiguration *setting)
     offsetY = setting->getInt("Texture/Pattern/OffsetY");
     isRandomOffsetX = setting->getBool("Texture/Pattern/isRandomOffsetX");
     isRandomOffsetY = setting->getBool("Texture/Pattern/isRandomOffsetY");
-    maximumOffsetX = setting->getInt("Texture/Pattern/MaximumOffsetX");
-    maximumOffsetY = setting->getInt("Texture/Pattern/MaximumOffsetY");
     texturingMode = static_cast<TexturingMode>(setting->getInt("Texture/Pattern/TexturingMode", MULTIPLY));
     useSoftTexturing = setting->getBool("Texture/Pattern/UseSoftTexturing");
     cutOffPolicy = setting->getInt("Texture/Pattern/CutoffPolicy");
@@ -30,6 +28,11 @@ bool KisTextureOptionData::read(const KisPropertiesConfiguration *setting)
     cutOffRight = setting->getInt("Texture/Pattern/CutoffRight", 255);
     invert = setting->getBool("Texture/Pattern/Invert");
     autoInvertOnErase = setting->getBool("Texture/Pattern/AutoInvertOnErase");
+
+    // TODO: we use a hack here and explicitly do not load MaximumOffsetX/Y
+    // here, since they are updated by the model when a pattern is loaded.
+    // This is a bad design, we should convert these members into a lager's
+    // reader in the model and let the values to be calculated on the fly.
 
     return true;
 }
@@ -53,8 +56,6 @@ void KisTextureOptionData::write(KisPropertiesConfiguration *setting) const
     setting->setProperty("Texture/Pattern/CutoffPolicy", cutOffPolicy);
     setting->setProperty("Texture/Pattern/Invert", invert);
     setting->setProperty("Texture/Pattern/AutoInvertOnErase", autoInvertOnErase);
-    setting->setProperty("Texture/Pattern/MaximumOffsetX", maximumOffsetX);
-    setting->setProperty("Texture/Pattern/MaximumOffsetY", maximumOffsetY);
     setting->setProperty("Texture/Pattern/isRandomOffsetX", isRandomOffsetX);
     setting->setProperty("Texture/Pattern/isRandomOffsetY", isRandomOffsetY);
 }

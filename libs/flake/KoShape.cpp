@@ -10,6 +10,7 @@
 
 #include <limits>
 
+#include "KisMpl.h"
 #include "KoShape.h"
 #include "KoShape_p.h"
 #include "KoShapeContainer.h"
@@ -26,15 +27,12 @@
 #include "KoPatternBackground.h"
 #include "KoShapeManager.h"
 #include "KoShapeUserData.h"
-#include "KoShapeApplicationData.h"
 #include "KoShapeSavingContext.h"
 #include "KoShapeLoadingContext.h"
 #include "KoViewConverter.h"
 #include "KoShapeStroke.h"
-#include "KoShapeShadow.h"
 #include "KoClipPath.h"
 #include "KoPathShape.h"
-#include "KoFilterEffectStack.h"
 #include <KoSnapData.h>
 
 #include <KoXmlWriter.h>
@@ -57,24 +55,14 @@
 KoShape::SharedData::SharedData()
     : QSharedData()
     , size(50, 50)
-    , shadow(0)
-    , filterEffectStack(0)
     , transparency(0.0)
     , zIndex(0)
-    , runThrough(0)
     , visible(true)
     , printable(true)
     , geometryProtected(false)
     , keepAspect(false)
     , selectable(true)
     , protectContent(false)
-    , textRunAroundSide(KoShape::BiggestRunAroundSide)
-    , textRunAroundDistanceLeft(0.0)
-    , textRunAroundDistanceTop(0.0)
-    , textRunAroundDistanceRight(0.0)
-    , textRunAroundDistanceBottom(0.0)
-    , textRunAroundThreshold(0.0)
-    , textRunAroundContour(KoShape::ContourFull)
     , paintOrder(defaultPaintOrder())
     , inheritPaintOrder(true)
 { }
@@ -90,31 +78,20 @@ KoShape::SharedData::SharedData(const SharedData &rhs)
     , fill(rhs.fill)
     , inheritBackground(rhs.inheritBackground)
     , inheritStroke(rhs.inheritStroke)
-    , shadow(0) // WARNING: not implemented in Krita
     , clipPath(rhs.clipPath ? rhs.clipPath->clone() : 0)
     , clipMask(rhs.clipMask ? rhs.clipMask->clone() : 0)
     , additionalAttributes(rhs.additionalAttributes)
     , additionalStyleAttributes(rhs.additionalStyleAttributes)
-    , filterEffectStack(0) // WARNING: not implemented in Krita
     , transparency(rhs.transparency)
     , hyperLink(rhs.hyperLink)
 
     , zIndex(rhs.zIndex)
-    , runThrough(rhs.runThrough)
     , visible(rhs.visible)
     , printable(rhs.visible)
     , geometryProtected(rhs.geometryProtected)
     , keepAspect(rhs.keepAspect)
     , selectable(rhs.selectable)
     , protectContent(rhs.protectContent)
-
-    , textRunAroundSide(rhs.textRunAroundSide)
-    , textRunAroundDistanceLeft(rhs.textRunAroundDistanceLeft)
-    , textRunAroundDistanceTop(rhs.textRunAroundDistanceTop)
-    , textRunAroundDistanceRight(rhs.textRunAroundDistanceRight)
-    , textRunAroundDistanceBottom(rhs.textRunAroundDistanceBottom)
-    , textRunAroundThreshold(rhs.textRunAroundThreshold)
-    , textRunAroundContour(rhs.textRunAroundContour)
 
     , paintOrder(rhs.paintOrder)
     , inheritPaintOrder(rhs.inheritPaintOrder)
@@ -123,10 +100,6 @@ KoShape::SharedData::SharedData(const SharedData &rhs)
 
 KoShape::SharedData::~SharedData()
 {
-    if (shadow && !shadow->deref())
-        delete shadow;
-    if (filterEffectStack && !filterEffectStack->deref())
-        delete filterEffectStack;
 }
 
 void KoShape::shapeChangedPriv(KoShape::ChangeType type)
@@ -321,20 +294,11 @@ bool KoShape::hitTest(const QPointF &position) const
     if (bb.contains(point))
         return true;
 
-    // if there is no shadow we can as well just leave
-    if (! s->shadow)
-        return false;
-
-    // the shadow has an offset to the shape, so we simply
-    // check if the position minus the shadow offset hits the shape
-    point = absoluteTransformation().inverted().map(position - s->shadow->offset());
-
-    return bb.contains(point);
+    return false;
 }
 
 QRectF KoShape::boundingRect() const
 {
-
     QTransform transform = absoluteTransformation();
     QRectF bb = outlineRect();
     if (s->stroke) {
@@ -343,26 +307,13 @@ QRectF KoShape::boundingRect() const
         bb.adjust(-insets.left, -insets.top, insets.right, insets.bottom);
     }
     bb = transform.mapRect(bb);
-    if (s->shadow) {
-        KoInsets insets;
-        s->shadow->insets(insets);
-        bb.adjust(-insets.left, -insets.top, insets.right, insets.bottom);
-    }
-    if (s->filterEffectStack) {
-        QRectF clipRect = s->filterEffectStack->clipRectForBoundingRect(outlineRect());
-        bb |= transform.mapRect(clipRect);
-    }
-
     return bb;
 }
 
 QRectF KoShape::boundingRect(const QList<KoShape *> &shapes)
 {
-    QRectF boundingRect;
-    Q_FOREACH (KoShape *shape, shapes) {
-        boundingRect |= shape->boundingRect();
-    }
-    return boundingRect;
+    return std::accumulate(shapes.begin(), shapes.end(), QRectF(),
+                           kismpl::mem_bit_or(&KoShape::boundingRect));
 }
 
 QRectF KoShape::absoluteOutlineRect() const
@@ -372,11 +323,8 @@ QRectF KoShape::absoluteOutlineRect() const
 
 QRectF KoShape::absoluteOutlineRect(const QList<KoShape *> &shapes)
 {
-    QRectF absoluteOutlineRect;
-    Q_FOREACH (KoShape *shape, shapes) {
-        absoluteOutlineRect |= shape->absoluteOutlineRect();
-    }
-    return absoluteOutlineRect;
+    return std::accumulate(shapes.begin(), shapes.end(), QRectF(),
+                           kismpl::mem_bit_or(&KoShape::absoluteOutlineRect));
 }
 
 QTransform KoShape::absoluteTransformation() const
@@ -409,16 +357,22 @@ void KoShape::applyAbsoluteTransformation(const QTransform &matrix)
 
 void KoShape::applyTransformation(const QTransform &matrix)
 {
-    s->localMatrix = matrix * s->localMatrix;
-    notifyChanged();
-    shapeChangedPriv(GenericMatrixChange);
+    const QTransform newLocalMatrix = matrix * s->localMatrix;
+
+    if (s->localMatrix != newLocalMatrix) {
+        s->localMatrix = newLocalMatrix;
+        notifyChanged();
+        shapeChangedPriv(GenericMatrixChange);
+    }
 }
 
 void KoShape::setTransformation(const QTransform &matrix)
 {
-    s->localMatrix = matrix;
-    notifyChanged();
-    shapeChangedPriv(GenericMatrixChange);
+    if (s->localMatrix != matrix) {
+        s->localMatrix = matrix;
+        notifyChanged();
+        shapeChangedPriv(GenericMatrixChange);
+    }
 }
 
 QTransform KoShape::transformation() const
@@ -453,39 +407,9 @@ bool KoShape::compareShapeZIndex(KoShape *s1, KoShape *s2)
      */
     if (s1 == s2) return false;
 
-
-    // First sort according to runThrough which is sort of a master level
     KoShape *parentShapeS1 = s1->parent();
     KoShape *parentShapeS2 = s2->parent();
-    int runThrough1 = s1->runThrough();
-    int runThrough2 = s2->runThrough();
-    while (parentShapeS1) {
-        if (parentShapeS1->childZOrderPolicy() == KoShape::ChildZParentChild) {
-            runThrough1 = parentShapeS1->runThrough();
-        } else {
-            runThrough1 = runThrough1 + parentShapeS1->runThrough();
-        }
-        parentShapeS1 = parentShapeS1->parent();
-    }
 
-    while (parentShapeS2) {
-        if (parentShapeS2->childZOrderPolicy() == KoShape::ChildZParentChild) {
-            runThrough2 = parentShapeS2->runThrough();
-        } else {
-            runThrough2 = runThrough2 + parentShapeS2->runThrough();
-        }
-        parentShapeS2 = parentShapeS2->parent();
-    }
-
-    if (runThrough1 > runThrough2) {
-        return false;
-    }
-    if (runThrough1 < runThrough2) {
-        return true;
-    }
-
-    // If on the same runThrough level then the zIndex is all that matters.
-    //
     // We basically walk up through the parents until we find a common base parent
     // To do that we need two loops where the inner loop walks up through the parents
     // of s2 every time we step up one parent level on s1
@@ -639,15 +563,6 @@ QRectF KoShape::outlineRect() const
     const QSizeF s = size();
     return QRectF(QPointF(0, 0), QSizeF(qMax(s.width(),  qreal(0.0001)),
                                         qMax(s.height(), qreal(0.0001))));
-}
-
-QPainterPath KoShape::shadowOutline() const
-{
-    if (background()) {
-        return outline();
-    }
-
-    return QPainterPath();
 }
 
 QPointF KoShape::absolutePosition(KoFlake::AnchorPosition anchor) const
@@ -828,93 +743,6 @@ QPointF KoShape::position() const
     return s->localMatrix.map(center) - center;
 }
 
-KoShape::TextRunAroundSide KoShape::textRunAroundSide() const
-{
-    return s->textRunAroundSide;
-}
-
-void KoShape::setTextRunAroundSide(TextRunAroundSide side, RunThroughLevel runThrough)
-{
-
-    if (side == RunThrough) {
-        if (runThrough == Background) {
-            setRunThrough(-1);
-        } else {
-            setRunThrough(1);
-        }
-    } else {
-        setRunThrough(0);
-    }
-
-    if ( s->textRunAroundSide == side) {
-        return;
-    }
-
-    s->textRunAroundSide = side;
-    notifyChanged();
-    shapeChangedPriv(TextRunAroundChanged);
-}
-
-qreal KoShape::textRunAroundDistanceTop() const
-{
-    return s->textRunAroundDistanceTop;
-}
-
-void KoShape::setTextRunAroundDistanceTop(qreal distance)
-{
-    s->textRunAroundDistanceTop = distance;
-}
-
-qreal KoShape::textRunAroundDistanceLeft() const
-{
-    return s->textRunAroundDistanceLeft;
-}
-
-void KoShape::setTextRunAroundDistanceLeft(qreal distance)
-{
-    s->textRunAroundDistanceLeft = distance;
-}
-
-qreal KoShape::textRunAroundDistanceRight() const
-{
-    return s->textRunAroundDistanceRight;
-}
-
-void KoShape::setTextRunAroundDistanceRight(qreal distance)
-{
-    s->textRunAroundDistanceRight = distance;
-}
-
-qreal KoShape::textRunAroundDistanceBottom() const
-{
-    return s->textRunAroundDistanceBottom;
-}
-
-void KoShape::setTextRunAroundDistanceBottom(qreal distance)
-{
-    s->textRunAroundDistanceBottom = distance;
-}
-
-qreal KoShape::textRunAroundThreshold() const
-{
-    return s->textRunAroundThreshold;
-}
-
-void KoShape::setTextRunAroundThreshold(qreal threshold)
-{
-    s->textRunAroundThreshold = threshold;
-}
-
-KoShape::TextRunAroundContour KoShape::textRunAroundContour() const
-{
-    return s->textRunAroundContour;
-}
-
-void KoShape::setTextRunAroundContour(KoShape::TextRunAroundContour contour)
-{
-    s->textRunAroundContour = contour;
-}
-
 void KoShape::setBackground(QSharedPointer<KoShapeBackground> fill)
 {
     s->inheritBackground = false;
@@ -957,16 +785,6 @@ void KoShape::setZIndex(qint16 zIndex)
         return;
     s->zIndex = zIndex;
     notifyChanged();
-}
-
-int KoShape::runThrough() const
-{
-    return s->runThrough;
-}
-
-void KoShape::setRunThrough(short int runThrough)
-{
-    s->runThrough = runThrough;
 }
 
 void KoShape::setVisible(bool on)
@@ -1018,7 +836,10 @@ bool KoShape::isSelectable() const
 
 void KoShape::setGeometryProtected(bool on)
 {
+    if (on != s->geometryProtected) return;
+
     s->geometryProtected = on;
+    shapeChangedPriv(GeometryProtectedChanged);
 }
 
 bool KoShape::isGeometryProtected() const
@@ -1098,24 +919,6 @@ void KoShape::setInheritStroke(bool value)
 bool KoShape::inheritStroke() const
 {
     return s->inheritStroke;
-}
-
-void KoShape::setShadow(KoShapeShadow *shadow)
-{
-    if (s->shadow)
-        s->shadow->deref();
-    s->shadow = shadow;
-    if (s->shadow) {
-        s->shadow->ref();
-        // TODO update changed area
-    }
-    shapeChangedPriv(ShadowChanged);
-    notifyChanged();
-}
-
-KoShapeShadow *KoShape::shadow() const
-{
-    return s->shadow;
 }
 
 void KoShape::setClipPath(KoClipPath *clipPath)
@@ -1227,17 +1030,18 @@ bool KoShape::addDependee(KoShape *shape)
     if (shape->hasDependee(this))
         return false;
 
-    if (! d->dependees.contains(shape))
+    if (! d->dependees.contains(shape)) {
         d->dependees.append(shape);
+        shape->addShapeChangeListener(&d->dependeesLifetimeListener);
+    }
 
     return true;
 }
 
 void KoShape::removeDependee(KoShape *shape)
 {
-    int index = d->dependees.indexOf(shape);
-    if (index >= 0)
-        d->dependees.removeAt(index);
+    d->dependees.removeOne(shape);
+    shape->removeShapeChangeListener(&d->dependeesLifetimeListener);
 }
 
 bool KoShape::hasDependee(KoShape *shape) const
@@ -1254,6 +1058,13 @@ void KoShape::shapeChanged(ChangeType type, KoShape *shape)
 {
     Q_UNUSED(type);
     Q_UNUSED(shape);
+
+    /**
+     * NOTE: we don't need to handle Deleted type for the shapes
+     * in d->dependees list here, becasue this function is called
+     * on the other side of the relation, i.e. in the actual
+     * "dependee". We handle that in Private::DependeesLifetimeListener.
+     */
 }
 
 KoSnapData KoShape::snapData() const
@@ -1289,22 +1100,6 @@ void KoShape::setAdditionalStyleAttribute(const char *name, const QString &value
 void KoShape::removeAdditionalStyleAttribute(const char *name)
 {
     s->additionalStyleAttributes.remove(name);
-}
-
-KoFilterEffectStack *KoShape::filterEffectStack() const
-{
-    return s->filterEffectStack;
-}
-
-void KoShape::setFilterEffectStack(KoFilterEffectStack *filterEffectStack)
-{
-    if (s->filterEffectStack)
-        s->filterEffectStack->deref();
-    s->filterEffectStack = filterEffectStack;
-    if (s->filterEffectStack) {
-        s->filterEffectStack->ref();
-    }
-    notifyChanged();
 }
 
 QSet<KoShape*> KoShape::toolDelegates() const

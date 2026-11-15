@@ -12,6 +12,7 @@
 #include <KoColorDisplayRendererInterface.h>
 #include <KoColorConversionTransformation.h>
 
+#include "KisHandleStyle.h"
 #include "kis_types.h"
 #include "canvas/kis_display_filter.h"
 
@@ -19,7 +20,10 @@ class KoColor;
 class KoColorProfile;
 class KoCanvasResourceProvider;
 class KisDisplayConfig;
+class KisMultiSurfaceDisplayConfig;
 class KoID;
+class QPalette;
+class QProgressDialog;
 
 /**
  * Special helper class that provides primitives for converting colors when
@@ -39,7 +43,7 @@ class KRITAUI_EXPORT KisDisplayColorConverter : public QObject
 
 public:
     KisDisplayColorConverter();
-    KisDisplayColorConverter(KoCanvasResourceProvider *resourceManager, QObject *parent);
+    KisDisplayColorConverter(KoCanvasResourceProvider *resourceManager, QObject *parent, bool reactOnThemeChange = true);
     ~KisDisplayColorConverter() override;
 
     void setImage(KisImageSP image);
@@ -51,7 +55,7 @@ public:
 
     const KoColorSpace* paintingColorSpace() const;
     const KoColorSpace* nodeColorSpace() const;
-    void setDisplayConfig(const KisDisplayConfig &config);
+    void setMultiSurfaceDisplayConfig(const KisMultiSurfaceDisplayConfig &config);
     void setDisplayFilter(QSharedPointer<KisDisplayFilter> displayFilter);
 
     QColor toQColor(const KoColor &c, bool proofToPaintColors = false) const;
@@ -59,7 +63,52 @@ public:
 
     bool canSkipDisplayConversion(const KoColorSpace *cs) const;
     KoColor applyDisplayFiltering(const KoColor &srcColor, const KoID &bitDepthId) const;
-    void applyDisplayFilteringF32(KisFixedPaintDeviceSP device, const KoID &bitDepthId) const;
+
+    /**
+     * Apply display filtering and convert \p device into \p dstColorSpace on exiting
+     * the function. The conversion can actually change the bit-depth of the device if
+     * necessary
+     */
+    void applyDisplayFilteringF32(KisFixedPaintDeviceSP device, const KoColorSpace *dstColorSpace) const;
+
+    /**
+     * @brief applyDisplayFilteringF32
+     * Same as applyDisplayFilteringF32, but then for a regular kispaintdevice.
+     */
+    void applyDisplayFilteringF32(KisPaintDeviceSP device, const KoColorSpace *dstColorSpace, QProgressDialog *progress = nullptr) const;
+
+    /**
+     * @brief convertColorToDisplayColorSpace
+     * This applies displayfiltering to the given KoColor, and then funnels the resulting
+     * data into a QColor for display. This function is used to draw canvas decorations into
+     * the canvas colorspace, as required for proper HDR and wide gamut support.
+     * @param color the KoColor to convert.
+     * @param applyOcio whether to also apply OCIO. This is only really relevant for color pickers.
+     * @return a QColor in the display color space.
+     */
+    QColor convertColorToDisplayColorSpace(const KoColor color, bool applyOcio = false) const;
+
+    /**
+     * @brief convertImageToDisplayColorSpace
+     * Same as convertColorToDisplayColorSpace, but then for a KisPaintDevice.
+     * @param srcDevice -- src device to process.
+     * @param source -- source rect.
+     * @param applyOcio -- whether to also apply OCIO. Only useful for previews and not UI elements.
+     * @return a QImage in the display color space.
+     */
+    QImage convertImageToDisplayColorSpace(KisPaintDeviceSP srcDevice, QRect source = QRect(), bool applyOcio = false) const;
+
+    /**
+     * @brief handlePaletteForDisplayColorSpace
+     * @return KisHandlePalette suitable to draw canvas decorations with.
+     */
+    KisHandlePalette handlePaletteForDisplayColorSpace() const;
+
+    /**
+     * @brief systemPaletteForDisplayColorSpace
+     * @return QPalette suitable to draw canvas decorations with.
+     */
+    QPalette systemPaletteForDisplayColorSpace() const;
 
 
     /**
@@ -86,10 +135,11 @@ public:
     KisDisplayConfig displayConfig() const;
 
     QSharedPointer<KisDisplayFilter> displayFilter() const;
-    KisDisplayConfig openGLCanvasSurfaceDisplayConfig() const;
-    bool isHDRMode() const;
+    KisMultiSurfaceDisplayConfig multiSurfaceDisplayConfig() const;
 
-    void notifyOpenGLCanvasIsActive(bool value);
+    using ConversionOptions = std::pair<KoColorConversionTransformation::Intent, KoColorConversionTransformation::ConversionFlags>;
+    ConversionOptions conversionOptions() const;
+
 
 Q_SIGNALS:
     void displayConfigurationChanged();
@@ -104,6 +154,7 @@ private:
     Q_PRIVATE_SLOT(m_d, void slotCanvasResourceChanged(int key, const QVariant &v));
     Q_PRIVATE_SLOT(m_d, void selectPaintingColorSpace());
     Q_PRIVATE_SLOT(m_d, void slotUpdateCurrentNodeColorSpace());
+    Q_SLOT void updatePalettes();
 
 private:
     struct Private;

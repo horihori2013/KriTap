@@ -10,12 +10,14 @@ KisFontFamilyValidator::KisFontFamilyValidator(QObject *parent)
 {}
 
 KisFontFamilyValidator::KisFontFamilyValidator(const QStringList &families, QObject *parent)
-    : m_families(families)
-    , QValidator(parent)
+    : QValidator(parent)
+    , m_families(families)
 {}
 
 QValidator::State KisFontFamilyValidator::validate(QString &input, int &pos) const
 {
+    Q_UNUSED(pos);
+
     for (const QString &family : m_families) {
         if (input == family) {
             return State::Acceptable;

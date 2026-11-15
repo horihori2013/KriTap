@@ -15,6 +15,8 @@
 #include <QList>
 #include <QTransform>
 
+#include <memory>
+
 class KoToolBase;
 class KoShape;
 class KoShapeResizeCommand;
@@ -37,7 +39,7 @@ public:
     void handleMouseMove(const QPointF &mouseLocation, Qt::KeyboardModifiers modifiers) override;
     KUndo2Command *createCommand() override;
     void finishInteraction(Qt::KeyboardModifiers modifiers) override;
-    void paint(QPainter &painter, const KoViewConverter &converter) override;
+    void paint(QPainter &painter, const KoViewConverter &converter, const KoColorDisplayRendererInterface *displayRendererInterface) override;
 private:
     void resizeBy(const QPointF &stillPoint, qreal zoomX, qreal zoomY);
 
@@ -54,7 +56,7 @@ private:
 
     QPointF m_globalStillPoint;
     QPointF m_globalCenterPoint;
-    QScopedPointer<KoShapeResizeCommand> m_executedCommand;
+    std::unique_ptr<KoShapeResizeCommand> m_executedCommand;
 
     bool m_forceUniformScalingMode {false};
 };

@@ -17,6 +17,7 @@
 #include <kis_icon.h>
 #include <ksharedconfig.h>
 #include <KisKineticScroller.h>
+#include <KoConfig.h>
 
 #include <QtDebug>
 #include <QContextMenuEvent>
@@ -33,6 +34,9 @@
 
 #include "kis_node_view_color_scheme.h"
 
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+#define QT6_SHIFT_SELECTION_WORKAROUND
+#endif
 
 #ifdef HAVE_X11
 #define DRAG_WHILE_DRAG_WORKAROUND
@@ -55,6 +59,9 @@ public:
 #ifdef DRAG_WHILE_DRAG_WORKAROUND
         , isDragging(false)
 #endif
+#ifdef QT6_SHIFT_SELECTION_WORKAROUND
+        , shiftClickFix(false)
+#endif
     {
     }
     NodeDelegate delegate;
@@ -64,6 +71,10 @@ public:
 #ifdef DRAG_WHILE_DRAG_WORKAROUND
     bool isDragging;
 #endif
+#ifdef QT6_SHIFT_SELECTION_WORKAROUND
+    bool shiftClickFix;
+#endif
+    bool ignoreDataChanged = false;
 };
 
 
@@ -148,59 +159,38 @@ void NodeView::toggleSolo(const QModelIndex &index) {
     d->delegate.toggleSolo(index);
 }
 
-QItemSelectionModel::SelectionFlags NodeView::selectionCommand(const QModelIndex &index,
-                                                                  const QEvent *event) const
-{
-    /**
-     * Qt has a bug: when we Ctrl+click on an item, the item's
-     * selections gets toggled on mouse *press*, whereas usually it is
-     * done on mouse *release*.  Therefore the user cannot do a
-     * Ctrl+D&D with the default configuration. This code fixes the
-     * problem by manually returning QItemSelectionModel::NoUpdate
-     * flag when the user clicks on an item and returning
-     * QItemSelectionModel::Toggle on release.
-     */
+QItemSelectionModel::SelectionFlags  NodeView::selectionCommand(const QModelIndex &index, const QEvent *event) const {
+    //When adding a layer with Shift or Ctrl is held, the selection will expand to add that new layer,
+    //So to avoid that we explicitly select the new layer.
+    if (!event && QApplication::keyboardModifiers() != Qt::NoModifier
+#ifdef QT6_SHIFT_SELECTION_WORKAROUND
+        && !d->shiftClickFix
+#endif
+    ) {
+#ifdef QT6_SHIFT_SELECTION_WORKAROUND
+        d->shiftClickFix = false;
+#endif
+        return QItemSelectionModel::ClearAndSelect;
+    }
 
+#ifdef QT6_SHIFT_SELECTION_WORKAROUND
+    //Clear this just in case
+    d->shiftClickFix = false;
+
+    //Qt6 has a bug/feature? where after you do a shift selection it sends a second selection event with the event argument being null
+    //This triggers the logic above, so we explicitly avoid the next null event
     if (event &&
-        (event->type() == QEvent::MouseButtonPress ||
-         event->type() == QEvent::MouseButtonRelease) &&
-        index.isValid()) {
+        (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::KeyPress) &&
+        QApplication::keyboardModifiers() & Qt::ShiftModifier)
+      d->shiftClickFix = true;
+#endif
 
-        const QMouseEvent *mevent = static_cast<const QMouseEvent*>(event);
+    //We still get ctrl click events so we need to ignore those
+    if (event &&
+        event->type() == QEvent::MouseButtonPress && (static_cast<const QMouseEvent*>(event)->modifiers() & Qt::ControlModifier))
+        return QItemSelectionModel::NoUpdate;
 
-        if (mevent->button() == Qt::RightButton &&
-            selectionModel()->selectedIndexes().contains(index)) {
-
-            // Allow calling context menu for multiple layers
-            return QItemSelectionModel::NoUpdate;
-        }
-
-        if (event->type() == QEvent::MouseButtonPress &&
-            (mevent->modifiers() & Qt::ControlModifier)) {
-
-            return QItemSelectionModel::NoUpdate;
-        }
-
-        if (event->type() == QEvent::MouseButtonRelease &&
-            (mevent->modifiers() & Qt::ControlModifier)) {
-
-            // Select the entire row, otherwise we only get updates for DEFAULT_COL and then we have to
-            // manually sync its state with SELECTED_COL.
-            return QItemSelectionModel::Toggle | QItemSelectionModel::Rows;
-        }
-    }
-
-    /**
-     * Qt 5.6 has a bug: it reads global modifiers, not the ones
-     * passed from event.  So if you paste an item using Ctrl+V it'll
-     * select multiple layers for you
-     */
-    Qt::KeyboardModifiers globalModifiers = QApplication::keyboardModifiers();
-    if (!event && globalModifiers != Qt::NoModifier) {
-        return QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows;
-    }
-
-    return QAbstractItemView::selectionCommand(index, event);
+    return QTreeView::selectionCommand(index, event);
 }
 
 QModelIndex NodeView::indexAt(const QPoint &point) const
@@ -232,6 +222,21 @@ bool NodeView::viewportEvent(QEvent *e)
             }
             QModelIndex index = model()->buddy(indexAt(pos));
             if (d->delegate.editorEvent(e, model(), optionForIndex(index), index)) {
+                return true;
+            }
+        } break;
+        case QEvent::MouseButtonRelease: {
+            const QPoint pos = static_cast<QMouseEvent*>(e)->pos();
+            QModelIndex index = model()->buddy(indexAt(pos));
+            if (!indexAt(pos).isValid()) {
+                return QTreeView::viewportEvent(e);
+            }
+            if (d->delegate.editorEvent(e, model(), optionForIndex(index), index)) {
+                //Sometimes 2 items become active, to prevent that we explicitly turn off all but the first active item
+                std::optional<QModelIndex> active_ind = getActiveItem();
+                if (active_ind.has_value()) {
+                    setExclusiveActiveItem(active_ind.value());
+                }
                 return true;
             }
         } break;
@@ -285,6 +290,7 @@ bool NodeView::viewportEvent(QEvent *e)
         default: break;
         }
     }
+
     return QTreeView::viewportEvent(e);
 }
 
@@ -315,6 +321,11 @@ void NodeView::currentChanged(const QModelIndex &current, const QModelIndex &pre
 void NodeView::dataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &/*roles*/)
 {
     QTreeView::dataChanged(topLeft, bottomRight);
+
+    if (d->ignoreDataChanged){
+      d->ignoreDataChanged = false;
+      return;
+    }
 
     for (int x = topLeft.row(); x <= bottomRight.row(); ++x) {
         for (int y = topLeft.column(); y <= bottomRight.column(); ++y) {
@@ -510,6 +521,20 @@ void NodeView::dragLeaveEvent(QDragLeaveEvent *e)
     DRAG_WHILE_DRAG_WORKAROUND_STOP();
 }
 
+void NodeView::mousePressEvent(QMouseEvent *e) {
+    if (!(e->modifiers() & Qt::ControlModifier)) {
+        QTreeView::mousePressEvent(e);
+        return;
+    }
+
+    std::optional<QModelIndex> ind = getActiveItem();
+    QTreeView::mousePressEvent(e);
+
+    if (ind.has_value()) {
+        setExclusiveActiveItem(ind.value());
+    }
+}
+
 bool NodeView::isDragging() const
 {
     return m_draggingFlag;
@@ -548,4 +573,46 @@ void NodeView::updateSelectedCheckboxColumn()
                             size().width()
                                 + (cfg.useLayerSelectionCheckbox() ? header()->sectionSize(SELECTED_COL)
                                                                    : -header()->sectionSize(SELECTED_COL)));
+}
+
+std::optional<QModelIndex> NodeView::getActiveItem()
+{
+    QAbstractItemModel* mdl = model(); 
+
+    int rows = mdl->rowCount();
+    int clmns = mdl->columnCount();
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < clmns; j++) {
+           auto index = mdl->index(i, j);
+           if (mdl->data(index, KisNodeModel::ActiveRole).toBool()){
+              return index;
+           }
+        }
+    }
+
+    return {};
+}
+
+void NodeView::setExclusiveActiveItem(QModelIndex index)
+{
+    QAbstractItemModel* mdl = model(); 
+
+    int rows = mdl->rowCount();
+    int clmns = mdl->columnCount();
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < clmns; j++) {
+           QModelIndex ind = mdl->index(i, j);
+           
+           //Suppress the data changed event, so that it doesn't mess with the selection
+           d->ignoreDataChanged = true;
+           mdl->setData(ind, false, KisNodeModel::ActiveRole);
+        }
+    }
+
+    d->ignoreDataChanged = true;
+    mdl->setData(index, true, KisNodeModel::ActiveRole);
+
+    selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
 }

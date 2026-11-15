@@ -157,22 +157,22 @@ KoSvgTextProperties adjustPropertiesForFontSizeWorkaround(const KoSvgTextPropert
 
 }
 
-const QString TEXT_STYLE_TYPE = "krita:style-type";
-const QString TEXT_STYLE_RES = "krita:style-resolution";
+const QLatin1String TEXT_STYLE_TYPE("krita:style-type");
+const QLatin1String TEXT_STYLE_RES("krita:style-resolution");
 
 bool KoSvgTextContentElement::loadSvg(const QDomElement &e, SvgLoadingContext &context, bool rootNode)
 {
     SvgGraphicsContext *gc = context.currentGC();
     KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(gc, false);
 
-    KoSvgTextProperties props = rootNode? context.resolvedProperties(): gc->textProperties;
+    KoSvgTextProperties props = rootNode? context.resolvedProperties(true): gc->textProperties;
 
 
     QVector<KoSvgTextProperties::PropertyId> generic = {KoSvgTextProperties::FillId,
                                                         KoSvgTextProperties::StrokeId,
                                                         KoSvgTextProperties::PaintOrder,
                                                         KoSvgTextProperties::Opacity,
-                                                        KoSvgTextProperties::Visiblity};
+                                                        KoSvgTextProperties::Visibility};
     for (int i = 0; i < generic.size(); i++) {
         auto id = generic[i];
         if (properties.hasProperty(id)) {
@@ -232,11 +232,11 @@ bool KoSvgTextContentElement::loadSvg(const QDomElement &e, SvgLoadingContext &c
         }
     }
 
-    if (e.hasAttribute(TEXT_STYLE_TYPE.toLatin1().data())) {
-        properties.setProperty(KoSvgTextProperties::KraTextStyleType, e.attribute(TEXT_STYLE_TYPE.toLatin1().data()));
-        if (e.hasAttribute(TEXT_STYLE_RES.toLatin1().data())) {
-            QString resolution = e.attribute(TEXT_STYLE_RES.toLatin1().data()).toLower();
-            if (resolution.endsWith("dpi")) {
+    if (e.hasAttribute(TEXT_STYLE_TYPE)) {
+        properties.setProperty(KoSvgTextProperties::KraTextStyleType, e.attribute(TEXT_STYLE_TYPE));
+        if (e.hasAttribute(TEXT_STYLE_RES)) {
+            QString resolution = e.attribute(TEXT_STYLE_RES);
+            if (resolution.endsWith("dpi", Qt::CaseInsensitive)) {
                 resolution.chop(3);
             }
             properties.setProperty(KoSvgTextProperties::KraTextStyleResolution, KisDomUtils::toInt(resolution));
@@ -268,13 +268,14 @@ bool KoSvgTextContentElement::loadSvgTextNode(const QDomText &text, SvgLoadingCo
 bool KoSvgTextContentElement::saveSvg(SvgSavingContext &context,
                                       bool rootText,
                                       bool saveText,
-                                      QMap<QString, QString> shapeSpecificAttributes)
+                                      QMap<QString, QString> shapeSpecificAttributes,
+                                      KoShape *textPath)
 {
     if (textPath) {
         if (textPath) {
             // we'll always save as an embedded shape as "path" is an svg 2.0
             // feature.
-            QString id = SvgStyleWriter::embedShape(textPath.data(), context);
+            QString id = textPath->isVisible(false) && !context.strippedTextMode()? context.getID(textPath): SvgStyleWriter::embedShape(textPath, context);
             // inkscape can only read 'xlink:href'
             if (!id.isEmpty()) {
                 context.shapeWriter().addAttribute("xlink:href", "#" + id);
@@ -366,9 +367,9 @@ bool KoSvgTextContentElement::saveSvg(SvgSavingContext &context,
     }
 
     if (properties.hasProperty(KoSvgTextProperties::KraTextStyleType)) {
-        context.shapeWriter().addAttribute(TEXT_STYLE_TYPE.toLatin1().data(), properties.property(KoSvgTextProperties::KraTextStyleType).toString());
+        context.shapeWriter().addAttribute(TEXT_STYLE_TYPE.data(), properties.property(KoSvgTextProperties::KraTextStyleType).toString());
         if (properties.hasProperty(KoSvgTextProperties::KraTextStyleResolution)) {
-            context.shapeWriter().addAttribute(TEXT_STYLE_RES.toLatin1().data(), QString::number(properties.property(KoSvgTextProperties::KraTextStyleResolution).toInt())+"dpi");
+            context.shapeWriter().addAttribute(TEXT_STYLE_RES.data(), QString::number(properties.property(KoSvgTextProperties::KraTextStyleResolution).toInt())+"dpi");
         }
     }
 

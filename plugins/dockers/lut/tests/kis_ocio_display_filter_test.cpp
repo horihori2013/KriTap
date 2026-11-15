@@ -20,11 +20,7 @@
 #include <kis_canvas_resource_provider.h>
 
 #include <config-ocio.h>
-#ifdef HAVE_OCIO_V2
 #include <ocio_display_filter_vfx2021.h>
-#else
-#include <ocio_display_filter_vfx2020.h>
-#endif
 
 void KisOcioDisplayFilterTest::test()
 {
@@ -76,7 +72,7 @@ void KisOcioDisplayFilterTest::test()
             utils::createResourceManager(image,
                                          image->root(), "");
 
-    KisDisplayColorConverter converter(resourceManager, 0);
+    KisDisplayColorConverter converter(resourceManager, 0, false);
 
     dbgKrita << ppVar(image->root()->firstChild());
 

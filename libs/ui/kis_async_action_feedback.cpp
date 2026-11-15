@@ -6,7 +6,10 @@
 
 #include "kis_async_action_feedback.h"
 
-#include <QtConcurrent>
+#include <QApplication>
+#include <QEventLoop>
+#include <QFutureWatcher>
+#include <QtConcurrentRun>
 #include <QProgressDialog>
 
 
@@ -48,6 +51,11 @@ T runActionImpl(std::function<T()> func)
 }
 
 KisImportExportErrorCode KisAsyncActionFeedback::runAction(std::function<KisImportExportErrorCode()> func)
+{
+    return runActionImpl(func);
+}
+
+bool KisAsyncActionFeedback::runAction(std::function<bool()> func)
 {
     return runActionImpl(func);
 }

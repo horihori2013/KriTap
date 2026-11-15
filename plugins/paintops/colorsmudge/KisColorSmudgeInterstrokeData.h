@@ -11,6 +11,8 @@
 #include "KisInterstrokeData.h"
 #include "KisOverlayPaintDeviceWrapper.h"
 
+#include <memory>
+
 class KisTransaction;
 
 /**
@@ -35,7 +37,7 @@ struct KisColorSmudgeInterstrokeData : public KisInterstrokeData
     KUndo2Command * endTransaction() override;
 
 private:
-    QScopedPointer<KUndo2Command> m_parentCommand;
+    std::unique_ptr<KUndo2Command> m_parentCommand;
     QScopedPointer<KisTransaction> m_heightmapDeviceTransaction;
 };
 

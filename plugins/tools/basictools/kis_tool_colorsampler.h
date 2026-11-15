@@ -43,22 +43,6 @@ public:
     ~KisToolColorSampler() override;
 
 public:
-    struct Configuration {
-        Configuration();
-
-        bool toForegroundColor;
-        bool updateColor;
-        bool addPalette;
-        bool normaliseValues;
-        bool sampleMerged;
-        int radius;
-        int blend;
-
-        void save() const;
-        void load();
-    };
-
-public:
     QWidget* createOptionWidget() override;
 
     void beginPrimaryAction(KoPointerEvent *event) override;
@@ -92,6 +76,9 @@ private Q_SLOTS:
     void slotColorPickerRequestedOutlineUpdate();
     void slotColorPickerSelectedColor(const KoColor &color);
     void slotColorPickerSelectionFinished(const KoColor &color);
+
+    void slotSetPreviewStyleComboBoxFromConfig();
+    void slotSetPreviewStyleConfigFromComboBox();
 
 private:
     void displaySampledColor(const KoColor &color);

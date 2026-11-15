@@ -12,10 +12,12 @@
 #include <QStandardPaths>
 #include <QDateTime>
 #include <QCheckBox>
+#include <QMessageBox>
 
 #include <klocalizedstring.h>
 #include <ksharedconfig.h>
 #include <kconfiggroup.h>
+#include "kcolorscheme.h"
 
 #include <KisPart.h>
 #include <KoDialog.h>
@@ -28,14 +30,134 @@
 #include "KisMainWindow.h"
 #include "kis_config.h"
 
-MessageSender *LogDockerDock::s_messageSender {new MessageSender()};
+#include <QThread>
+#include <QMutex>
+#include <QWaitCondition>
+#include <QGlobalStatic>
+#include <KisStaticInitializer.h>
+
 QTextCharFormat LogDockerDock::s_debug;
 QTextCharFormat LogDockerDock::s_info;
 QTextCharFormat LogDockerDock::s_warning;
 QTextCharFormat LogDockerDock::s_critical;
 QTextCharFormat LogDockerDock::s_fatal;
 
-static QtMessageHandler s_originalMessageHandler{nullptr};
+KIS_DECLARE_STATIC_INITIALIZER {
+    qRegisterMetaType<QtMsgType>("QtMsgType");
+}
+
+/**
+ * A background thread that receives all the debug messages from 
+ * the main thread and resends them forward using qt-signals. We
+ * cannot resend the message in the same thread, because the a 
+ * qDebug() message can come form the qt-signaling code, which
+ * can cause deadlocks.
+ */
+class MessageForwarderThread : public QThread
+{
+    Q_OBJECT
+public:
+    void run() override {
+        while (1) {
+            QMutexLocker locker(&m_mutex);
+            m_waitCondition.wait(&m_mutex);
+            if (m_exitFlag) break;
+
+            while (!m_messages.empty()) {
+                auto message = m_messages.dequeue();
+                Q_EMIT sigDeliverMessage(message.first, message.second);
+            }
+        }
+    }
+
+    void pushMessage(QtMsgType type, const QString &message) {
+        QMutexLocker locker(&m_mutex);
+        m_messages.enqueue(std::make_pair(type, message));
+        locker.unlock();
+        m_waitCondition.wakeAll();
+    }
+
+    void pushExitFlag() {
+        QMutexLocker locker(&m_mutex);
+        m_exitFlag = true;
+        locker.unlock();
+        m_waitCondition.wakeAll();
+    }
+
+Q_SIGNALS:
+    void sigDeliverMessage(QtMsgType type, const QString &message);
+
+
+private:
+    QMutex m_mutex;
+    QWaitCondition m_waitCondition;
+    QQueue<std::pair<QtMsgType, QString>> m_messages;
+    bool m_exitFlag {false};
+};
+
+/**
+ * A forward declaration of the handler that will be passed to Qt as
+ * a message handler. The handler will use MessageHandler object
+ * below to post the actual messages.
+ */
+void kritaLoggerMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg);
+
+/**
+ * MessageHandler is the main object that handles management of the debug
+ * message delivery. It creates a backgroud thread and set up all the 
+ * connections when requested.
+ * 
+ * MessageHandler is a singleton, i.e. it will be reused by **all**
+ * the logging dockers we have in any of Krita's windows.
+ */
+class MessageHandler : public QObject
+{
+    Q_OBJECT
+public:
+    ~MessageHandler() {
+        setLoggingEnabled(false);
+    }
+
+    void setLoggingEnabled(bool value) {
+        if (value == isLoggingEnabled()) return;
+        
+        if (value) {
+            const QtMessageHandler oldHandler = qInstallMessageHandler(kritaLoggerMessageHandler);
+            m_originalMessageHandler = oldHandler;
+            m_forwarderThread.reset(new MessageForwarderThread());
+            connect(m_forwarderThread.get(), &MessageForwarderThread::sigDeliverMessage, this, &MessageHandler::sigDeliverMessage);
+            m_forwarderThread->start();
+        } else {
+            qInstallMessageHandler(nullptr);
+            m_originalMessageHandler = nullptr;
+            m_forwarderThread->pushExitFlag();
+            m_forwarderThread->wait();
+            m_forwarderThread.reset();
+        }
+    }
+
+    bool isLoggingEnabled() const {
+        return m_originalMessageHandler;
+    }
+
+Q_SIGNALS:
+    void sigDeliverMessage(QtMsgType type, const QString &message);
+
+public:
+    QtMessageHandler m_originalMessageHandler {nullptr};
+    std::unique_ptr<MessageForwarderThread> m_forwarderThread;
+};
+
+Q_GLOBAL_STATIC(MessageHandler, s_messageHandlerObject)
+
+void kritaLoggerMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+    KIS_SAFE_ASSERT_RECOVER_RETURN(s_messageHandlerObject->m_forwarderThread);
+    KIS_SAFE_ASSERT_RECOVER_RETURN(s_messageHandlerObject->m_originalMessageHandler);
+    
+    s_messageHandlerObject->m_forwarderThread->pushMessage(type, message);
+    s_messageHandlerObject->m_originalMessageHandler(type, context, message);
+}
 
 LogDockerDock::LogDockerDock( )
     : QDockWidget(i18n("Log Viewer"))
@@ -58,8 +180,7 @@ LogDockerDock::LogDockerDock( )
     bnSettings->setIcon(koIcon("configure-thicker"));
     connect(bnSettings, SIGNAL(clicked(bool)), SLOT(settings()));
 
-    qRegisterMetaType<QtMsgType>("QtMsgType");
-    connect(s_messageSender, SIGNAL(emitMessage(QtMsgType,QString)), this, SLOT(insertMessage(QtMsgType,QString)), Qt::AutoConnection);
+    connect(s_messageHandlerObject, SIGNAL(sigDeliverMessage(QtMsgType,QString)), this, SLOT(insertMessage(QtMsgType,QString)), Qt::AutoConnection);
 
     changeTheme();
 }
@@ -77,18 +198,14 @@ void LogDockerDock::setViewManager(KisViewManager *kisview)
 void LogDockerDock::toggleLogging(bool toggle)
 {
     KisConfig(false).writeEntry<bool>("logviewer_enabled", toggle);
+    
     if (toggle) {
-        const QtMessageHandler oldHandler = qInstallMessageHandler(messageHandler);
-        if (!s_originalMessageHandler) {
-            s_originalMessageHandler = oldHandler;
-        }
         applyCategories();
-    }
-    else {
-        qInstallMessageHandler(nullptr);
+    } else {
         QLoggingCategory::setFilterRules(QString());
     }
 
+    s_messageHandlerObject->setLoggingEnabled(toggle);
 }
 
 void LogDockerDock::clearLog()
@@ -103,9 +220,13 @@ void LogDockerDock::saveLog()
     QString filename = fileDialog.filename();
     if (!filename.isEmpty()) {
         QFile f(filename);
-        f.open(QFile::WriteOnly);
-        f.write(txtLogViewer->document()->toPlainText().toUtf8());
-        f.close();
+        if (f.open(QFile::WriteOnly)) {
+            f.write(txtLogViewer->document()->toPlainText().toUtf8());
+            f.close();
+        } else {
+            QMessageBox::warning(this, i18nc("@title:window", "Krita"),
+                i18n("Could not save %1.\nReason: %2.", f.fileName(), f.errorString()));
+        }
     }
 }
 
@@ -172,10 +293,6 @@ void LogDockerDock::settings()
     chkScript->setChecked(cfg.readEntry("script_41011", false));
     layout->addWidget(chkScript);
 
-    QCheckBox *chkInput = new QCheckBox(i18n("Input handling"), page);
-    chkInput->setChecked(cfg.readEntry("input_41012", false));
-    layout->addWidget(chkInput);
-
     QCheckBox *chkAction = new QCheckBox(i18n("Actions"), page);
     chkAction->setChecked(cfg.readEntry("action_41013", false));
     layout->addWidget(chkAction);
@@ -184,6 +301,14 @@ void LogDockerDock::settings()
     chkTablet->setChecked(cfg.readEntry("tablet_41014", false));
     layout->addWidget(chkTablet);
 
+    QCheckBox *chkInputEater = new QCheckBox(i18n("Input Filtering"), page);
+    chkInputEater->setChecked(cfg.readEntry("input_eater_41019", false));
+    layout->addWidget(chkInputEater);
+
+    QCheckBox *chkInputMatcher = new QCheckBox(i18n("Input Matching"), page);
+    chkInputMatcher->setChecked(cfg.readEntry("input_matcher_41020", false));
+    layout->addWidget(chkInputMatcher);
+
     QCheckBox *chkOpenGL = new QCheckBox(i18n("GPU Canvas"), page);
     chkOpenGL->setChecked(cfg.readEntry("opengl_41015", false));
     layout->addWidget(chkOpenGL);
@@ -191,6 +316,10 @@ void LogDockerDock::settings()
     QCheckBox *chkMetaData = new QCheckBox(i18n("Metadata"), page);
     chkMetaData->setChecked(cfg.readEntry("metadata_41016", false));
     layout->addWidget(chkMetaData);
+
+    QCheckBox *chkPerformance = new QCheckBox(i18n("Performance"), page);
+    chkPerformance->setChecked(cfg.readEntry("performance_41021", false));
+    layout->addWidget(chkPerformance);
 
     QCheckBox *chkPigment = new QCheckBox(i18n("Color Management"), page);
     chkPigment->setChecked(cfg.readEntry("pigment", false));
@@ -212,11 +341,13 @@ void LogDockerDock::settings()
         cfg.writeEntry("math_41009", chkMath->isChecked());
         cfg.writeEntry("render_41010", chkRender->isChecked());
         cfg.writeEntry("script_41011", chkScript->isChecked());
-        cfg.writeEntry("input_41012", chkInput->isChecked());
         cfg.writeEntry("action_41013", chkAction->isChecked());
         cfg.writeEntry("tablet_41014", chkTablet->isChecked());
+        cfg.writeEntry("input_eater_41019", chkInputEater->isChecked());
+        cfg.writeEntry("input_matcher_41020", chkInputMatcher->isChecked());
         cfg.writeEntry("opengl_41015", chkOpenGL->isChecked());
         cfg.writeEntry("metadata_41016", chkMetaData->isChecked());
+        cfg.writeEntry("performance_41021", chkPerformance->isChecked());
         cfg.writeEntry("pigment", chkPigment->isChecked());
 
         if (bnToggle->isChecked()) {
@@ -264,23 +395,17 @@ void LogDockerDock::applyCategories()
     filters << cfgToString("krita.math", cfg.readEntry("math_41009", false));
     filters << cfgToString("krita.grender", cfg.readEntry("render_41010", false));
     filters << cfgToString("krita.scripting", cfg.readEntry("script_41011", false));
-    filters << cfgToString("krita.input", cfg.readEntry("input_41012", false));
     filters << cfgToString("krita.action", cfg.readEntry("action_41013", false));
     filters << cfgToString("krita.tablet", cfg.readEntry("tablet_41014", false));
+    filters << cfgToString("krita.input.eater", cfg.readEntry("input_eater_41019", false));
+    filters << cfgToString("krita.input.matcher", cfg.readEntry("input_matcher_41020", false));
     filters << cfgToString("krita.opengl", cfg.readEntry("opengl_41015", false));
     filters << cfgToString("krita.metadata", cfg.readEntry("metadata_41016", false));
+    filters << cfgToString("krita.performance", cfg.readEntry("performance_41021", false));
 
     filters << cfgToString("krita.lib.pigment", cfg.readEntry("pigment", false));
 
     QLoggingCategory::setFilterRules(filters.join("\n"));
-}
-
-void LogDockerDock::messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-{
-    s_messageSender->sendMessage(type, msg);
-    if (s_originalMessageHandler) {
-        s_originalMessageHandler(type, context, msg);
-    }
 }
 
 void LogDockerDock::insertMessage(QtMsgType type, const QString &msg)
@@ -315,6 +440,15 @@ void LogDockerDock::insertMessage(QtMsgType type, const QString &msg)
 void LogDockerDock::changeTheme()
 {
     clearLog();
+
+#if QT_VERSION > QT_VERSION_CHECK(6, 0, 0)
+    KColorScheme scheme(QPalette::Active, KColorScheme::Window);
+    s_debug.setForeground(scheme.foreground(KColorScheme::NormalText));
+    s_info.setForeground(scheme.foreground(KColorScheme::PositiveText));
+    s_warning.setForeground(scheme.foreground(KColorScheme::NeutralText));
+    s_critical.setForeground(scheme.foreground(KColorScheme::NegativeText));
+    s_fatal.setForeground(scheme.foreground(KColorScheme::NegativeText));
+#else
     QColor background = qApp->palette().window().color();
     if (background.value() > 100) {
         s_debug.setForeground(Qt::black);
@@ -322,18 +456,16 @@ void LogDockerDock::changeTheme()
         s_warning.setForeground(Qt::darkYellow);
         s_critical.setForeground(Qt::darkRed);
         s_fatal.setForeground(Qt::darkRed);
-    }
-    else {
+    } else {
         s_debug.setForeground(Qt::white);
         s_info.setForeground(Qt::green);
         s_warning.setForeground(Qt::yellow);
         s_critical.setForeground(Qt::red);
         s_fatal.setForeground(Qt::red);
     }
+#endif
+
     s_fatal.setFontWeight(QFont::Bold);
 }
 
-void MessageSender::sendMessage(QtMsgType type, const QString &msg)
-{
-    Q_EMIT emitMessage(type, msg);
-}
+#include <LogDockerDock.moc>

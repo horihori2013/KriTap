@@ -13,11 +13,13 @@ set(kis_stroke_benchmark_SRCS kis_stroke_benchmark.cpp)
 set(kis_fast_math_benchmark_SRCS kis_fast_math_benchmark.cpp)
 set(kis_floodfill_benchmark_SRCS kis_floodfill_benchmark.cpp)
 set(kis_gradient_benchmark_SRCS kis_gradient_benchmark.cpp)
-set(kis_mask_generator_benchmark_SRCS kis_mask_generator_benchmark.cpp)
 set(kis_low_memory_benchmark_SRCS kis_low_memory_benchmark.cpp)
 set(KisAnimationRenderingBenchmark_SRCS KisAnimationRenderingBenchmark.cpp)
 set(kis_filter_selections_benchmark_SRCS kis_filter_selections_benchmark.cpp)
 set(kis_thumbnail_benchmark_SRCS kis_thumbnail_benchmark.cpp)
+set(KisLiquifyTransformWorkerBenchmark_SRCS KisLiquifyTransformWorkerBenchmark.cpp)
+set(KisFourPointInterpolatorBenchmark_SRCS KisFourPointInterpolatorBenchmark.cpp)
+
 
 krita_add_benchmark(KisDatamanagerBenchmark TESTNAME krita-benchmarks-KisDataManager ${kis_datamanager_benchmark_SRCS})
 krita_add_benchmark(KisHLineIteratorBenchmark TESTNAME krita-benchmarks-KisHLineIterator ${kis_hiterator_benchmark_SRCS})
@@ -32,11 +34,16 @@ krita_add_benchmark(KisStrokeBenchmark TESTNAME krita-benchmarks-KisStrokeBenchm
 krita_add_benchmark(KisFastMathBenchmark TESTNAME krita-benchmarks-KisFastMath ${kis_fast_math_benchmark_SRCS})
 krita_add_benchmark(KisFloodfillBenchmark TESTNAME krita-benchmarks-KisFloodFill ${kis_floodfill_benchmark_SRCS})
 krita_add_benchmark(KisGradientBenchmark TESTNAME krita-benchmarks-KisGradientFill ${kis_gradient_benchmark_SRCS})
-krita_add_benchmark(KisMaskGeneratorBenchmark TESTNAME krita-benchmarks-KisMaskGenerator ${kis_mask_generator_benchmark_SRCS})
 krita_add_benchmark(KisLowMemoryBenchmark TESTNAME krita-benchmarks-KisLowMemory ${kis_low_memory_benchmark_SRCS})
 krita_add_benchmark(KisAnimationRenderingBenchmark TESTNAME krita-benchmarks-KisAnimationRenderingBenchmark ${KisAnimationRenderingBenchmark_SRCS})
 krita_add_benchmark(KisFilterSelectionsBenchmark TESTNAME krita-image-KisFilterSelectionsBenchmark ${kis_filter_selections_benchmark_SRCS})
 krita_add_benchmark(KisThumbnailBenchmark TESTNAME krita-benchmarks-KisThumbnail ${kis_thumbnail_benchmark_SRCS})
+krita_add_benchmark(KisLiquifyTransformWorkerBenchmark TESTNAME krita-benchmarks-KisLiquifyTransformWorker ${KisLiquifyTransformWorkerBenchmark_SRCS})
+krita_add_benchmark(KisFourPointInterpolatorBenchmark TESTNAME krita-benchmarks-KisFourPointInterpolator ${KisFourPointInterpolatorBenchmark_SRCS})
+
+
+include_directories(${QUAZIP_INCLUDE_DIRS})
+
 
 target_link_libraries(KisDatamanagerBenchmark  kritaimage  kritatestsdk)
 target_link_libraries(KisHLineIteratorBenchmark  kritaimage  kritatestsdk)
@@ -54,6 +61,9 @@ target_link_libraries(KisGradientBenchmark  kritaimage  kritatestsdk)
 target_link_libraries(KisLowMemoryBenchmark  kritaimage  kritatestsdk)
 target_link_libraries(KisAnimationRenderingBenchmark  kritaimage kritaui  kritatestsdk)
 target_link_libraries(KisFilterSelectionsBenchmark   kritaimage  kritatestsdk)
+target_link_libraries(KisLiquifyTransformWorkerBenchmark   kritaimage  kritatestsdk ${QUAZIP_LIBRARIES})
+target_link_libraries(KisFourPointInterpolatorBenchmark   kritaimage  kritatestsdk)
+
 
 ko_compile_for_all_implementations_no_scalar(__per_arch_composition_objects kis_composition_benchmark.cpp)
 message("Following objects are generated for the composition benchmark")
@@ -80,5 +90,4 @@ foreach(_obj IN LISTS __per_arch_composition_objects)
     target_link_libraries(${_target} kritaimage kritatestsdk kritamultiarch)
 endforeach()
 
-target_link_libraries(KisMaskGeneratorBenchmark  kritaimage  kritatestsdk)
 target_link_libraries(KisThumbnailBenchmark  kritaimage  kritatestsdk)

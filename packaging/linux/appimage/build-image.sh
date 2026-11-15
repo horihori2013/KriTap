@@ -32,11 +32,23 @@ export LD_LIBRARY_PATH=$DEPS_INSTALL_PREFIX/lib/:$DEPS_INSTALL_PREFIX/lib/$TRIPL
 export PATH=$DEPS_INSTALL_PREFIX/bin/:$PATH
 export PKG_CONFIG_PATH=$DEPS_INSTALL_PREFIX/share/pkgconfig/:$DEPS_INSTALL_PREFIX/lib/pkgconfig/:/usr/lib/pkgconfig/:$PKG_CONFIG_PATH
 export CMAKE_PREFIX_PATH=$DEPS_INSTALL_PREFIX:$CMAKE_PREFIX_PATH
+
+export QT_VERSION_MAJOR=$(echo $($DEPS_INSTALL_PREFIX/bin/qtpaths --qt-version) | cut -d. -f1)
+
 # https://docs.python.org/3.10/using/cmdline.html#envvar-PYTHONHOME
 if [ -d $DEPS_INSTALL_PREFIX/sip ] ; then
 export PYTHONPATH=$DEPS_INSTALL_PREFIX/sip
 fi
 export PYTHONHOME=$DEPS_INSTALL_PREFIX
+
+# Detect Python version; for example 'python3.13'
+export PYTHON_VER=`find $DEPS_INSTALL_PREFIX/lib -maxdepth 1 -name 'python*' -type d`
+export PYTHON_VER=`basename $PYTHON_VER`
+if [ -d $DEPS_INSTALL_PREFIX/lib/$PYTHON_VER/site-packages/PyQt5/ ]; then
+  export PYQT_VER=PyQt5
+else
+  export PYQT_VER=PyQt6
+fi
 
 # add our own linuxdeployqt to our PATH environment if available
 if [ -d $DEPS_INSTALL_PREFIX/appimage-tools/bin ]; then
@@ -44,6 +56,7 @@ if [ -d $DEPS_INSTALL_PREFIX/appimage-tools/bin ]; then
 fi
 
 source ${KRITA_SOURCES}/packaging/linux/appimage/override_compiler.sh.inc
+source ${KRITA_SOURCES}/packaging/linux/appimage/kritaci-utils.sh.inc
 
 if [[ $ARCH == "arm64" ]]; then
   APPIMAGE_ARCHITECTURE="aarch64"
@@ -140,20 +153,31 @@ cd $BUILD_PREFIX
 #
 
 # Step 0: place the translations where ki18n and Qt look for them
-if [ -d $APPDIR/usr/share/locale ] ; then
-    rsync -prul $APPDIR/usr/share/locale $APPDIR/usr/share/krita
-    rm -rf $APPDIR/usr/share/locale
+#
+# In Qt5 version of Krita we used to patch ki18n to locate the translations
+# in QStandardPaths::AppLocalDataLocation, hence all the translations had to
+# be moved into the Krita-local directory. In Qt6 we dropped this patch, so
+# all the translations are now searched in QStandardPaths::GenericDataLocation
+
+if [ "$QT_VERSION_MAJOR" = "5" ] ; then
+    if [ -d $APPDIR/usr/share/locale ] ; then
+        rsync -prul $APPDIR/usr/share/locale $APPDIR/usr/share/krita
+        rm -rf $APPDIR/usr/share/locale
+    fi
+    rsync -prul $DEPS_INSTALL_PREFIX/share/locale $APPDIR/usr/share/krita
+else
+    rsync -prul $DEPS_INSTALL_PREFIX/share/locale $APPDIR/usr/share/
 fi
 
 # Step 1: Copy over all necessary resources required by dependencies or libraries that are missed by linuxdeployqt
-cp -r $DEPS_INSTALL_PREFIX/share/locale $APPDIR/usr/share/krita
+
 if [ -d $DEPS_INSTALL_PREFIX/share/kf5 ]; then
     cp -r $DEPS_INSTALL_PREFIX/share/kf5 $APPDIR/usr/share
 else
     cp -r $DEPS_INSTALL_PREFIX/share/kf6 $APPDIR/usr/share
 fi
 cp -r $DEPS_INSTALL_PREFIX/share/mime $APPDIR/usr/share
-cp -r $DEPS_INSTALL_PREFIX/lib/python3.10 $APPDIR/usr/lib
+cp -r $DEPS_INSTALL_PREFIX/lib/$PYTHON_VER $APPDIR/usr/lib
 if [ -d $DEPS_INSTALL_PREFIX/share/sip ] ; then
 cp -r $DEPS_INSTALL_PREFIX/share/sip $APPDIR/usr/share
 fi
@@ -176,15 +200,15 @@ mkdir $BUILD_PREFIX/krita-apprun-build
 )
 rm -rf $BUILD_PREFIX/krita-apprun-build
 
-if [ -d $APPDIR/usr/lib/python3.10/site-packages ]; then
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/packaging*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/pip*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/pyparsing*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/PyQt_builder*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/setuptools*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/sip*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/toml*
-    rm -rf $APPDIR/usr/lib/python3.10/site-packages/easy-install.pth
+if [ -d $APPDIR/usr/lib/$PYTHON_VER/site-packages ]; then
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/packaging*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/pip*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/pyparsing*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/PyQt_builder*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/setuptools*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/sip*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/toml*
+    rm -rf $APPDIR/usr/lib/$PYTHON_VER/site-packages/easy-install.pth
 fi
 
 ## Font related deps are explicitly ignored by AppImage build script,
@@ -245,13 +269,13 @@ for lib in $PLUGINS/*.so*; do
   patchelf --set-rpath '$ORIGIN/..' $lib;
 done
 
-if [ -d $APPDIR/usr/lib/python3.10/site-packages/PyQt5/ ] ; then
-  for lib in $APPDIR/usr/lib/python3.10/site-packages/PyQt5/*.so*; do
+if [ -d $APPDIR/usr/lib/$PYTHON_VER/site-packages/$PYQT_VER/ ] ; then
+  for lib in $APPDIR/usr/lib/$PYTHON_VER/site-packages/$PYQT_VER/*.so*; do
     patchelf --set-rpath '$ORIGIN/../..' $lib;
   done
 fi
 
-for lib in $APPDIR/usr/lib/python3.10/lib-dynload/*.so*; do
+for lib in $APPDIR/usr/lib/$PYTHON_VER/lib-dynload/*.so*; do
   patchelf --set-rpath '$ORIGIN/../..' $lib;
 done
 
@@ -261,8 +285,8 @@ else
   patchelf --set-rpath '$ORIGIN/../..' $APPDIR/usr/lib/krita-python-libs/PyKrita/krita.so
 fi
 
-if [ -f $APPDIR/usr/lib/python3.10/site-packages/PyQt5/sip.so ] ; then
-patchelf --set-rpath '$ORIGIN/../..' $APPDIR/usr/lib/python3.10/site-packages/PyQt5/sip.so
+if [ -f $APPDIR/usr/lib/$PYTHON_VER/site-packages/$PYQT_VER/sip.so ] ; then
+patchelf --set-rpath '$ORIGIN/../..' $APPDIR/usr/lib/$PYTHON_VER/site-packages/$PYQT_VER/sip.so
 fi
 
 # Step 4: Update version and update information
@@ -290,7 +314,7 @@ if [[ $ARCH == "amd64" ]]; then
     UPDATER_SHA256=414f10d9ab2dc72dc6874dbdb99454227124473a7ae691db2288d60f14f810fe
 
     if ! test -f "AppImageUpdate" || ! echo -n "$UPDATER_SHA256 AppImageUpdate" | sha256sum -c -; then
-        wget "https://files.kde.org/krita/build/AppImageUpdate-x86_64.AppImage" -O AppImageUpdate
+        wget --no-verbose "https://files.kde.org/krita/build/AppImageUpdate-x86_64.AppImage" -O AppImageUpdate
         echo -n "$UPDATER_SHA256 AppImageUpdate" | sha256sum -c -
     fi
 
@@ -312,7 +336,7 @@ if [ -n "$STRIP_APPIMAGE" ]; then
     function find-elf-files {
         # * python libraries are not strippable (strip fails with error)
         # * AppImage packages should not be stripped, because it breaks them
-        find $1 -type f -name "*" -not -name "*.o" -not -path "*/python3.10/*" -not -name "AppImageUpdate" -not -name "libstdc++.so.6.*" -exec sh -c '
+        find $1 -type f -name "*" -not -name "*.o" -not -path "*/python3.*/*" -not -name "AppImageUpdate" -not -name "libstdc++.so.6.*" -exec sh -c '
             case "$(head -n 1 "$1")" in
             ?ELF*) exit 0;;
             esac
@@ -332,15 +356,36 @@ fi
 
 EXTRA_PLUGINS_LIST="$PLUGINS,$APPDIR/usr/lib/krita-python-libs/PyKrita/krita.so"
 
+WAYLAND_PLATFORM_PLUGIN_NAME=
+# Qt6.8 names the plugin file as libqwayland-generic.so
 if [ -f $DEPS_INSTALL_PREFIX/plugins/platforms/libqwayland-generic.so ]; then
-  EXTRA_PLATFORM_PLUGINS="platforms/libqwayland-generic.so,wayland-shell-integration/libxdg-shell.so,wayland-graphics-integration-client/libqt-plugin-wayland-egl.so"
+  WAYLAND_PLATFORM_PLUGIN_NAME="platforms/libqwayland-generic.so"
+fi
+# Qt6.10 names the plugin file as libqwayland.so
+if [ -f $DEPS_INSTALL_PREFIX/plugins/platforms/libqwayland.so ]; then
+  WAYLAND_PLATFORM_PLUGIN_NAME="platforms/libqwayland.so"
+fi
+
+if [ -n "$WAYLAND_PLATFORM_PLUGIN_NAME" ]; then
+  EXTRA_PLATFORM_PLUGINS="$WAYLAND_PLATFORM_PLUGIN_NAME,wayland-shell-integration/libxdg-shell.so,wayland-graphics-integration-client/libqt-plugin-wayland-egl.so"
   EXTRA_PLUGINS_LIST="$EXTRA_PLUGINS_LIST,$EXTRA_PLATFORM_PLUGINS"
 fi
+
+for plugin in $DEPS_INSTALL_PREFIX/plugins/wayland-decoration-client/*.so; do
+  echo "Adding client-side-decoration plugin: $plugin"
+  relative_plugin=`realpath -m --relative-to="$DEPS_INSTALL_PREFIX/plugins" $plugin`
+  EXTRA_PLUGINS_LIST="$EXTRA_PLUGINS_LIST,$relative_plugin"
+done
 
 EXTRA_RUNTIME_ARGUMENT=
 
 if [ -f $DEPS_INSTALL_PREFIX/appimage-tools/share/runtime-x86_64 ]; then
   EXTRA_RUNTIME_ARGUMENT=-runtime-file=$DEPS_INSTALL_PREFIX/appimage-tools/share/runtime-x86_64
+fi
+
+EXTRA_VERBOSE_ARGUMENT=
+if [ $useVerbosePackagingLog -eq 1 ]; then
+  EXTRA_VERBOSE_ARGUMENT=-verbose=2
 fi
 
 # Step 4: Build the image!!!
@@ -349,7 +394,7 @@ linuxdeployqt $APPDIR/usr/share/applications/org.kde.krita.desktop \
   ${MLT_BINARIES} \
   ${FFMPEG_BINARIES} \
   -qmldir=$KRITA_SOURCES/plugins/dockers/textproperties \
-  -verbose=2 \
+  ${EXTRA_VERBOSE_ARGUMENT} \
   -bundle-non-qt-libs \
   -extra-plugins=$EXTRA_PLUGINS_LIST \
   -updateinformation="${ZSYNC_URL}" \

@@ -16,6 +16,14 @@ private Q_SLOTS:
     void testFiles();
     void testWriteonly();
     void testSaveHDR();
+
+    void testRoundtripCicpIccProfile_data();
+    void testRoundtripCicpIccProfile();
+
+    void testLoadPngWithLegacyProfile();
+
+    void testRoundtripHDRMetadata();
+
 };
 
 #endif

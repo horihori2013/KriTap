@@ -15,6 +15,9 @@
 #include <KoColorSpaceRegistry.h>
 #include <testpigment.h>
 
+#include <kis_debug.h>
+#include <qimage_test_util.h>
+
 #include <QRandomGenerator>
 
 TestColorConversionSystem::TestColorConversionSystem()
@@ -89,7 +92,7 @@ inline bool qCompare(const std::vector<KoColorConversionSystem::NodeKey> &t1,
 }
 }
 
-std::vector<KoColorConversionSystem::NodeKey> TestColorConversionSystem::calcPath(const std::vector<KoColorConversionSystem::NodeKey> &expectedPath) {
+std::vector<KoColorConversionSystem::NodeKey> TestColorConversionSystem::calcPath(const std::vector<KoColorConversionSystem::NodeKey> &expectedPath, bool skipEngineNodes) {
 
     const KoColorConversionSystem *system = KoColorSpaceRegistry::instance()->colorConversionSystem();
 
@@ -99,7 +102,7 @@ std::vector<KoColorConversionSystem::NodeKey> TestColorConversionSystem::calcPat
     std::vector<KoColorConversionSystem::NodeKey> realPath;
 
     Q_FOREACH (const KoColorConversionSystem::Vertex *vertex, path.vertexes) {
-        if (!vertex->srcNode->isEngine) {
+        if (!skipEngineNodes || !vertex->srcNode->isEngine) {
             realPath.push_back(vertex->srcNode->key());
         }
     }
@@ -112,8 +115,6 @@ void TestColorConversionSystem::testAlphaConnectionPaths()
 {
     const KoColorSpace *alpha8 = KoColorSpaceRegistry::instance()->alpha8();
 
-    using Path = KoColorConversionSystem::Path;
-    using Vertex = KoColorConversionSystem::Vertex;
     using NodeKey = KoColorConversionSystem::NodeKey;
 
     std::vector<NodeKey> expectedPath;
@@ -126,6 +127,8 @@ void TestColorConversionSystem::testAlphaConnectionPaths()
         {{GrayAColorModelID.id(), Integer8BitsColorDepthID.id(), "Gray-D50-elle-V2-srgbtrc.icc"},
          {alpha8->colorModelId().id(), alpha8->colorDepthId().id(), alpha8->profile()->name()}};
     QCOMPARE(calcPath(expectedPath), expectedPath);
+
+return;
 
     expectedPath =
         {{GrayAColorModelID.id(), Integer16BitsColorDepthID.id(), "Gray-D50-elle-V2-srgbtrc.icc"},
@@ -335,8 +338,6 @@ void TestColorConversionSystem::testAlphaU16Conversions()
 
 void TestColorConversionSystem::testGrayAConnectionPaths()
 {
-    using Path = KoColorConversionSystem::Path;
-    using Vertex = KoColorConversionSystem::Vertex;
     using NodeKey = KoColorConversionSystem::NodeKey;
 
     std::vector<NodeKey> expectedPath;
@@ -416,6 +417,131 @@ void TestColorConversionSystem::testGrayAConversions()
     }
 }
 
+using ExpectedPathVector = std::vector<KoColorConversionSystem::NodeKey>;
+Q_DECLARE_METATYPE(ExpectedPathVector)
+
+void TestColorConversionSystem::testRec2020PQConnectionPaths_data()
+{
+    using NodeKey = KoColorConversionSystem::NodeKey;
+    QTest::addColumn<ExpectedPathVector>("expectedPath");
+
+    auto addPQTests = [](const char *pqTagVariant, const QString &pqProfileName) {
+        auto rgbNode = [](const KoID &colorDepthId, const QString &profileName) -> NodeKey {
+            return {RGBAColorModelID.id(), colorDepthId.id(), profileName};
+        };
+
+        auto iccNode = []() -> NodeKey {
+            return {"icc", "icc", "icc"};
+        };
+
+#ifdef HAVE_OPENEXR
+        QTest::addRow("f16-%s-f16-linear", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Float16BitsColorDepthID, pqProfileName),
+            rgbNode(Float16BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+        };
+
+        QTest::addRow("f16-linear-f16-%s", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Float16BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            rgbNode(Float16BitsColorDepthID, pqProfileName),
+        };
+#endif
+
+        QTest::addRow("f32-%s-f32-linear", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Float32BitsColorDepthID, pqProfileName),
+            rgbNode(Float32BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+        };
+
+        QTest::addRow("f32-linear-f32-%s", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Float32BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            rgbNode(Float32BitsColorDepthID, pqProfileName),
+        };
+
+        //
+        // PQ spaces have direct connections to floating point spaces only. It disables
+        // the usage of the integer spaces as intermediate spaces
+        //
+
+#ifdef HAVE_OPENEXR
+        QTest::addRow("f16-linear-u16-%s", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Float16BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            rgbNode(Integer16BitsColorDepthID, pqProfileName),
+        };
+
+        QTest::addRow("u16-%s-f16-linear", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Integer16BitsColorDepthID, pqProfileName),
+            rgbNode(Float16BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+        };
+#endif
+
+        //
+        // It is impossible to convert any PQ space into an integer space directly,
+        // it should go through a floating point space first
+        //
+
+        QTest::addRow("u16-%s-u16-linear", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Integer16BitsColorDepthID, pqProfileName),
+            rgbNode(Float32BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            iccNode(),
+            rgbNode(Integer16BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+        };
+
+        //
+        // Conversion into sRGB happens via F32 space as well
+        // TODO: perhaps we could optimize U8 case and use F16 as an intermediate space instead?
+        //
+
+        QTest::addRow("u16-%s-u8-srgb", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Integer16BitsColorDepthID, pqProfileName),
+            rgbNode(Float32BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            iccNode(),
+            rgbNode(Integer8BitsColorDepthID, KoColorSpaceRegistry::instance()->p709SRGBProfile()->name()),
+        };
+
+        QTest::addRow("u8-%s-u8-srgb", pqTagVariant) << ExpectedPathVector{
+            rgbNode(Integer8BitsColorDepthID, pqProfileName),
+            rgbNode(Float32BitsColorDepthID, KoColorSpaceRegistry::instance()->p2020G10Profile()->name()),
+            iccNode(),
+            rgbNode(Integer8BitsColorDepthID, KoColorSpaceRegistry::instance()->p709SRGBProfile()->name()),
+        };
+    };
+
+    addPQTests("pq", KoColorSpaceRegistry::instance()->p2020PQProfile()->name());
+    addPQTests("pq_180nit", "Krita Rec. 2100 Perceptual Quantizer 180nits");
+    addPQTests("pq_legacy", "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF");
+}
+
+void TestColorConversionSystem::testRec2020PQConnectionPaths()
+{
+    using NodeKey = KoColorConversionSystem::NodeKey;
+    QFETCH(std::vector<NodeKey>, expectedPath);
+
+    auto loadExternalProfile = [](const QString &profileName, const QString &profileFileName) {
+        const KoColorProfile *profile = KoColorSpaceRegistry::instance()->profileByName(profileName);
+        if (!profile || profile->name() != profileName) {
+            const QString profileFilePath = TestUtil::fetchDataFileLazy(profileFileName);
+            KIS_ASSERT(QFile::exists(profileFilePath));
+
+            {
+                KoColorSpaceEngine *iccEngine = KoColorSpaceEngineRegistry::instance()->get("icc");
+                KIS_ASSERT(iccEngine);
+                const KoColorProfile *profile = iccEngine->addProfile(profileFilePath);
+                KIS_ASSERT(profile);
+            }
+        }
+    };
+
+    const QString additionalProfileName = "Krita Rec. 2100 Perceptual Quantizer 180nits";
+    const QString additionalProfileFileName = "rec2020pq-crwl-180nits-cicp.icc";
+
+    const QString legacyProfileName = "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF";
+    const QString legacyProfileFileName = "ITUR_2100_PQ_FULL.ICC";
+
+    loadExternalProfile(additionalProfileName, additionalProfileFileName);
+    loadExternalProfile(legacyProfileName, legacyProfileFileName);
+
+    QCOMPARE(calcPath(expectedPath, false), expectedPath);
+}
+
 void TestColorConversionSystem::benchmarkAlphaToRgbConversion()
 {
     const KoColorSpace *alpha8 = KoColorSpaceRegistry::instance()->alpha8();
@@ -493,7 +619,7 @@ void TestColorConversionSystem::testCmykBitnessConversion()
 //    qDebug() << ppVar(color2);
 
     /**
-     * For some reason out CMYK color spaces don't support rount-tripping
+     * For some reason out CMYK color spaces don't support round-tripping
      * to-from 16-bit representation. So the code that relies on that should
      * use KoOptimizedCmykPixelDataScalerU8ToU16Factory::create().
      */

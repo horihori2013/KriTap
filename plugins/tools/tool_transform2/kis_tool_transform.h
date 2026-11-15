@@ -160,6 +160,7 @@ public:
 
     void newActivationWithExternalSource(KisPaintDeviceSP externalSource) override;
 
+    void setNextActivationTransformMode(TransformToolMode mode);
     TransformToolMode transformMode() const;
 
     double translateX() const;
@@ -178,6 +179,8 @@ public:
     WarpType warpType() const;
     double warpFlexibility() const;
     int warpPointDensity() const;
+
+    static ToolTransformArgs::TransformMode toArgsMode(KisToolTransform::TransformToolMode toolMode);
 
 public Q_SLOTS:
     void activate(const QSet<KoShape*> &shapes) override;
@@ -279,6 +282,7 @@ private:
     KisToolChangesTracker m_changesTracker;
     KisSignalAutoConnectionsStore m_actionConnections;
 
+    TransformToolMode nextActivationTransformMode {FreeTransformMode};
 
     /// actions for the context click menu
     KisAction* warpAction {0};
@@ -338,6 +342,9 @@ private Q_SLOTS:
     void slotMoveDiscreteRight();
     void slotMoveDiscreteRightMore();
 
+    void slotIncreaseBrushSize();
+    void slotDecreaseBrushSize();
+
     void slotTransactionGenerated(TransformTransactionProperties transaction, ToolTransformArgs args, void *strokeStrategyCookie);
     void slotPreviewDeviceGenerated(KisPaintDeviceSP device);
 
@@ -353,6 +360,9 @@ private Q_SLOTS:
 
 class KisToolTransformFactory : public KisToolPaintFactoryBase
 {
+
+    Q_OBJECT
+
 public:
 
     KisToolTransformFactory()
@@ -360,7 +370,7 @@ public:
         setToolTip(i18n("Transform a layer or a selection"));
         setSection(ToolBoxSection::Transform);
         setIconName(koIconNameCStr("krita_tool_transform"));
-        setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
+        setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
         setPriority(2);
         setActivationShapeId(KRITA_TOOL_ACTIVATION_ID);
     }
@@ -371,7 +381,10 @@ public:
         return new KisToolTransform(canvas);
     }
 
-    QList<QAction *> createActionsImpl() override;
+    QList<QAction *> createActionsImpl(KoToolManager *toolManager) override;
+
+private Q_SLOTS:
+    void activateSubtool(KoToolManager *toolManager, KisToolTransform::TransformToolMode mode);
 };
 
 

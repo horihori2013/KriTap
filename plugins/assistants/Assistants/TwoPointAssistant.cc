@@ -20,16 +20,20 @@
 #include <kis_algebra_2d.h>
 #include <kis_dom_utils.h>
 #include <math.h>
+#include <cmath>
 #include <QtCore/qmath.h>
 #include <kis_assert.h>
+#include <KoColorDisplayRendererInterface.h>
 
 TwoPointAssistant::TwoPointAssistant()
-    : KisPaintingAssistant("two point", i18n("Two point assistant"))
+    : KisAbstractPerspectiveGrid()
+    , KisPaintingAssistant("two point", i18n("Two point assistant"))
 {
 }
 
 TwoPointAssistant::TwoPointAssistant(const TwoPointAssistant &rhs, QMap<KisPaintingAssistantHandleSP, KisPaintingAssistantHandleSP> &handleMap)
-    : KisPaintingAssistant(rhs, handleMap)
+    : KisAbstractPerspectiveGrid(rhs.parent())
+    , KisPaintingAssistant(rhs, handleMap)
     , m_canvas(rhs.m_canvas)
     , m_snapLine(rhs.m_snapLine)
     , m_gridDensity(rhs.m_gridDensity)
@@ -148,12 +152,14 @@ void TwoPointAssistant::adjustLine(QPointF &point, QPointF &strokeBegin)
     point = p;
 }
 
-void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, bool cached, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
+void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, const KoColorDisplayRendererInterface *displayRenderInterface, bool cached, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
 {
     Q_UNUSED(updateRect);
     Q_UNUSED(cached);
     gc.save();
     gc.resetTransform();
+
+    const QColor canvasAssistantColor = displayRenderInterface->convertColorToDisplayColorSpace(KoColor(effectiveAssistantColor(), KoColorSpaceRegistry::instance()->rgb8()));
 
     const QTransform initialTransform = converter->documentToWidgetTransform();
     bool isEditing = false;
@@ -170,7 +176,7 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
 
             QPainterPath pathCenter;
             pathCenter.addEllipse(ellipse);
-            drawPath(gc, pathCenter, isSnappingActive());
+            drawPath(gc, pathCenter, displayRenderInterface, isSnappingActive());
 
             // Draw circle to represent center of vision
             if (handles().length() == 3 && handle == handles()[2]) {
@@ -183,7 +189,7 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
                 QRectF center_ellipse = QRectF(QPointF(center.x() -15, center.y() -15), QSizeF(30, 30));
                 QPainterPath pathCenter;
                 pathCenter.addEllipse(center_ellipse);
-                drawPath(gc, pathCenter, isSnappingActive());
+                drawPath(gc, pathCenter, displayRenderInterface, isSnappingActive());
             }
         }
 
@@ -222,7 +228,7 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
 
                 }
 
-                drawPreview(gc, path);//and we draw the preview.
+                drawPreview(gc, path, displayRenderInterface);//and we draw the preview.
 
             }
         }
@@ -296,8 +302,8 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
         }
 
 
-        drawPreview(gc,previewPath);
-        drawPath(gc, path, isSnappingActive());
+        drawPreview(gc,previewPath, displayRenderInterface);
+        drawPath(gc, path, displayRenderInterface, isSnappingActive());
 
         if (handles().size() >= 3 && isSnappingActive()) {
             path = QPainterPath(); // clear
@@ -323,26 +329,26 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
 
                     if (assistantVisible) {
                         // Display a notch to represent the center of vision
-                        path.moveTo(initialTransform.map(inv.map(QPointF(0,vp_a.y()-10))));
-                        path.lineTo(initialTransform.map(inv.map(QPointF(0,vp_a.y()+10))));
+                        path.moveTo(initialTransform.map(inv.map(QPointF(0,-10))));
+                        path.lineTo(initialTransform.map(inv.map(QPointF(0,10))));
                     }
-                    drawPreview(gc,path);
+                    drawPreview(gc,path, displayRenderInterface);
                     path = QPainterPath(); // clear
                 }
             }
 
-            const QPointF upper = QPointF(0,vp_a.y() + size);
-            const QPointF lower = QPointF(0,vp_a.y() - size);
+            const QPointF upper = QPointF(0, size);
+            const QPointF lower = QPointF(0, -size);
 
             // Set up the fading effect for the grid lines
             // Needed so the grid density doesn't look distracting
-            QColor color = effectiveAssistantColor();
+            QColor color = canvasAssistantColor;
             QGradient fade = QLinearGradient(initialTransform.map(inv.map(upper)),
                                              initialTransform.map(inv.map(lower)));
             color.setAlphaF(0);
-            fade.setColorAt(0.4, effectiveAssistantColor());
+            fade.setColorAt(0.4, canvasAssistantColor);
             fade.setColorAt(0.5, color);
-            fade.setColorAt(0.6, effectiveAssistantColor());
+            fade.setColorAt(0.6, canvasAssistantColor);
             const QPen pen = gc.pen();
             const QBrush new_brush = QBrush(fade);
             int width = 1;
@@ -395,11 +401,12 @@ void TwoPointAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, co
     //KisPaintingAssistant::drawAssistant(gc, updateRect, converter, cached, canvas, assistantVisible, previewVisible);
 }
 
-void TwoPointAssistant::drawCache(QPainter& gc, const KisCoordinatesConverter *converter, bool assistantVisible)
+void TwoPointAssistant::drawCache(QPainter& gc, const KisCoordinatesConverter *converter, const KoColorDisplayRendererInterface *displayRenderInterface, bool assistantVisible)
 {
     Q_UNUSED(gc);
     Q_UNUSED(converter);
     Q_UNUSED(assistantVisible);
+    Q_UNUSED(displayRenderInterface);
     if (!m_canvas || !isAssistantComplete()) {
         return;
     }
@@ -461,13 +468,16 @@ double TwoPointAssistant::gridDensity()
     return m_gridDensity;
 }
 
-QTransform TwoPointAssistant::localTransform(QPointF vp_a, QPointF vp_b, QPointF pt_c, qreal* size)
+QTransform TwoPointAssistant::localTransform(QPointF vp_a, QPointF vp_b, QPointF pt_c, qreal* size) const
 {
     QTransform t = QTransform();
     t.rotate(QLineF(vp_a, vp_b).angle());
-    t.translate(-pt_c.x(),-pt_c.y());
-    const QLineF horizon = QLineF(t.map(vp_a), QPointF(t.map(vp_b).x(),t.map(vp_a).y()));
-    *size = sqrt(pow(horizon.length()/2.0,2) - pow(abs(horizon.center().x()),2));
+    // Translate in the rotated frame: the third handle defines x = 0,
+    // while the vanishing points define the horizon at y = 0.
+    t *= QTransform::fromTranslate(-t.map(pt_c).x(), -t.map(vp_a).y());
+    // For orthogonal vanishing directions the cone radius is the geometric
+    // mean of the distances from the center of vision to the two VPs.
+    *size = std::sqrt(-t.map(vp_a).x() * t.map(vp_b).x());
 
     return t;
 }
@@ -480,6 +490,74 @@ bool TwoPointAssistant::isAssistantComplete() const
 bool TwoPointAssistant::canBeLocal() const
 {
     return true;
+}
+
+bool TwoPointAssistant::localPerspectiveData(const QPointF &point, QPointF *localPoint, qreal *size) const
+{
+    if (!isAssistantComplete()) {
+        return false;
+    }
+
+    const QPointF vpA = *handles()[FirstHandle];
+    const QPointF vpB = *handles()[SecondHandle];
+    const QPointF center = *handles()[VerticalHandle];
+
+    qreal localSize = 0.0;
+    const QTransform transform = localTransform(vpA, vpB, center, &localSize);
+
+    if (!std::isfinite(localSize) || localSize <= 0.0) {
+        return false;
+    }
+
+    const QPointF mappedVpA = transform.map(vpA);
+    const QPointF mappedVpB = transform.map(vpB);
+    if (!std::isfinite(mappedVpA.y()) || !std::isfinite(mappedVpB.y())) {
+        return false;
+    }
+
+    if (localPoint) {
+        *localPoint = transform.map(point);
+    }
+    if (size) {
+        *size = localSize;
+    }
+
+    return true;
+}
+
+bool TwoPointAssistant::contains(const QPointF &point) const
+{
+    QPointF localPoint;
+    qreal size = 0.0;
+
+    if (!localPerspectiveData(point, &localPoint, &size)) {
+        return false;
+    }
+
+    if (isLocal() && handles().size() == numHandles() && !getLocalRect().contains(point)) {
+        return false;
+    }
+
+    const qreal distanceToHorizon = qAbs(localPoint.y());
+    // Rotation can move a point on the inclusive boundary just outside it.
+    return distanceToHorizon <= size || qFuzzyCompare(distanceToHorizon, size);
+}
+
+qreal TwoPointAssistant::distance(const QPointF &point) const
+{
+    QPointF localPoint;
+    qreal size = 0.0;
+
+    if (!localPerspectiveData(point, &localPoint, &size)) {
+        return 1.0;
+    }
+
+    return qBound<qreal>(0.0, qAbs(localPoint.y()) / size, 1.0);
+}
+
+bool TwoPointAssistant::isActive() const
+{
+    return isSnappingActive();
 }
 
 void TwoPointAssistant::saveCustomXml(QXmlStreamWriter* xml)

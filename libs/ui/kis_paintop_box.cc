@@ -65,6 +65,7 @@
 #include "widgets/kis_paintop_presets_chooser_popup.h"
 #include "widgets/kis_workspace_chooser.h"
 #include "widgets/kis_paintop_list_widget.h"
+#include "widgets/KisBrushStrokePreviewCache.h"
 #include "kis_slider_spin_box.h"
 #include "KisAngleSelector.h"
 #include "kis_multipliers_double_slider_spinbox.h"
@@ -285,14 +286,14 @@ KisPaintopBox::KisPaintopBox(KisViewManager *viewManager, QWidget *parent, const
         slOpacity->setSingleStep(5);
         slOpacity->setMinimumWidth(qMax(sliderWidth, slOpacity->sizeHint().width()));
         slOpacity->setFixedHeight(buttonsize);
-        slOpacity->setBlockUpdateSignalOnDrag(true);
+        slOpacity->setBlockUpdateSignalOnDrag(false);
 
         slFlow->setRange(0, 100, 0);
         slFlow->setValue(100);
         slFlow->setSingleStep(5);
         slFlow->setMinimumWidth(qMax(sliderWidth, slFlow->sizeHint().width()));
         slFlow->setFixedHeight(buttonsize);
-        slFlow->setBlockUpdateSignalOnDrag(true);
+        slFlow->setBlockUpdateSignalOnDrag(false);
 
         slSize->setRange(0.01, KisImageConfig(true).maxBrushSize(), 2);
         slSize->setValue(100);
@@ -302,7 +303,7 @@ KisPaintopBox::KisPaintopBox(KisViewManager *viewManager, QWidget *parent, const
         slSize->setSuffix(i18n(" px"));
         slSize->setMinimumWidth(qMax(sliderWidth, slSize->sizeHint().width()));
         slSize->setFixedHeight(buttonsize);
-        slSize->setBlockUpdateSignalOnDrag(true);
+        slSize->setBlockUpdateSignalOnDrag(false);
 
         slRotation->setFlipOptionsMode(KisAngleSelector::FlipOptionsMode_MenuButton);
         slRotation->setRange(-360.0, 360.0);
@@ -319,7 +320,7 @@ KisPaintopBox::KisPaintopBox(KisViewManager *viewManager, QWidget *parent, const
         slPatternSize->setSuffix(i18n("x"));
         slPatternSize->setMinimumWidth(qMax(sliderWidth, slPatternSize->sizeHint().width()));
         slPatternSize->setFixedHeight(buttonsize);
-        slPatternSize->setBlockUpdateSignalOnDrag(true);
+        slPatternSize->setBlockUpdateSignalOnDrag(false);
 
         m_sliderChooser[i]->setMinimumWidth(qMax(sliderWidth, slPatternSize->sizeHint().width()));
 
@@ -576,7 +577,7 @@ KisPaintopBox::KisPaintopBox(KisViewManager *viewManager, QWidget *parent, const
 
     connect(&m_optionWidgetUpdateCompressor, SIGNAL(timeout()), this, SLOT(slotUpdateOptionsWidgetPopup()));
 
-    slotInputDeviceChanged(KoToolManager::instance()->currentInputDevice());
+    slotInputDeviceChanged(m_viewManager->toolManager()->currentInputDevice());
 
     m_brushSelectPresetAction->setChecked(true);
 }
@@ -848,7 +849,13 @@ void KisPaintopBox::updateCompositeOp(QString compositeOpID)
     }
 
     {
-        KisSignalsBlocker b1(m_cmbCompositeOp, m_eraseModeButton);
+        std::vector<QSignalBlocker> b1;
+        b1.emplace_back(m_cmbCompositeOp);
+        b1.emplace_back(m_eraseModeButton);
+        for (auto *action : m_eraseModeButton->actions()) {
+            b1.emplace_back(action);
+        }
+
         m_cmbCompositeOp->selectCompositeOp(KoID(compositeOpID));
         m_eraseModeButton->setChecked(compositeOpID == COMPOSITE_ERASE || m_resourceProvider->eraserMode());
     }
@@ -970,7 +977,7 @@ void KisPaintopBox::slotToggleEraserPreset(bool usingEraser)
 void KisPaintopBox::slotSelectEraserPreset()
 {
     // automatically select freehand brush tool for these select actions
-    KoToolManager::instance()->switchToolRequested("KritaShape/KisToolBrush");
+    m_viewManager->toolManager()->switchToolRequested("KritaShape/KisToolBrush");
 
     KoInputDevice::InputDevice dev = KoInputDevice::InputDevice::Unknown;
     KoInputDevice::Pointer ptr = KoInputDevice::Pointer::Eraser;
@@ -983,7 +990,7 @@ void KisPaintopBox::slotSelectEraserPreset()
 void KisPaintopBox::slotSelectBrushPreset()
 {
     // automatically select freehand brush tool for these select actions
-    KoToolManager::instance()->switchToolRequested("KritaShape/KisToolBrush");
+    m_viewManager->toolManager()->switchToolRequested("KritaShape/KisToolBrush");
 
     KoInputDevice::InputDevice dev = KoInputDevice::InputDevice::Unknown;
     KoInputDevice::Pointer ptr = KoInputDevice::Pointer::Pen;
@@ -1038,6 +1045,9 @@ void KisPaintopBox::slotCanvasResourceChanged(int key, const QVariant &value)
              */
             m_presetsChooserPopup->canvasResourceChanged(preset);
             m_presetsEditor->currentPresetChanged(preset);
+
+            // Track the current preset for settings changes in the stroke preview cache
+            KisBrushStrokePreviewCache::instance()->slotSetCurrentPreset(preset);
         }
 
         if (key == KoCanvasResource::CurrentCompositeOp) {
@@ -1275,8 +1285,8 @@ void KisPaintopBox::slotToolChanged(KoCanvasController* canvas)
 
     if (!m_viewManager->canvasBase()) return;
 
-    QString  id   = KoToolManager::instance()->activeToolId();
-    KisTool* tool = dynamic_cast<KisTool*>(KoToolManager::instance()->toolById(m_viewManager->canvasBase(), id));
+    QString  id   = m_viewManager->toolManager()->activeToolId();
+    KisTool* tool = dynamic_cast<KisTool*>(m_viewManager->toolManager()->toolById(m_viewManager->canvasBase(), id));
 
     setSliderValue("opacity", m_resourceProvider->opacity());
 
@@ -1415,6 +1425,7 @@ void KisPaintopBox::slotReloadPreset()
         const bool result = rserver->reloadResource(preset);
         KIS_SAFE_ASSERT_RECOVER_NOOP(result && "couldn't reload preset");
     }
+
 }
 void KisPaintopBox::slotGuiChangedCurrentPreset() // Called only when UI is changed and not when preset is changed
 {
@@ -1464,6 +1475,7 @@ void KisPaintopBox::slotSaveLockedOptionToPreset(KisPropertiesConfigurationSP p)
     /// explicitly mark the preset as dirty since the properties
     /// might have the same values (updated before)
     preset->setDirty(true);
+
 }
 
 void KisPaintopBox::slotDropLockedOption(KisPropertiesConfigurationSP p)
@@ -1485,6 +1497,7 @@ void KisPaintopBox::slotDropLockedOption(KisPropertiesConfigurationSP p)
 
         }
     }
+
 }
 void KisPaintopBox::slotDirtyPresetToggled(bool value)
 {
@@ -1576,4 +1589,3 @@ void KisPaintopBox::updatePresetConfig()
         }
     }
 }
-

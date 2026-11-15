@@ -59,8 +59,13 @@ public Q_SLOTS:
     qreal brushSize() const;
     void setBrushSize(qreal brushSize);
 
+    qreal brushFade() const;
+    void setBrushFade(qreal brushFade);
+
     qreal brushRotation() const;
     void setBrushRotation(qreal brushRotation);
+
+    QPointF brushPosition() const;
 
     qreal paintingFlow() const;
     void setPaintingFlow(qreal flow);
@@ -84,5 +89,10 @@ public Q_SLOTS:
     QTransform flakeToDocumentTransform() const;
     QTransform flakeToCanvasTransform() const;
     QTransform flakeToImageTransform() const;
+Q_SIGNALS:
+    void currentToolChanged(const QString &toolId);
+    void currentBrushPresetChanged();
+    void foregroundColorChanged();
+    void backgroundColorChanged();
 private:
 };

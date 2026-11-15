@@ -16,10 +16,8 @@
 #include "KoPathShapeLoader.h"
 #include "KoShapeSavingContext.h"
 #include "KoShapeLoadingContext.h"
-#include "KoShapeShadow.h"
 #include "KoShapeBackground.h"
 #include "KoShapeContainer.h"
-#include "KoFilterEffectStack.h"
 #include "KoMarker.h"
 #include "KoShapeStroke.h"
 #include "KoInsets.h"
@@ -32,6 +30,7 @@
 #include <QPainterPath>
 
 #include "kis_global.h"
+#include <kis_algebra_2d.h>
 
 #include <qnumeric.h> // for qIsNaN
 static bool qIsNaNPoint(const QPointF &p) {
@@ -58,13 +57,13 @@ QRectF KoPathShape::Private::handleRect(const QPointF &p, qreal radius) const
 
 
 KoPathShape::KoPathShape()
-    : KoTosContainer()
+    : KoShape()
     , d(new Private)
 {
 }
 
 KoPathShape::KoPathShape(const KoPathShape &rhs)
-    : KoTosContainer(rhs)
+    : KoShape(rhs)
     , d(new Private(*rhs.d))
 {
     // local data cannot be shared via QSharedData because
@@ -291,18 +290,7 @@ QRectF KoPathShape::boundingRect() const
 #endif
 
     // add 10% extra update area around the doubled insets
-    QRectF bb = transform.mapRect(kisGrowRect(outline().boundingRect(), 1.1 * 0.5 * outlineSweepWidth));
-
-    if (shadow()) {
-        KoInsets insets;
-        shadow()->insets(insets);
-        bb.adjust(-insets.left, -insets.top, insets.right, insets.bottom);
-    }
-    if (filterEffectStack()) {
-        QRectF clipRect = filterEffectStack()->clipRectForBoundingRect(QRectF(QPointF(), size()));
-        bb |= transform.mapRect(clipRect);
-    }
-    return bb;
+    return transform.mapRect(kisGrowRect(outline().boundingRect(), 1.1 * 0.5 * outlineSweepWidth));
 }
 
 QSizeF KoPathShape::size() const
@@ -1249,19 +1237,30 @@ KoPathShape * KoPathShape::createShapeFromPainterPath(const QPainterPath &path)
     KoPathShape * shape = new KoPathShape();
 
     int elementCount = path.elementCount();
+    QPointF lastTeleportedToPoint = QPointF();
     for (int i = 0; i < elementCount; i++) {
         QPainterPath::Element element = path.elementAt(i);
+        bool nextIsMove = (i == elementCount - 1) || (path.elementAt(i + 1).isMoveTo());
+        bool merge = nextIsMove && KisAlgebra2D::fuzzyPointCompare(lastTeleportedToPoint, QPointF(element.x, element.y));
+
         switch (element.type) {
         case QPainterPath::MoveToElement:
             shape->moveTo(QPointF(element.x, element.y));
+            lastTeleportedToPoint = QPointF(element.x, element.y);
             break;
         case QPainterPath::LineToElement:
             shape->lineTo(QPointF(element.x, element.y));
+            if (merge) {
+                shape->closeMerge();
+            }
             break;
         case QPainterPath::CurveToElement:
             shape->curveTo(QPointF(element.x, element.y),
                            QPointF(path.elementAt(i + 1).x, path.elementAt(i + 1).y),
                            QPointF(path.elementAt(i + 2).x, path.elementAt(i + 2).y));
+            if (merge) {
+                shape->closeMerge();
+            }
             break;
         default:
             continue;
@@ -1294,15 +1293,7 @@ bool KoPathShape::hitTest(const QPointF &position) const
             return true;
     }
 
-    // if there is no shadow we can as well just leave
-    if (! shadow())
-        return false;
-
-    // the shadow has an offset to the shape, so we simply
-    // check if the position minus the shadow offset hits the shape
-    point = absoluteTransformation().inverted().map(position - shadow()->offset());
-
-    return outlinePath.contains(point);
+    return false;
 }
 
 void KoPathShape::setMarker(KoMarker *marker, KoFlake::MarkerPosition pos)
@@ -1335,6 +1326,38 @@ bool KoPathShape::autoFillMarkers() const
 void KoPathShape::setAutoFillMarkers(bool value)
 {
     d->autoFillMarkers = value;
+}
+
+KoPathSegment KoPathShape::segmentAtPoint(const QPointF &point, const QRectF &grabRoi) const
+{
+    const qreal distanceThreshold = 0.5 * KisAlgebra2D::maxDimension(grabRoi);
+    KoPathSegment segment;
+
+    // convert document point to shape coordinates
+    const QPointF p = documentToShape(point);
+    // our region of interest, i.e. a region around our mouse position
+    const QRectF roi = documentToShape(grabRoi);
+
+    qreal minDistance = std::numeric_limits<qreal>::max();
+
+    // check all segments of this shape which intersect the region of interest
+    const QList<KoPathSegment> segments = segmentsAt(roi);
+
+    foreach (KoPathSegment s, segments) {
+        const qreal nearestPointParam = s.nearestPoint(p);
+        const QPointF nearestPoint = s.pointAt(nearestPointParam);
+        const qreal distance = kisDistance(p, nearestPoint);
+
+        // are we within the allowed distance ?
+        if (distance > distanceThreshold)
+            continue;
+        // are we closer to the last closest point ?
+        if (distance < minDistance) {
+            segment = s;
+        }
+    }
+
+    return segment;
 }
 
 void KoPathShape::recommendPointSelectionChange(const QList<KoPathPointIndex> &newSelection)

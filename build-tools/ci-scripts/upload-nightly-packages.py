@@ -7,7 +7,9 @@ import argparse
 import shutil
 import glob
 
-supportedPlatforms = ['linux', 'windows', 'macos-universal', 'android-x86_64', 'android-arm64-v8a', 'android-armeabi-v7a']
+supportedPlatforms = ['linux', 'windows', 'macos-universal',
+    'linux-qt5', 'windows-qt5', 'macos-universal-qt5',
+    'android-x86_64', 'android-arm64-v8a', 'android-armeabi-v7a']
 
 # Capture our command line parameters
 parser = argparse.ArgumentParser(description='A script for building Krita Windows package on CI')
@@ -33,12 +35,12 @@ sourcePath = os.path.abspath(arguments.folder)
 
 patterns = []
 
-if arguments.platform == 'windows':
+if arguments.platform.startswith('windows'):
     patterns = ['*.zip', '*.exe', '*.msix']
-elif arguments.platform == 'linux':
+elif arguments.platform.startswith('linux'):
     patterns = ['*.AppImage', '*.zsync']
     pass
-elif arguments.platform == 'macos-universal':
+elif arguments.platform.startswith('macos-universal'):
     print('## WARNING: check the pattern for artifacts on macOS!')
     patterns = ['*.dmg']
     pass
@@ -58,16 +60,15 @@ for pattern in patterns:
         print( "## Found a package file: {}".format(package))
         shutil.move(package, packagesFolder)
 
-commandToRun = ' '.join([sys.executable,
-                         os.path.join('ci-notary-service', 'publishbuild.py'),
-                         '--config', os.environ['KRITACI_PUBLISH_BUILD_CONFIG'],
-                         '--platform', arguments.platform,
-                         packagesFolder])
+commandToRun = [sys.executable,
+                os.path.join('ci-notary-service', 'publishbuild.py'),
+                '--config', os.environ['KRITACI_PUBLISH_BUILD_CONFIG'],
+                '--platform', arguments.platform,
+                packagesFolder]
 try:
-    print( "## RUNNING: " + commandToRun )
-    subprocess.check_call( commandToRun, stdout=sys.stdout, stderr=sys.stderr,
-                          shell=True)
-except Exception:
-    print("## Failed to upload packages")
+    print( "## RUNNING: " + ' '.join(commandToRun) )
+    subprocess.check_call(commandToRun)
+except Exception as e:
+    print(f"## Failed to upload packages: {e}")
     sys.exit(1)
 

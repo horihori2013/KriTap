@@ -38,6 +38,7 @@
 #include "kis_selection_mask.h"
 #include <KisPart.h>
 #include <KisScreenMigrationTracker.h>
+#include <kis_display_color_converter.h>
 
 static const unsigned int ANT_LENGTH = 4;
 static const unsigned int ANT_SPACE = 4;
@@ -65,13 +66,14 @@ KisSelectionDecoration::KisSelectionDecoration(QPointer<KisView>_view)
     // selections should be at the top of the stack
     setPriority(100);
 
-    m_selectionActionsPanel = new KisSelectionActionsPanel(this->view()->viewManager(), this->view());
+    m_selectionActionsPanel = new KisSelectionActionsPanel(this->view()->viewManager());
 
     slotConfigChanged();
 }
 
 KisSelectionDecoration::~KisSelectionDecoration()
 {
+    delete m_selectionActionsPanel;
 }
 
 KisSelectionDecoration::Mode KisSelectionDecoration::mode() const
@@ -95,8 +97,12 @@ bool KisSelectionDecoration::selectionIsActive()
 
 void KisSelectionDecoration::initializePens()
 {
+    QColor white(Qt::white);
+    QColor black(Qt::black);
+
     KisPaintingTweaks::initAntsPen(&m_antsPen, &m_outlinePen,
-                                   ANT_LENGTH, ANT_SPACE);
+                                   ANT_LENGTH, ANT_SPACE,
+                                   black, white);
 
     m_antsPen.setWidth(decorationThickness());
     m_outlinePen.setWidth(decorationThickness());
@@ -136,7 +142,6 @@ void KisSelectionDecoration::selectionChanged()
                 view()->canvasBase()->updateCanvas();
             }
 
-
             m_selectionActionsPanel->setVisible(true);
         } else {
             m_signalCompressor.start();
@@ -153,6 +158,7 @@ void KisSelectionDecoration::selectionChanged()
     if (!selection && !selectionIsActive()) {
         m_selectionActionsPanel->setVisible(false);
     }
+    m_selectionActionsPanel->updatePositioning();
 }
 
 void KisSelectionDecoration::slotStartUpdateSelection()
@@ -194,13 +200,32 @@ void KisSelectionDecoration::antsAttackEvent()
     }
 }
 
+void KisSelectionDecoration::toggleSelectionVisibility() {
+    m_selectionVisibility = !m_selectionVisibility;
+}
+
+bool KisSelectionDecoration::selectionVisible() const {
+    return m_selectionVisibility;
+}
+
 void KisSelectionDecoration::drawDecoration(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter *converter, KisCanvas2 *canvas)
 {
     Q_UNUSED(updateRect);
     Q_UNUSED(canvas);
 
-    if ((m_mode == Ants && m_outlinePath.isEmpty()) ||
-        (m_mode == Mask && m_thumbnailImage.isNull())) return;
+    // render Selection Action Bar first, so that it doesn't blink when making a new selection
+
+    if ((m_mode == Ants && m_outlinePath.isEmpty()) || (m_mode == Mask && m_thumbnailImage.isNull())
+        || !m_selectionVisibility) {
+        //The SAP needs to be drawn on top of the decoration, but to avoid the panel flashing when making a new selection, we also need to call draw here
+        m_selectionActionsPanel->draw(gc, canvas->displayRendererInterface());
+
+        return;
+    }
+
+    if (!m_selectionVisibility) {
+        return;
+    }
 
     QTransform transform = converter->imageToWidgetTransform();
 
@@ -223,11 +248,20 @@ void KisSelectionDecoration::drawDecoration(QPainter& gc, const QRectF& updateRe
         QPainterPath p2;
         p2.addRect(r2);
 
-        gc.setBrush(m_maskColor);
+        KoColor c;
+        c.fromQColor(m_maskColor);
+        gc.setBrush(canvas->displayColorConverter()->convertColorToDisplayColorSpace(c));
         gc.setPen(Qt::NoPen);
         gc.drawPath(p1 - p2);
 
     } else /* if (m_mode == Ants) */ {
+
+        KoColor c;
+        c.fromQColor(Qt::white);
+        m_outlinePen.setColor(canvas->displayColorConverter()->convertColorToDisplayColorSpace(c));
+        c.fromQColor(Qt::black);
+        m_antsPen.setColor(canvas->displayColorConverter()->convertColorToDisplayColorSpace(c));
+
         gc.setRenderHints(QPainter::Antialiasing | QPainter::Antialiasing, m_antialiasSelectionOutline);
 
         gc.setOpacity(m_opacity);
@@ -240,14 +274,19 @@ void KisSelectionDecoration::drawDecoration(QPainter& gc, const QRectF& updateRe
         gc.setPen(m_antsPen);
         gc.drawPath(m_outlinePath);
     }
-    gc.restore();
 
-    // render Selection Action Bar
-    m_selectionActionsPanel->draw(gc);
+    gc.restore();
+    m_selectionActionsPanel->draw(gc, canvas->displayRendererInterface());
+}
+
+void KisSelectionDecoration::setCanvasWidget(KisCanvasWidgetBase* canvas)
+{
+    m_selectionActionsPanel->canvasWidgetChanged(canvas);
 }
 
 void KisSelectionDecoration::setVisible(bool v)
 {
+    m_selectionVisibility = v;
     KisCanvasDecoration::setVisible(v);
     selectionChanged();
     m_selectionActionsPanel->setVisible(v);

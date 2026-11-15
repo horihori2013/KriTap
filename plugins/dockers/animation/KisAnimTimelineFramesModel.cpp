@@ -334,7 +334,7 @@ void KisAnimTimelineFramesModel::processUpdateQueue()
 
         if (row >= 0) {
             Q_EMIT headerDataChanged (Qt::Vertical, row, row);
-            Q_EMIT dataChanged(this->index(row, 0), this->index(row, columnCount() - 1));
+            emitRowDataChanged(row);
         }
     }
     m_d->updateQueue.clear();
@@ -427,7 +427,7 @@ QVariant KisAnimTimelineFramesModel::data(const QModelIndex &index, int role) co
             }
             const int maxSize = 200;
 
-            QImage image(dummy->node()->createThumbnailForFrame(maxSize, maxSize, index.column(), Qt::KeepAspectRatio));
+            QImage image(dummy->node()->createPreferredThumbnailForFrame(maxSize, maxSize, index.column(), Qt::KeepAspectRatio));
             return image;
         }
     }
@@ -446,8 +446,8 @@ bool KisAnimTimelineFramesModel::setData(const QModelIndex &index, const QVarian
                 int prevLayer = m_d->activeLayerIndex;
                 m_d->activeLayerIndex = index.row();
 
-                Q_EMIT dataChanged(this->index(prevLayer, 0), this->index(prevLayer, columnCount() - 1));
-                Q_EMIT dataChanged(this->index(m_d->activeLayerIndex, 0), this->index(m_d->activeLayerIndex, columnCount() - 1));
+                emitRowDataChanged(prevLayer);
+                emitRowDataChanged(m_d->activeLayerIndex);
 
                 Q_EMIT headerDataChanged(Qt::Vertical, prevLayer, prevLayer);
                 Q_EMIT headerDataChanged(Qt::Vertical, m_d->activeLayerIndex, m_d->activeLayerIndex);
@@ -616,7 +616,7 @@ QMimeData *KisAnimTimelineFramesModel::mimeDataExtended(const QModelIndexList &i
     stream << int(uuidDataRoot.size());
     stream.writeRawData(uuidDataRoot.data(), uuidDataRoot.size());
 
-    stream << indexes.size();
+    stream << int(indexes.size());
     stream << baseRow << baseColumn;
 
     Q_FOREACH (const QModelIndex &index, indexes) {
@@ -766,7 +766,7 @@ bool KisAnimTimelineFramesModel::dropMimeDataExtended(const QMimeData *data, Qt:
     const bool cloneFrames = action == Qt::LinkAction || copyPolicy == CloneFramesPolicy;
 
     if (dataMoved) {
-        *dataMoved = !copyFrames;
+        *dataMoved = !copyFrames && !cloneFrames;
     }
 
     KUndo2Command *cmd = 0;
@@ -970,7 +970,7 @@ bool KisAnimTimelineFramesModel::insertHoldFrames(const QModelIndexList &selecte
 {
     if (selectedIndexes.isEmpty() || insertCount == 0) return true;
 
-    QScopedPointer<KUndo2Command> parentCommand(new KUndo2Command(kundo2_i18np("Insert frame", "Insert %1 frames", insertCount)));
+    std::unique_ptr<KUndo2Command> parentCommand(new KUndo2Command(kundo2_i18np("Insert frame", "Insert %1 frames", insertCount)));
 
     {
         KisImageBarrierLock locker(m_d->image);
@@ -1068,7 +1068,7 @@ bool KisAnimTimelineFramesModel::insertHoldFrames(const QModelIndexList &selecte
                                       QPoint(plannedFrameMove, 0),
                                       false,
                                       true,
-                                      parentCommand.data());
+                                      parentCommand.get());
         }
 
         if (originalActiveKeyframe) {
@@ -1077,11 +1077,11 @@ bool KisAnimTimelineFramesModel::insertHoldFrames(const QModelIndexList &selecte
                                         activeNode,
                                         KisKeyframeChannel::Raster,
                                         originalActiveKeyframe,
-                                        parentCommand.data());
+                                        parentCommand.get());
         }
     }
 
-    KisProcessingApplicator::runSingleCommandStroke(m_d->image, parentCommand.take(),
+    KisProcessingApplicator::runSingleCommandStroke(m_d->image, parentCommand.release(),
                                                     KisStrokeJobData::BARRIER,
                                                     KisStrokeJobData::EXCLUSIVE);
     return true;
@@ -1156,4 +1156,13 @@ void KisAnimTimelineFramesModel::setActiveLayerSelectedTimes(const QSet<int> &ti
     if (!m_d->image) return;
 
     m_d->image->animationInterface()->setActiveLayerSelectedTimes(times);
+}
+
+void KisAnimTimelineFramesModel::emitRowDataChanged(int row)
+{
+    int rows = rowCount();
+    int cols = columnCount();
+    if (row >= 0 && row < rows && cols > 0) {
+        Q_EMIT dataChanged(index(row, 0), index(row, cols - 1));
+    }
 }

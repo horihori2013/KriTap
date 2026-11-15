@@ -16,6 +16,7 @@
 #include "kis_config.h"
 
 #include <KoStore.h>
+#include <KoColorDisplayRendererInterface.h>
 
 #include <QGlobalStatic>
 #include <QPen>
@@ -129,6 +130,7 @@ struct KisPaintingAssistant::Private {
         QString id;
         QString name;
         bool isSnappingActive {true};
+        int brushPriority {0};
         bool outlineVisible {true};
         bool isLocal {false};
         bool isLocked {false};
@@ -290,6 +292,16 @@ void KisPaintingAssistant::setSnappingActive(bool set)
     d->s->isSnappingActive = set;
 }
 
+int KisPaintingAssistant::brushPriority() const
+{
+    return d->s->brushPriority;
+}
+
+void KisPaintingAssistant::setBrushPriority(int priority)
+{
+    d->s->brushPriority = priority;
+}
+
 void KisPaintingAssistant::endStroke()
 {
     d->s->adjustedPositionValid = false;
@@ -359,27 +371,29 @@ void KisPaintingAssistant::setEditorWidgetOffset(QPointF offset)
 }
 
 
-void KisPaintingAssistant::drawPath(QPainter& painter, const QPainterPath &path, bool isSnappingOn)
+void KisPaintingAssistant::drawPath(QPainter& painter, const QPainterPath &path, const KoColorDisplayRendererInterface *displayRenderInterface, bool isSnappingOn, QPen startingPen)
 {
 
-    QColor paintingColor = effectiveAssistantColor();
+    QColor paintingColor = displayRenderInterface->convertColorToDisplayColorSpace(KoColor(effectiveAssistantColor(), KoColorSpaceRegistry::instance()->rgb8()));;
 
     if (!isSnappingOn) {
         paintingColor.setAlpha(0.2 * paintingColor.alpha());
     }
 
     painter.save();
-    QPen pen_a(paintingColor, d->mainLineWidth * d->decorationThickness);
+    QPen pen_a = startingPen;
+    pen_a.setColor(paintingColor);
+    pen_a.setWidth(d->mainLineWidth * d->decorationThickness);
     pen_a.setCosmetic(true);
     painter.setPen(pen_a);
     painter.drawPath(path);
     painter.restore();
 }
 
-void KisPaintingAssistant::drawPreview(QPainter& painter, const QPainterPath &path)
+void KisPaintingAssistant::drawPreview(QPainter& painter, const QPainterPath &path, const KoColorDisplayRendererInterface *displayRenderInterface)
 {
     painter.save();
-    QPen pen_a(effectiveAssistantColor(), d->previewLineWidth);
+    QPen pen_a(displayRenderInterface->convertColorToDisplayColorSpace(KoColor(effectiveAssistantColor(), KoColorSpaceRegistry::instance()->rgb8())), d->previewLineWidth);
     pen_a.setStyle(Qt::SolidLine);
     pen_a.setCosmetic(true);
     painter.setPen(pen_a);
@@ -387,22 +401,23 @@ void KisPaintingAssistant::drawPreview(QPainter& painter, const QPainterPath &pa
     painter.restore();
 }
 
-void KisPaintingAssistant::drawError(QPainter &painter, const QPainterPath &path)
+void KisPaintingAssistant::drawError(QPainter &painter, const QPainterPath &path, const KoColorDisplayRendererInterface *displayRenderInterface)
 {
     painter.save();
-    QPen pen_a(QColor(255, 0, 0, 125), d->errorLineWidth * d->decorationThickness);
+    const QColor error = displayRenderInterface->convertColorToDisplayColorSpace(KoColor(QColor(255, 0, 0, 125), KoColorSpaceRegistry::instance()->rgb8()));
+    QPen pen_a(error, d->errorLineWidth * d->decorationThickness);
     pen_a.setCosmetic(true);
     painter.setPen(pen_a);
     painter.drawPath(path);
     painter.restore();
 }
 
-void KisPaintingAssistant::drawX(QPainter &painter, const QPointF &pt)
+void KisPaintingAssistant::drawX(QPainter &painter, const QPointF &pt, const KoColorDisplayRendererInterface *displayRenderInterface)
 {
     QPainterPath path;
     path.moveTo(QPointF(pt.x() - 5.0, pt.y() - 5.0)); path.lineTo(QPointF(pt.x() + 5.0, pt.y() + 5.0));
     path.moveTo(QPointF(pt.x() - 5.0, pt.y() + 5.0)); path.lineTo(QPointF(pt.x() + 5.0, pt.y() - 5.0));
-    drawPath(painter, path);
+    drawPath(painter, path, displayRenderInterface);
 }
 
 void KisPaintingAssistant::initHandles(QList<KisPaintingAssistantHandleSP> _handles)
@@ -476,7 +491,7 @@ QPointF KisPaintingAssistant::viewportConstrainedEditorPosition(const KisCoordin
     return converter->widgetToDocument(editorWidgetPos);
 }
 
-void KisPaintingAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, bool useCache, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
+void KisPaintingAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect, const KisCoordinatesConverter* converter, const KoColorDisplayRendererInterface *displayRenderInterface, bool useCache, KisCanvas2* canvas, bool assistantVisible, bool previewVisible)
 {
     Q_UNUSED(updateRect);
 
@@ -486,7 +501,7 @@ void KisPaintingAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect,
 
     if (!useCache) {
         gc.save();
-        drawCache(gc, converter, assistantVisible);
+        drawCache(gc, converter, displayRenderInterface, assistantVisible);
         gc.restore();
         return;
     }
@@ -520,7 +535,7 @@ void KisPaintingAssistant::drawAssistant(QPainter& gc, const QRectF& updateRect,
         QPainter painter(&cached);
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setWindow(cacheRect);
-        drawCache(painter, converter, assistantVisible);
+        drawCache(painter, converter, displayRenderInterface, assistantVisible);
         painter.end();
         d->s->cachedTransform = transform;
         d->s->cachedRect = cacheRect.translated(-widgetBound.topLeft());
@@ -579,6 +594,7 @@ QByteArray KisPaintingAssistant::saveXml(QMap<KisPaintingAssistantHandleSP, int>
     xml.writeStartElement("assistant");
     xml.writeAttribute("type",d->s->id);
     xml.writeAttribute("active", QString::number(d->s->isSnappingActive));
+    xml.writeAttribute("brushPriority", QString::number(d->s->brushPriority));
     xml.writeAttribute("useCustomColor", QString::number(d->s->useCustomColor));
     xml.writeAttribute("customColor",  KisDomUtils::qColorToQString(d->s->assistantCustomColor));
     xml.writeAttribute("locked", QString::number(d->s->isLocked));
@@ -643,6 +659,10 @@ void KisPaintingAssistant::loadXml(KoStore* store, QMap<int, KisPaintingAssistan
 
                 auto active = xml.attributes().value("active");
                 setSnappingActive( (active != "0")  );
+
+                if (xml.attributes().hasAttribute("brushPriority")) {
+                    setBrushPriority(xml.attributes().value("brushPriority").toInt());
+                }
 
                 // load custom shared assistant properties
                 if ( xml.attributes().hasAttribute("useCustomColor")) {
@@ -1163,4 +1183,3 @@ KisPaintingAssistantFactoryRegistry* KisPaintingAssistantFactoryRegistry::instan
 {
     return s_instance;
 }
-

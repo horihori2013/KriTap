@@ -18,18 +18,22 @@ const QString localeName (const KoWritingSystemUtils::Bcp47Locale &locale) {
     QString name;
     const QLocale l = KoWritingSystemUtils::localeFromBcp47Locale(locale);
     const QString lang = QLocale::languageToString(l.language());
+#if QT_VERSION < QT_VERSION_CHECK(6, 2, 0)
     const QString region = QLocale::countryToString(l.country());
+#else
+    const QString region = QLocale::territoryToString(l.territory());
+#endif
 
     if (!lang.isEmpty() && lang != "C") {
         if (!locale.regionTag.isEmpty()) {
             if (!locale.variantTags.isEmpty()) {
-                name = i18nc("language, region, variant", "%1, %2, variant: %3").arg(lang).arg(region).arg(locale.variantTags.join("-"));
+                name = i18nc("language, region, variant", "%1, %2, variant: %3", lang, region, locale.variantTags.join("-"));
             } else {
-                name = i18nc("language, region", "%1, %2").arg(lang).arg(region);
+                name = i18nc("language, variant", "%1, variant: %2", lang, region);
             }
         } else {
             if (!locale.variantTags.isEmpty()) {
-                name = i18nc("language, variant", "%1, variant: %3").arg(lang).arg(locale.variantTags.join("-"));
+                name = i18nc("language, variant", "%1, variant: %2", lang, locale.variantTags.join("-"));
             } else {
                 name = lang;
             }
@@ -354,7 +358,14 @@ bool LanguagesFilterModel::filterAcceptsRow(int source_row, const QModelIndex &s
     const QString name = sourceModel()->data(idx).toString();
     const QString code = sourceModel()->data(idx, AllLanguagesModel::Code).toString();
 
-    return (name.contains(filterRegularExpression()) || code.contains(filterRegularExpression()));
+    QRegularExpression newRegexp = filterRegularExpression();
+
+    if (m_cachedRegexp != newRegexp) {
+        m_cachedRegexp = newRegexp;
+        m_cachedRegexp.optimize();
+    }
+
+    return (name.contains(m_cachedRegexp) || code.contains(m_cachedRegexp));
 }
 
 

@@ -18,6 +18,7 @@
 #include <KoColorSpaceRegistry.h>
 #include <KoResource.h>
 #include <KoSvgTextPropertyData.h>
+#include <KisUniqueColorSet.h>
 
 #include <resources/KoPattern.h>
 #include <kis_paint_device.h>
@@ -42,7 +43,6 @@ KisCanvasResourceProvider::KisCanvasResourceProvider(KisViewManager * view)
 
 KisCanvasResourceProvider::~KisCanvasResourceProvider()
 {
-    disconnect(); // in case Qt gets confused
 }
 
 KoCanvasResourceProvider* KisCanvasResourceProvider::resourceManager()
@@ -70,6 +70,11 @@ void KisCanvasResourceProvider::setResourceManager(KoCanvasResourceProvider *res
     m_resourceManager->setResource(KoCanvasResource::HdrGamma, 1.0);
     m_resourceManager->setResource(KoCanvasResource::EffectiveZoom, 1.0);
     m_resourceManager->setResource(KoCanvasResource::EffectivePhysicalZoom, 1.0);
+
+    KisUniqueColorSet *set = new KisUniqueColorSet(this);
+    QVariant vSet;
+    vSet.setValue(set);
+    m_resourceManager->setResource(KoCanvasResource::ColorHistoryModel, vSet);
 
     connect(m_resourceManager, SIGNAL(canvasResourceChanged(int,QVariant)),
             this, SLOT(slotCanvasResourceChanged(int,QVariant)));
@@ -108,22 +113,20 @@ KoColor KisCanvasResourceProvider::fgColor() const
     }
 }
 
-QList<KoColor> KisCanvasResourceProvider::colorHistory() const
+KisUniqueColorSet *KisCanvasResourceProvider::colorHistoryModel() const
 {
-    QVariant c = m_resourceManager->resource(KoCanvasResource::ColorHistory);
-    if (c.isValid()) {
-        return c.value<QList<KoColor>>();
-    }
-    else {
-        return QList<KoColor>();
-    }
+    QVariant c = m_resourceManager->resource(KoCanvasResource::ColorHistoryModel);
+    return dynamic_cast<KisUniqueColorSet *>(c.value<QObject*>());
 }
 
-void KisCanvasResourceProvider::setColorHistory(const QList<KoColor>& colors)
+void KisCanvasResourceProvider::setColorHistoryColors(const QList<KoColor> &colors)
 {
-    QVariant v;
-    v.setValue(colors);
-    m_resourceManager->setResource(KoCanvasResource::ColorHistory, v);
+    colorHistoryModel()->setColorList(colors);
+}
+
+QList<KoColor> KisCanvasResourceProvider::colorHistoryColors() const
+{
+    return colorHistoryModel()->colorList();
 }
 
 float KisCanvasResourceProvider::HDRExposure() const
@@ -507,6 +510,16 @@ qreal KisCanvasResourceProvider::size() const
     return m_resourceManager->resource(KoCanvasResource::Size).toReal();
 }
 
+void KisCanvasResourceProvider::setFade(qreal fade)
+{
+    m_resourceManager->setResource(KoCanvasResource::Fade, fade);
+}
+
+qreal KisCanvasResourceProvider::fade() const
+{
+    return m_resourceManager->resource(KoCanvasResource::Fade).toReal();
+}
+
 void KisCanvasResourceProvider::setBrushRotation(qreal rotation)
 {
     m_resourceManager->setResource(KoCanvasResource::BrushRotation, rotation);
@@ -556,6 +569,17 @@ void KisCanvasResourceProvider::setTextPropertyData(KoSvgTextPropertyData data)
 KoSvgTextPropertyData KisCanvasResourceProvider::textPropertyData() const
 {
     return m_resourceManager->resource(KoCanvasResource::SvgTextPropertyData).value<KoSvgTextPropertyData>();
+}
+
+void KisCanvasResourceProvider::setCharacterPropertyData(KoSvgTextPropertyData data)
+{
+    m_resourceManager->setResource(KoCanvasResource::SvgCharacterTextPropertyData, QVariant::fromValue(data));
+    Q_EMIT sigCharacterPropertiesChanged();
+}
+
+KoSvgTextPropertyData KisCanvasResourceProvider::characterTextPropertyData() const
+{
+    return m_resourceManager->resource(KoCanvasResource::SvgCharacterTextPropertyData).value<KoSvgTextPropertyData>();
 }
 
 void KisCanvasResourceProvider::notifyLoadingWorkspace(KisWorkspaceResourceSP workspace)

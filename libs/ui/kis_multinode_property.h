@@ -10,7 +10,7 @@
 #include <QObject>
 #include <QCheckBox>
 #include <QPointer>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QBitArray>
 
 #include <kundo2command.h>
@@ -77,10 +77,10 @@ struct NameAdapter : public BaseAdapter {
 
 private:
     static QString stripName(QString name) {
-        QRegExp rexp("^(.+) (\\d{1,3})$");
-        int pos = rexp.indexIn(name);
-        if (pos > -1) {
-            name = rexp.cap(1);
+        QRegularExpression rexp("^(.+) \\d{1,3}$");
+        QRegularExpressionMatch match;
+        if (name.contains(rexp, &match))  {
+            name = match.captured(1);
         }
 
         return name;
@@ -170,7 +170,7 @@ struct LayerPropertyAdapter : public BaseAdapter {
             int sortingIndex = 0;
             KisBaseNode::PropertyList props = node->sectionModelProperties();
             Q_FOREACH (const KisBaseNode::Property &prop, props) {
-                if (prop.state.type() != QVariant::Bool) continue;
+                if (prop.state.type() != QMetaType::Bool) continue;
 
                 if (!adapters.contains(prop.id)) {
                     adapters.insert(prop.id, std::make_pair(prop, sortingIndex));

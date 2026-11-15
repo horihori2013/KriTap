@@ -7,9 +7,12 @@
 #include "kis_liquify_transform_worker.h"
 
 #include <KoColorSpace.h>
+#include <Eigen/Dense>
+#include <cmath>
 #include "kis_grid_interpolation_tools.h"
 #include "kis_dom_utils.h"
 #include "krita_utils.h"
+#include "KisSpatialContainer.h"
 
 
 struct Q_DECL_HIDDEN KisLiquifyTransformWorker::Private
@@ -17,9 +20,11 @@ struct Q_DECL_HIDDEN KisLiquifyTransformWorker::Private
     Private(const QRect &_srcBounds,
             KoUpdater *_progress,
             int _pixelPrecision)
-        : srcBounds(_srcBounds),
-          progress(_progress),
-          pixelPrecision(_pixelPrecision)
+        : srcBounds(_srcBounds)
+        , originalPointsContainer(_srcBounds)
+        , transformedPointsContainer(_srcBounds)
+        , progress(_progress)
+        , pixelPrecision(_pixelPrecision)
     {
     }
 
@@ -27,6 +32,11 @@ struct Q_DECL_HIDDEN KisLiquifyTransformWorker::Private
 
     QVector<QPointF> originalPoints;
     QVector<QPointF> transformedPoints;
+
+    KisSpatialContainer originalPointsContainer;
+    KisSpatialContainer transformedPointsContainer;
+
+    QRectF accumulatedBrushStrokes;
 
     KoUpdater *progress;
     int pixelPrecision;
@@ -159,30 +169,37 @@ void KisLiquifyTransformWorker::Private::preparePoints()
 
     originalPoints = pointsOp.m_points;
     transformedPoints = pointsOp.m_points;
+
+    originalPointsContainer.initializeWithGridPoints(srcBounds, pixelPrecision);
+    transformedPointsContainer.initializeWithGridPoints(srcBounds, pixelPrecision);
+
 }
 
 void KisLiquifyTransformWorker::translate(const QPointF &offset)
 {
-    QVector<QPointF>::iterator it = m_d->transformedPoints.begin();
-    QVector<QPointF>::iterator end = m_d->transformedPoints.end();
-
-    QVector<QPointF>::iterator refIt = m_d->originalPoints.begin();
     KIS_ASSERT_RECOVER_RETURN(m_d->originalPoints.size() ==
                               m_d->transformedPoints.size());
 
-    for (; it != end; ++it, ++refIt) {
-        *it += offset;
-        *refIt += offset;
+    // TODO: make it within Spatial Container, either a hidden offset, or just offsetting all points at once
+    // and benchmark
+    for (int i = 0; i < m_d->transformedPoints.count(); i++) {
+        m_d->originalPointsContainer.movePoint(i, m_d->originalPoints[i], m_d->originalPoints[i] + offset);
+        m_d->transformedPointsContainer.movePoint(i, m_d->transformedPoints[i], m_d->transformedPoints[i] + offset);
+
+        m_d->originalPoints[i] += offset;
+        m_d->transformedPoints[i] += offset;
     }
+
+    m_d->accumulatedBrushStrokes.translate(offset);
 }
 
 void KisLiquifyTransformWorker::translateDstSpace(const QPointF &offset)
 {
-    QVector<QPointF>::iterator it = m_d->transformedPoints.begin();
-    QVector<QPointF>::iterator end = m_d->transformedPoints.end();
-
-    for (; it != end; ++it) {
-        *it += offset;
+    // TODO: make it within Spatial Container, either a hidden offset, or just offsetting all points at once
+    // and benchmark
+    for (int i = 0; i < m_d->transformedPoints.count(); i++) {
+        m_d->transformedPointsContainer.movePoint(i, m_d->transformedPoints[i], m_d->transformedPoints[i] + offset);
+        m_d->transformedPoints[i] += offset;
     }
 }
 
@@ -192,26 +209,208 @@ void KisLiquifyTransformWorker::undoPoints(const QPointF &base,
 {
     const qreal maxDistCoeff = 3.0;
     const qreal maxDist = maxDistCoeff * sigma;
-    QRectF clipRect(base.x() - maxDist, base.y() - maxDist,
-                    2 * maxDist, 2 * maxDist);
 
-    QVector<QPointF>::iterator it = m_d->transformedPoints.begin();
-    QVector<QPointF>::iterator end = m_d->transformedPoints.end();
-
-    QVector<QPointF>::iterator refIt = m_d->originalPoints.begin();
     KIS_ASSERT_RECOVER_RETURN(m_d->originalPoints.size() ==
                               m_d->transformedPoints.size());
 
-    for (; it != end; ++it, ++refIt) {
-        if (!clipRect.contains(*it)) continue;
+    QVector<int> indexes;
+    m_d->transformedPointsContainer.findAllInRange(indexes, base, maxDist);
+    for (int i = 0; i < indexes.count(); i++) {
 
-        QPointF diff = *it - base;
+        QPointF diff = m_d->transformedPoints[indexes[i]] - base;
         qreal dist = KisAlgebra2D::norm(diff);
-        if (dist > maxDist) continue;
-
         qreal lambda = exp(-0.5 * pow2(dist / sigma));
         lambda *= amount;
-        *it = *refIt * lambda + *it * (1.0 - lambda);
+
+        QPointF oldPosition = m_d->transformedPoints[indexes[i]];
+        m_d->transformedPoints[indexes[i]] = m_d->originalPoints[indexes[i]] * lambda + m_d->transformedPoints[indexes[i]] * (1.0 - lambda);
+
+        m_d->transformedPointsContainer.movePoint(indexes[i], oldPosition, m_d->transformedPoints[indexes[i]]);
+    }
+}
+
+namespace {
+
+struct PointUpdate
+{
+    int index = -1;
+    QPointF oldPosition;
+    QPointF newPosition;
+};
+
+struct RestoreShapeSample
+{
+    int index = -1;
+    qreal weight = 0.0;
+    qreal lambda = 0.0;
+};
+
+Eigen::Vector2d toEigenPoint(const QPointF &pt)
+{
+    return Eigen::Vector2d(pt.x(), pt.y());
+}
+
+QPointF fromEigenPoint(const Eigen::Vector2d &pt)
+{
+    return QPointF(pt.x(), pt.y());
+}
+
+bool isFinite(const Eigen::Matrix2d &m)
+{
+    return std::isfinite(m(0, 0)) &&
+        std::isfinite(m(0, 1)) &&
+        std::isfinite(m(1, 0)) &&
+        std::isfinite(m(1, 1));
+}
+
+}
+
+// A restore-shape dab determines its samples and Gaussian falloff from the
+// points' positions at the beginning of the dab. The centroid correction keeps
+// this fixed weighted sample set centered; subsequent dabs query the moved
+// points and calculate their falloff again.
+void KisLiquifyTransformWorker::restoreShapePoints(const QPointF &base,
+                                                   qreal amount,
+                                                   qreal sigma,
+                                                   bool preserveRotation,
+                                                   bool preserveScale,
+                                                   bool preserveStretch)
+{
+    const qreal maxDistCoeff = 3.0;
+    const qreal maxDist = maxDistCoeff * sigma;
+
+    KIS_ASSERT_RECOVER_RETURN(m_d->originalPoints.size() ==
+                              m_d->transformedPoints.size());
+
+    QRectF clipRect(base.x() - maxDist, base.y() - maxDist,
+                    2 * maxDist, 2 * maxDist);
+    m_d->accumulatedBrushStrokes |= kisGrowRect(clipRect, m_d->pixelPrecision);
+
+    QVector<int> indexes;
+    m_d->transformedPointsContainer.findAllInRange(indexes, base, maxDist);
+
+    QVector<RestoreShapeSample> samples;
+    samples.reserve(indexes.count());
+
+    qreal weightSum = 0.0;
+    Eigen::Vector2d originalCentroid(0.0, 0.0);
+    Eigen::Vector2d transformedCentroid(0.0, 0.0);
+
+    for (int i = 0; i < indexes.count(); i++) {
+        const int index = indexes[i];
+
+        const QPointF diff = m_d->transformedPoints[index] - base;
+        const qreal dist = KisAlgebra2D::norm(diff);
+        if (dist > maxDist) continue;
+
+        const qreal weight = exp(-0.5 * pow2(dist / sigma));
+        const qreal lambda = qBound<qreal>(0.0, weight * amount, 1.0);
+        if (lambda <= 0.0) continue;
+
+        samples << RestoreShapeSample{index, weight, lambda};
+
+        originalCentroid += weight * toEigenPoint(m_d->originalPoints[index]);
+        transformedCentroid += weight * toEigenPoint(m_d->transformedPoints[index]);
+        weightSum += weight;
+    }
+
+    if (samples.count() < 3 || weightSum <= 1e-12) return;
+
+    originalCentroid /= weightSum;
+    transformedCentroid /= weightSum;
+
+    Eigen::Matrix2d originalMoment = Eigen::Matrix2d::Zero();
+    Eigen::Matrix2d transformedOriginalMoment = Eigen::Matrix2d::Zero();
+
+    for (int i = 0; i < samples.count(); i++) {
+        const RestoreShapeSample &sample = samples[i];
+
+        const Eigen::Vector2d originalOffset =
+            toEigenPoint(m_d->originalPoints[sample.index]) - originalCentroid;
+        const Eigen::Vector2d transformedOffset =
+            toEigenPoint(m_d->transformedPoints[sample.index]) - transformedCentroid;
+
+        originalMoment += sample.weight * originalOffset * originalOffset.transpose();
+        transformedOriginalMoment += sample.weight * transformedOffset * originalOffset.transpose();
+    }
+
+    if (qAbs(originalMoment.determinant()) < 1e-12) return;
+
+    const Eigen::Matrix2d affine =
+        transformedOriginalMoment * originalMoment.inverse();
+
+    if (!isFinite(affine)) return;
+
+    Eigen::JacobiSVD<Eigen::Matrix2d> svd(affine, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    Eigen::Matrix2d rotation = svd.matrixU() * svd.matrixV().transpose();
+
+    if (rotation.determinant() < 0.0) {
+        Eigen::Matrix2d u = svd.matrixU();
+        u.col(1) *= -1.0;
+        rotation = u * svd.matrixV().transpose();
+    }
+
+    if (!isFinite(rotation)) return;
+
+    const Eigen::Vector2d singularValues = svd.singularValues();
+    const qreal uniformScale =
+        preserveScale ? qMax<qreal>(1e-6, 0.5 * (singularValues.x() + singularValues.y())) : 1.0;
+
+    Eigen::Matrix2d targetLinear = Eigen::Matrix2d::Identity();
+    if (preserveRotation) {
+        targetLinear = rotation;
+    }
+    targetLinear *= uniformScale;
+
+    if (preserveStretch) {
+        const Eigen::Matrix2d stretchInRotationSpace = rotation.transpose() * affine;
+        qreal stretchX = qMax<qreal>(1e-6, qAbs(stretchInRotationSpace(0, 0)));
+        qreal stretchY = qMax<qreal>(1e-6, qAbs(stretchInRotationSpace(1, 1)));
+        const qreal stretchNormalization =
+            preserveScale ? uniformScale : qMax<qreal>(1e-6, std::sqrt(stretchX * stretchY));
+
+        Eigen::Matrix2d stretch = Eigen::Matrix2d::Identity();
+        stretch(0, 0) = stretchX / stretchNormalization;
+        stretch(1, 1) = stretchY / stretchNormalization;
+        targetLinear *= stretch;
+    }
+
+    QVector<PointUpdate> updates;
+    updates.reserve(samples.count());
+
+    Eigen::Vector2d updatedCentroid(0.0, 0.0);
+    qreal updatedWeightSum = 0.0;
+
+    for (int i = 0; i < samples.count(); i++) {
+        const RestoreShapeSample &sample = samples[i];
+        const Eigen::Vector2d oldPosition = toEigenPoint(m_d->transformedPoints[sample.index]);
+        const Eigen::Vector2d originalOffset =
+            toEigenPoint(m_d->originalPoints[sample.index]) - originalCentroid;
+        const Eigen::Vector2d targetPosition =
+            transformedCentroid + targetLinear * originalOffset;
+        const Eigen::Vector2d newPosition =
+            oldPosition * (1.0 - sample.lambda) + targetPosition * sample.lambda;
+
+        updates << PointUpdate{sample.index,
+                               m_d->transformedPoints[sample.index],
+                               fromEigenPoint(newPosition)};
+
+        updatedCentroid += sample.weight * newPosition;
+        updatedWeightSum += sample.weight;
+    }
+
+    if (updatedWeightSum <= 1e-12) return;
+    updatedCentroid /= updatedWeightSum;
+
+    const QPointF centroidCorrection = fromEigenPoint(transformedCentroid - updatedCentroid);
+
+    for (int i = 0; i < updates.count(); i++) {
+        PointUpdate &update = updates[i];
+        update.newPosition += centroidCorrection;
+        m_d->transformedPoints[update.index] = update.newPosition;
+        m_d->transformedPointsContainer.movePoint(update.index,
+                                                 update.oldPosition,
+                                                 update.newPosition);
     }
 }
 
@@ -225,18 +424,24 @@ processTransformedPixelsBuildUp(ProcessOp op,
     QRectF clipRect(base.x() - maxDist, base.y() - maxDist,
                     2 * maxDist, 2 * maxDist);
 
-    QVector<QPointF>::iterator it = transformedPoints.begin();
-    QVector<QPointF>::iterator end = transformedPoints.end();
+    accumulatedBrushStrokes |= kisGrowRect(clipRect, pixelPrecision);
 
-    for (; it != end; ++it) {
-        if (!clipRect.contains(*it)) continue;
+    QVector<int> indexes;
+    transformedPointsContainer.findAllInRange(indexes, base, maxDist);
 
-        QPointF diff = *it - base;
+    for (int i = 0; i < indexes.count(); i++) {
+
+        QPointF diff = transformedPoints[indexes[i]] - base;
         qreal dist = KisAlgebra2D::norm(diff);
         if (dist > maxDist) continue;
 
         const qreal lambda = exp(-0.5 * pow2(dist / sigma));
-        *it = op(*it, base, diff, lambda);
+        QPointF oldPosition = transformedPoints[indexes[i]];
+        transformedPoints[indexes[i]] = op(transformedPoints[indexes[i]], base, diff, lambda);
+
+
+        transformedPointsContainer.movePoint(indexes[i], oldPosition, transformedPoints[indexes[i]]);
+
     }
 }
 
@@ -251,25 +456,29 @@ processTransformedPixelsWash(ProcessOp op,
     QRectF clipRect(base.x() - maxDist, base.y() - maxDist,
                     2 * maxDist, 2 * maxDist);
 
-    QVector<QPointF>::iterator it = transformedPoints.begin();
-    QVector<QPointF>::iterator end = transformedPoints.end();
+    accumulatedBrushStrokes |= kisGrowRect(clipRect, pixelPrecision);
 
-    QVector<QPointF>::iterator refIt = originalPoints.begin();
     KIS_ASSERT_RECOVER_RETURN(originalPoints.size() ==
                               transformedPoints.size());
 
-    for (; it != end; ++it, ++refIt) {
-        if (!clipRect.contains(*it)) continue;
+    // TODO: remove the originalPointsContainer entirely, and use GridIterationTools to figure out indexes instead
+    // and add unit tests for it
 
-        QPointF diff = *refIt - base;
+    QVector<int> indexes;
+    originalPointsContainer.findAllInRange(indexes, base, maxDist);
+    for (int i = 0; i < indexes.count(); i++) {
+
+        QPointF diff = originalPoints[indexes[i]] - base;
         qreal dist = KisAlgebra2D::norm(diff);
-        if (dist > maxDist) continue;
 
         const qreal lambda = exp(-0.5 * pow2(dist / sigma));
-        QPointF dstPt = op(*refIt, base, diff, lambda);
+        QPointF dstPt = op(originalPoints[indexes[i]], base, diff, lambda);
 
-        if (kisDistance(dstPt, *refIt) > kisDistance(*it, *refIt)) {
-            *it = (1.0 - flow) * (*it) + flow * dstPt;
+        if (kisDistance(dstPt, originalPoints[indexes[i]]) > kisDistance(transformedPoints[indexes[i]], originalPoints[indexes[i]])) {
+            QPointF oldPosition = transformedPoints[indexes[i]];
+            transformedPoints[indexes[i]] = (1.0 - flow) * transformedPoints[indexes[i]] + flow * dstPt;
+
+            transformedPointsContainer.movePoint(indexes[i], oldPosition, transformedPoints[indexes[i]]);
         }
     }
 }
@@ -396,34 +605,39 @@ void KisLiquifyTransformWorker::run(KisPaintDeviceSP srcDevice, KisPaintDeviceSP
     dstDevice->clear();
 
     using namespace GridIterationTools;
+    QRect correctSubGrid = calculateCorrectSubGrid(m_d->srcBounds, m_d->pixelPrecision, m_d->accumulatedBrushStrokes, m_d->gridSize);
 
     PaintDevicePolygonOp polygonOp(srcDevice, dstDevice);
     RegularGridIndexesOp indexesOp(m_d->gridSize);
+
+    bool canMergeRects = GridIterationTools::canProcessRectsInRandomOrder(indexesOp, m_d->transformedPoints, correctSubGrid);
+    polygonOp.setCanMergeRects(canMergeRects);
+
+#ifdef DEBUG_PAINTING_POLYGONS
+    polygonOp.setDebugColor(Qt::red);
+#endif
+
     iterateThroughGrid<AlwaysCompletePolygonPolicy>(polygonOp, indexesOp,
                                                     m_d->gridSize,
                                                     m_d->originalPoints,
-                                                    m_d->transformedPoints);
+                                                    m_d->transformedPoints,
+                                                    correctSubGrid);
+    QList<QRectF> areasToCopy = cutOutSubgridFromBounds(correctSubGrid, m_d->srcBounds, m_d->gridSize, m_d->originalPoints);
+#ifdef DEBUG_PAINTING_POLYGONS
+    QList<QColor> colors = {Qt::blue, Qt::green, Qt::yellow, Qt::black};
+#endif
+    for (int i = 0; i < areasToCopy.length(); i++) {
+#ifdef DEBUG_PAINTING_POLYGONS
+        polygonOp.setDebugColor(colors[i]);
+#endif
+        polygonOp.fastCopyArea(areasToCopy[i].toRect(), false);
+    }
 }
 
 QRect KisLiquifyTransformWorker::approxChangeRect(const QRect &rc)
 {
     const qreal margin = 0.05;
-
-    /**
-     * Here we just return the full area occupied by the transformed grid.
-     * We sample grid points for not doing too much work.
-     */
-    const int maxSamplePoints = 200;
-    const int minStep = 3;
-    const int step = qMax(minStep, m_d->transformedPoints.size() / maxSamplePoints);
-    Q_UNUSED(step);
-
-    QVector<QPoint> samplePoints;
-    for (auto it = m_d->transformedPoints.constBegin(); it != m_d->transformedPoints.constEnd(); ++it) {
-        samplePoints << it->toPoint();
-    }
-
-    QRect resultRect = KisAlgebra2D::approximateRectFromPoints(samplePoints);
+    QRect resultRect = m_d->transformedPointsContainer.exactBounds().toRect();
     return KisAlgebra2D::blowRect(resultRect | rc, margin);
 }
 
@@ -433,17 +647,31 @@ QRect KisLiquifyTransformWorker::approxNeedRect(const QRect &rc, const QRect &fu
     return fullBounds;
 }
 
+QRectF KisLiquifyTransformWorker::accumulatedStrokesBounds() const
+{
+    return m_d->accumulatedBrushStrokes;
+}
+
 void KisLiquifyTransformWorker::transformSrcAndDst(const QTransform &t)
 {
     KIS_SAFE_ASSERT_RECOVER_RETURN(t.type() <= QTransform::TxScale);
 
     m_d->srcBounds = t.mapRect(m_d->srcBounds);
 
-    for (auto it = m_d->originalPoints.begin(); it != m_d->originalPoints.end(); ++it) {
-        *it = t.map(*it);
+    // TODO: do it within Spatial Container
+    for (int i = 0; i < m_d->transformedPoints.count(); i++) {
+        m_d->originalPointsContainer.movePoint(i, m_d->originalPoints[i], t.map(m_d->originalPoints[i]));
+        m_d->transformedPointsContainer.movePoint(i, m_d->transformedPoints[i], t.map(m_d->transformedPoints[i]));
+
+        m_d->originalPoints[i] = t.map(m_d->originalPoints[i]);
+        m_d->transformedPoints[i] = t.map(m_d->transformedPoints[i]);
     }
-    for (auto it = m_d->transformedPoints.begin(); it != m_d->transformedPoints.end(); ++it) {
-        *it = t.map(*it);
+    m_d->accumulatedBrushStrokes = t.map(m_d->accumulatedBrushStrokes).boundingRect();
+    if (t == QTransform::fromScale(t.m11(), t.m22()) && t.m11() == t.m22()) {
+        m_d->pixelPrecision *= t.m11();
+        KIS_SAFE_ASSERT_RECOVER(m_d->pixelPrecision > 0) { m_d->pixelPrecision = 1; }
+        KIS_SAFE_ASSERT_RECOVER(QList<int>({1, 2, 4, 8, 16}).contains(m_d->pixelPrecision) || m_d->pixelPrecision%16 == 0) { m_d->pixelPrecision = 1; }
+        // should check if pixelPrecision is a power of 2, but that's more complicated
     }
 }
 
@@ -506,13 +734,34 @@ QImage KisLiquifyTransformWorker::runOnQImage(const QImage &srcImage,
 
     GridIterationTools::QImagePolygonOp polygonOp(srcImage, dstImage, srcImageOffset, dstQImageOffset);
     GridIterationTools::RegularGridIndexesOp indexesOp(m_d->gridSize);
-    GridIterationTools::iterateThroughGrid
-        <GridIterationTools::AlwaysCompletePolygonPolicy>(polygonOp, indexesOp,
-                                                          m_d->gridSize,
-                                                          originalPointsLocal,
-                                                          transformedPointsLocal);
+
+
+    QRect correctSubGrid = GridIterationTools::calculateCorrectSubGrid(m_d->srcBounds, m_d->pixelPrecision, m_d->accumulatedBrushStrokes, m_d->gridSize);
+    bool canMergeRects = GridIterationTools::canProcessRectsInRandomOrder(indexesOp, m_d->transformedPoints, correctSubGrid);
+    polygonOp.setCanMergeRects(canMergeRects);
+
+
+    GridIterationTools::iterateThroughGrid<GridIterationTools::AlwaysCompletePolygonPolicy>(polygonOp, indexesOp,
+                                                    m_d->gridSize,
+                                                    originalPointsLocal,
+                                                    transformedPointsLocal,
+                                                    correctSubGrid);
+
+
+    QList<QRectF> areasToCopy = GridIterationTools::cutOutSubgridFromBounds(correctSubGrid, m_d->srcBounds, m_d->gridSize, m_d->originalPoints);
+    polygonOp.setCanMergeRects(false);
+    const qreal eps = 0.001;
+    for (int i = 0; i < areasToCopy.length(); i++) {
+        QPolygonF transformed = imageToThumbTransform.map(QPolygonF(areasToCopy[i]));
+        if (KisAlgebra2D::isPolygonPixelAlignedRect(transformed, eps)) {
+            polygonOp.fastCopyArea(transformed.boundingRect().toRect());
+        } else {
+            polygonOp.operator()(transformed, transformed);
+        }
+    }
     return dstImage;
 }
+
 
 void KisLiquifyTransformWorker::toXML(QDomElement *e) const
 {
@@ -573,10 +822,22 @@ KisLiquifyTransformWorker* KisLiquifyTransformWorker::fromXML(const QDomElement 
         return worker;
     }
 
+    QRectF changedRect = QRectF();
+
     for (int i = 0; i < numPoints; i++) {
         worker->m_d->originalPoints[i] = originalPoints[i];
         worker->m_d->transformedPoints[i] = transformedPoints[i];
+        if (!KisAlgebra2D::fuzzyPointCompare(transformedPoints[i], originalPoints[i])) {
+            KisAlgebra2D::accumulateBounds(transformedPoints[i], &changedRect);
+            KisAlgebra2D::accumulateBounds(originalPoints[i], &changedRect);
+        }
     }
+    changedRect = kisGrowRect(changedRect, pixelPrecision);
+
+    worker->m_d->transformedPointsContainer.initializeWith(worker->m_d->transformedPoints);
+    worker->m_d->originalPointsContainer.initializeWith(worker->m_d->originalPoints);
+
+    worker->m_d->accumulatedBrushStrokes = changedRect;
 
 
     return worker;

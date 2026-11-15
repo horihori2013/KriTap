@@ -657,7 +657,7 @@ const KoColorProfile *KisKraLoadVisitor::loadProfile(const QString &location, co
         }
         else {
             // Create a colorspace with the embedded profile
-            const KoColorProfile *profile = KoColorSpaceRegistry::instance()->createColorProfile(colorModelId, colorDepthId, data);
+            const KoColorProfile *profile = KoColorSpaceRegistry::instance()->createColorProfile(colorModelId, colorDepthId, data, customProfileNameAliasForKra());
             m_profileCache[hash] = profile;
             result = profile;
         }
@@ -820,17 +820,25 @@ void KisKraLoadVisitor::loadNodeKeyframes(KisNode *node)
         return;
     }
 
+
+    QDomDocument dom;
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
     QString errorMsg;
     int errorLine;
     int errorColumn;
-
-    QDomDocument dom;
     bool ok = dom.setContent(m_store->device(), &errorMsg, &errorLine, &errorColumn);
+#else
+    QDomDocument::ParseResult result = dom.setContent(m_store->device());
+#endif
     m_store->close();
 
-
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
     if (!ok) {
         m_errorMessages << i18n("parsing error in the keyframe file %1 at line %2, column %3\nError message: %4", location, errorLine, errorColumn, i18n(errorMsg.toUtf8()));
+#else
+    if (!result) {
+        m_errorMessages << i18n("parsing error in the keyframe file %1 at line %2, column %3\nError message: %4", location, result.errorLine, result.errorColumn, i18n(result.errorMessage.toUtf8()));
+#endif
         return;
     }
 
@@ -883,4 +891,14 @@ void KisKraLoadVisitor::loadDeprecatedFilter(KisFilterConfigurationSP cfg)
         cfg->setProperty("lockAspect", true);
         cfg->setProperty("transparency", false);
     }
+}
+
+QHash<QString, QString> KisKraLoadVisitor::customProfileNameAliasForKra()
+{
+    // replace the legacy profile with the new Rec2020PQ profile explicitly pinned
+    // to 80 nit Diffuse White
+    return {
+        {"High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF",
+        "Krita Rec. 2100 Perceptual Quantizer (80cd/m²)"}
+    };
 }

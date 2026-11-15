@@ -28,6 +28,7 @@
 #include <KoColorSpaceConstants.h>
 #include <KoColorSpaceRegistry.h>
 #include <KoColorTransferFunctions.h>
+#include <KoColorProfileQuery.h>
 #include <kis_assert.h>
 #include <kis_config.h>
 #include <kis_exif_info_visitor.h>
@@ -67,9 +68,7 @@ KisPropertiesConfigurationSP HeifExport::defaultConfiguration(const QByteArray &
     cfg->setProperty("chroma", "444");
     cfg->setProperty("floatingPointConversionOption", "KeepSame");
     cfg->setProperty("monochromeToSRGB", false);
-    cfg->setProperty("HLGnominalPeak", 1000.0);
-    cfg->setProperty("HLGgamma", 1.2);
-    cfg->setProperty("removeHGLOOTF", true);
+    cfg->setProperty("removeHGLOOTF", false);
     return cfg;
 }
 
@@ -195,9 +194,9 @@ KisImportExportErrorCode HeifExport::convert(KisDocument *document, QIODevice *i
     }
 
     if (cs->hasHighDynamicRange() && convertToRec2020) {
-        const KoColorProfile *linear = KoColorSpaceRegistry::instance()->profileFor(QVector<double>(),
+        const KoColorProfile *linear = KoColorSpaceRegistry::instance()->profileFor(KoColorProfileQuery(
                                                                                    PRIMARIES_ITU_R_BT_2020_2_AND_2100_0,
-                                                                                   TRC_LINEAR);
+                                                                                   TRC_LINEAR));
         const KoColorSpace *linearRec2020 = KoColorSpaceRegistry::instance()->colorSpace("RGBA", "F32", linear);
         image->convertImageColorSpace(linearRec2020,
                                       KoColorConversionTransformation::internalRenderingIntent(),
@@ -211,8 +210,7 @@ KisImportExportErrorCode HeifExport::convert(KisDocument *document, QIODevice *i
     bool lossless = configuration->getBool("lossless", false);
     bool hasAlpha = configuration->getBool(KisImportExportFilter::ImageContainsTransparencyTag, false);
     float hlgGamma = configuration->getFloat("HLGgamma", 1.2f);
-    float hlgNominalPeak = configuration->getFloat("HLGnominalPeak", 1000.0f);
-    bool removeHGLOOTF = configuration->getBool("removeHGLOOTF", true);
+    bool removeHGLOOTF = false;
 
     // If we want to add information from the document to the metadata,
     // we should do that here.
@@ -330,7 +328,6 @@ KisImportExportErrorCode HeifExport::convert(KisDocument *document, QIODevice *i
                                                     stride,
                                                     it,
                                                     hlgGamma,
-                                                    hlgNominalPeak,
                                                     cs);
                 }
             }
@@ -592,9 +589,6 @@ void KisWdgOptionsHeif::setConfiguration(const KisPropertiesConfigurationSP cfg)
         cmbConversionPolicy->setCurrentIndex(
             conversionOptionName.indexOf(optionName));
     }
-    chkHLGOOTF->setChecked(cfg->getBool("removeHGLOOTF", true));
-    spnNits->setValue(cfg->getDouble("HLGnominalPeak", 1000.0));
-    spnGamma->setValue(cfg->getDouble("HLGgamma", 1.2));
 
     lossySettings->setEnabled(!chkLossless->isChecked());
 }
@@ -607,9 +601,6 @@ KisPropertiesConfigurationSP KisWdgOptionsHeif::configuration() const
     cfg->setProperty("chroma", cmbChroma->currentText());
     cfg->setProperty("floatingPointConversionOption", cmbConversionPolicy->currentData(Qt::UserRole+1).toString());
     cfg->setProperty("monochromeToSRGB", chkMonochromesRGB->isChecked());
-    cfg->setProperty("HLGnominalPeak", spnNits->value());
-    cfg->setProperty("HLGgamma", spnGamma->value());
-    cfg->setProperty("removeHGLOOTF", chkHLGOOTF->isChecked());
     cfg->setProperty(KisImportExportFilter::ImageContainsTransparencyTag, m_hasAlpha);
     return cfg;
 }
@@ -618,19 +609,5 @@ void KisWdgOptionsHeif::toggleQualitySlider(bool toggle)
 {
     // Disable the quality slider if lossless is true
     lossySettings->setEnabled(!toggle);
-}
-
-void KisWdgOptionsHeif::toggleHLGOptions(bool toggle)
-{
-    spnNits->setEnabled(toggle);
-    spnGamma->setEnabled(toggle);
-}
-
-void KisWdgOptionsHeif::toggleExtraHDROptions(int index) {
-    Q_UNUSED(index)
-    bool toggle = cmbConversionPolicy->currentData(Qt::UserRole+1).toString().contains("HLG");
-    chkHLGOOTF->setEnabled(toggle);
-    spnNits->setEnabled(toggle);
-    spnGamma->setEnabled(toggle);
 }
 #include <HeifExport.moc>

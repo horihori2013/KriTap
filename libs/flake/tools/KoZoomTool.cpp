@@ -9,6 +9,9 @@
 #include "KoZoomTool.h"
 
 #include <QKeyEvent>
+#include <QIcon>
+#include <QPixmap>
+#include <QWidget>
 
 #include "KoZoomStrategy.h"
 #include "KoZoomToolWidget.h"
@@ -24,10 +27,10 @@ KoZoomTool::KoZoomTool(KoCanvasBase *canvas)
         , m_zoomInMode(true)
 {
     QPixmap inPixmap, outPixmap;
-    inPixmap.load(":/zoom_in_cursor.png");
-    outPixmap.load(":/zoom_out_cursor.png");
-    m_inCursor = QCursor(inPixmap, 4, 4);
-    m_outCursor = QCursor(outPixmap, 4, 4);
+    inPixmap = QIcon(":/zoom_in_cursor.svg").pixmap(32);
+    outPixmap = QIcon(":/zoom_out_cursor.svg").pixmap(32);
+    m_inCursor = QCursor(inPixmap, 4*inPixmap.devicePixelRatio(), 4*inPixmap.devicePixelRatio());
+    m_outCursor = QCursor(outPixmap, 4*outPixmap.devicePixelRatio(), 4*outPixmap.devicePixelRatio());
 }
 
 void KoZoomTool::mouseReleaseEvent(KoPointerEvent *event)

@@ -17,7 +17,6 @@
 
 #include "kritaflake_export.h"
 #include "SvgGradientHelper.h"
-#include "SvgFilterHelper.h"
 #include "SvgClipPathHelper.h"
 #include "SvgLoadingContext.h"
 #include "SvgStyleParser.h"
@@ -58,7 +57,7 @@ public:
     void setResolution(const QRectF boundsInPixels, qreal pixelsPerInch);
     void setDefaultKraTextVersion(int version);
 
-    // Set whether to always consider shapes without fill or stroke explicitely set as inherited.
+    // Set whether to always consider shapes without fill or stroke explicitly set as inherited.
     // By default, this is off, and the parser retrieves the fill from the graphicsContext.
     void setFillStrokeInheritByDefault(const bool enable);
 
@@ -95,10 +94,10 @@ protected:
     KoShape* parseGroup(const QDomElement &e, const QDomElement &overrideChildrenFrom = QDomElement(), bool createContext = true);
 
     /// Get the path for the gives textPath element.
-    KoShape* getTextPath(const QDomElement &e);
+    KoShape* getTextPath(const QDomElement &e, bool hideShapesFromDefs = true);
 
     /// parse children of a <text /> element into the root shape.
-    void parseTextChildren(const QDomElement &e, KoSvgTextLoader &textLoader);
+    void parseTextChildren(const QDomElement &e, KoSvgTextLoader &textLoader, bool hideShapesFromDefs = true);
     
     /// Parses a container element, returning a list of child shapes
     QList<KoShape*> parseContainer(const QDomElement &);
@@ -166,9 +165,6 @@ protected:
     /// find pattern with given id in pattern map
     QSharedPointer<KoVectorPatternBackground> findPattern(const QString &id, const KoShape *shape);
 
-    /// find filter with given id in filter map
-    SvgFilterHelper* findFilter(const QString &id, const QString &href = QString());
-
     /// find clip path with given id in clip path map
     SvgClipPathHelper* findClipPath(const QString &id);
 
@@ -182,10 +178,10 @@ protected:
     KoShape * createShapeFromElement(const QDomElement &element, SvgLoadingContext &context);
 
     /// Creates a shape from a CSS shapes definition.
-    KoShape * createShapeFromCSS(const QDomElement e, const QString value, SvgLoadingContext &context);
+    KoShape * createShapeFromCSS(const QDomElement e, const QString value, SvgLoadingContext &context, bool hideShapesFromDefs = true);
 
     /// Create a list of shapes from a CSS shapes definition with potentially multiple shapes.
-    QList<KoShape*> createListOfShapesFromCSS(const QDomElement e, const QString value, SvgLoadingContext &context);
+    QList<KoShape*> createListOfShapesFromCSS(const QDomElement e, const QString value, SvgLoadingContext &context, bool hideShapesFromDefs = true);
 
     /// Builds the document from the given shapes list
     void buildDocument(QList<KoShape*> shapes);
@@ -206,9 +202,6 @@ protected:
     /// Applies the current stroke style to the object
     void applyStrokeStyle(KoShape * shape);
 
-    /// Applies the current filter to the object
-    void applyFilter(KoShape * shape);
-
     /// Applies the current clip path to the object
     void applyClipping(KoShape *shape, const QPointF &shapeToOriginalUserCoordinates);
     void applyMaskClipping(KoShape *shape, const QPointF &shapeToOriginalUserCoordinates);
@@ -225,10 +218,12 @@ protected:
 
     QDomText getTheOnlyTextChild(const QDomElement &e);
 
+    /// Check whether the shapes are in the defs of the SVG document.
+    bool shapeInDefs(const KoShape *shape);
+
 private:
     SvgLoadingContext m_context;
     QMap<QString, SvgGradientHelper> m_gradients;
-    QMap<QString, SvgFilterHelper> m_filters;
     QMap<QString, SvgClipPathHelper> m_clipPaths;
     QMap<QString, QSharedPointer<KoClipMask>> m_clipMasks;
     QMap<QString, QExplicitlySharedDataPointer<KoMarker>> m_markers;

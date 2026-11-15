@@ -1,5 +1,3 @@
-include(KritaAddBrokenUnitTest)
-
 #add_subdirectory(filedialogtester)
 
 kis_add_tests(
@@ -8,6 +6,5 @@ kis_add_tests(
     TestKoZoomAction.cpp
     TestKisTagSelectionWidget.cpp
     TestKisPaletteModel.cpp
-    NAME_PREFIX "libs-widgets-"
     LINK_LIBRARIES kritawidgets kritatestsdk
     )

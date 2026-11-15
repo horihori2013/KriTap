@@ -80,6 +80,7 @@
 //new
 #include "kis_node_query_path.h"
 #include "kis_tool_shape.h"
+#include "kis_config_notifier.h"
 
 KisSelectionManager::KisSelectionManager(KisViewManager * view)
         : m_view(view)
@@ -188,6 +189,14 @@ void KisSelectionManager::setup(KisActionManager* actionManager)
     action = actionManager->createAction("convert_selection_to_shape");
     connect(action, SIGNAL(triggered()), SLOT(convertToShape()));
 
+    KisConfig cfg(true);
+    m_enableSelectionActionsPanel = actionManager->createAction("enable_sap");
+    m_enableSelectionActionsPanel->setChecked(cfg.selectionActionBar());
+    connect(m_enableSelectionActionsPanel, SIGNAL(triggered(bool)), SLOT(enableSelectionActionsPanel(bool)));
+
+    action = actionManager->createAction("configure_sap");
+    action->setVisible(false);
+
     m_toggleSelectionOverlayMode  = actionManager->createAction("toggle-selection-overlay-mode");
     connect(m_toggleSelectionOverlayMode, SIGNAL(triggered()), SLOT(slotToggleSelectionDecoration()));
 
@@ -196,6 +205,8 @@ void KisSelectionManager::setup(KisActionManager* actionManager)
 
     QClipboard *cb = QApplication::clipboard();
     connect(cb, SIGNAL(dataChanged()), SLOT(clipboardDataChanged()));
+
+    connect(KisConfigNotifier::instance(), SIGNAL(configChanged()), SLOT(configChanged()));
 }
 
 
@@ -460,7 +471,7 @@ void KisSelectionManager::editSelection()
         KisShapeSelection *shapeSelection = dynamic_cast<KisShapeSelection*>(selection->shapeSelection());
         KIS_SAFE_ASSERT_RECOVER_RETURN(shapeSelection);
 
-        KoToolManager::instance()->switchToolRequested(KoInteractionTool_ID);
+        m_view->toolManager()->switchToolRequested(KoInteractionTool_ID);
 
         QList<KoShape*> shapes = shapeSelection->shapes();
 
@@ -473,7 +484,7 @@ void KisSelectionManager::editSelection()
             m_view->canvasBase()->selectedShapesProxy()->selection()->select(shape);
         }
     } else {
-        KoToolManager::instance()->switchToolRequested("KisToolTransform");
+        m_view->toolManager()->switchToolRequested("KisToolTransform");
     }
 }
 
@@ -499,6 +510,21 @@ void KisSelectionManager::convertToShape()
 {
     KisSelectionToShapeActionFactory factory;
     factory.run(m_view);
+}
+
+void KisSelectionManager::enableSelectionActionsPanel(bool visible)
+{
+    KisConfig cfg(false);
+    cfg.setSelectionActionBar(visible);
+
+    KisConfigNotifier::instance()->notifyConfigChanged();
+}
+
+void KisSelectionManager::configChanged()
+{
+    KisConfig cfg(true);
+
+    m_enableSelectionActionsPanel->setChecked(cfg.selectionActionBar());
 }
 
 void KisSelectionManager::clear()
@@ -561,9 +587,9 @@ void KisSelectionManager::toggleDisplaySelection()
 {
     KIS_ASSERT_RECOVER_RETURN(m_selectionDecoration);
 
-    m_selectionDecoration->toggleVisibility();
+    m_selectionDecoration->toggleSelectionVisibility();
     m_toggleDisplaySelection->blockSignals(true);
-    m_toggleDisplaySelection->setChecked(m_selectionDecoration->visible());
+    m_toggleDisplaySelection->setChecked(m_selectionDecoration->selectionVisible());
     m_toggleDisplaySelection->blockSignals(false);
 
     Q_EMIT displaySelectionChanged();
@@ -765,4 +791,27 @@ void KisSelectionManager::selectOpaqueOnNode(KisNodeSP node, SelectionAction act
     KisSelectionToolHelper helper(canvas, actionName);
     tmpSel->invalidateOutlineCache();
     helper.selectPixelSelection(tmpSel, action);
+}
+
+void KisSelectionManager::toggleSAPpin()
+{
+    KisConfig cfg(false);
+
+    auto current = cfg.selectionActionBarBehavior();
+
+    KisConfig::SelectionActionsBarBehavior new_behavior;
+
+    switch (current) {
+    case KisConfig::FreeFloating:
+        new_behavior = KisConfig::Fixed;
+
+        break;
+    case KisConfig::Fixed:
+        new_behavior = KisConfig::FreeFloating;
+        break;
+    }
+
+    cfg.setSelectionActionBarBehavior(new_behavior);
+
+    KisConfigNotifier::instance()->notifyConfigChanged();
 }

@@ -10,9 +10,11 @@
 #include <klocalizedstring.h>
 
 #include <KoColorModelStandardIds.h>
+#include <KoColorProfileQuery.h>
 #include <kis_assert.h>
 
 #include "LcmsColorSpace.h"
+#include "RgbU8ColorSpace.h"
 
 // -- KoLcmsColorConversionTransformation --
 
@@ -36,6 +38,9 @@ public:
             conversionFlags |= KoColorConversionTransformation::NoOptimization;
         }
         conversionFlags |= KoColorConversionTransformation::CopyAlpha;
+
+        // unset Krita-only flag
+        conversionFlags.setFlag(KoColorConversionTransformation::NoAdaptationAbsoluteIntent, false);
 
         m_transform = cmsCreateTransform(srcProfile->lcmsProfile(),
                                          srcColorSpaceType,
@@ -75,10 +80,9 @@ public:
                                                 Intent proofingIntent,
                                                 bool bpcFirstTransform,
                                                 quint8 *gamutWarning,
-                                                double adaptationState,
                                                 ConversionFlags displayConversionFlags
                                                 )
-        : KoColorProofingConversionTransformation(srcCs, dstCs, proofingSpace, renderingIntent, proofingIntent, bpcFirstTransform, gamutWarning, adaptationState, displayConversionFlags)
+        : KoColorProofingConversionTransformation(srcCs, dstCs, proofingSpace, renderingIntent, displayConversionFlags)
         , m_transform(0)
     {
         Q_ASSERT(srcCs);
@@ -93,6 +97,11 @@ public:
             displayConversionFlags |= KoColorConversionTransformation::NoOptimization;
         }
         displayConversionFlags |= KoColorConversionTransformation::CopyAlpha;
+
+        const double adaptationState = displayConversionFlags.testFlag(KoColorConversionTransformation::NoAdaptationAbsoluteIntent) ? 0.0 : 1.0;
+
+        // unset Krita-only flag
+        displayConversionFlags.setFlag(KoColorConversionTransformation::NoAdaptationAbsoluteIntent, false);
 
         quint16 alarm[cmsMAXCHANNELS];//this seems to be bgr???
         alarm[0] = (cmsUInt16Number)gamutWarning[2]*256;
@@ -198,26 +207,25 @@ const KoColorProfile* IccColorSpaceEngine::addProfile(const QByteArray &data)
     return profile;
 }
 
-const KoColorProfile *IccColorSpaceEngine::getProfile(const QVector<double> &colorants, ColorPrimaries colorPrimaries, TransferCharacteristics transferFunction)
+const KoColorProfile *IccColorSpaceEngine::getProfile(const KoColorProfileQuery &query)
 {
     KoColorSpaceRegistry *registry = KoColorSpaceRegistry::instance();
 
-    KIS_SAFE_ASSERT_RECOVER(
-        (!colorants.isEmpty() || colorPrimaries != PRIMARIES_UNSPECIFIED)
-        && transferFunction != TRC_UNSPECIFIED)
+    KoColorProfileQuery modifiedQuery = query;
+    KIS_SAFE_ASSERT_RECOVER(modifiedQuery.isValid())
     {
-        if (transferFunction == TRC_LINEAR) {
-            colorPrimaries = PRIMARIES_ITU_R_BT_2020_2_AND_2100_0;
+        if (modifiedQuery.transfer == TRC_LINEAR) {
+            modifiedQuery.primaries = PRIMARIES_ITU_R_BT_2020_2_AND_2100_0;
         } else {
-            colorPrimaries = PRIMARIES_ITU_R_BT_709_5;
+            modifiedQuery.primaries = PRIMARIES_ITU_R_BT_709_5;
         }
 
-        if (transferFunction == TRC_UNSPECIFIED) {
-            transferFunction = TRC_IEC_61966_2_1;
+        if (modifiedQuery.transfer == TRC_UNSPECIFIED) {
+            modifiedQuery.transfer = TRC_IEC_61966_2_1;
         }
     }
 
-    const KoColorProfile *profile = new IccColorProfile(colorants, colorPrimaries, transferFunction);
+    const KoColorProfile *profile = new IccColorProfile(modifiedQuery);
     Q_CHECK_PTR(profile);
 
     if (profile->valid()) {
@@ -268,7 +276,6 @@ KoColorProofingConversionTransformation *IccColorSpaceEngine::createColorProofin
                                                                                                 KoColorConversionTransformation::Intent proofingIntent,
                                                                                                 bool firstTransformBPC,
                                                                                                 quint8 *gamutWarning,
-                                                                                                double adaptationState,
                                                                                                 KoColorConversionTransformation::ConversionFlags displayConversionFlags) const
 {
     KIS_ASSERT(srcColorSpace);
@@ -280,7 +287,7 @@ KoColorProofingConversionTransformation *IccColorSpaceEngine::createColorProofin
                 srcColorSpace, computeColorSpaceType(srcColorSpace),
                 dynamic_cast<const IccColorProfile *>(srcColorSpace->profile())->asLcms(), dstColorSpace, computeColorSpaceType(dstColorSpace),
                 dynamic_cast<const IccColorProfile *>(dstColorSpace->profile())->asLcms(), proofingSpace, renderingIntent, proofingIntent, firstTransformBPC, gamutWarning,
-                adaptationState, displayConversionFlags
+                displayConversionFlags
                 );
 }
 
@@ -342,5 +349,8 @@ quint32 IccColorSpaceEngine::computeColorSpaceType(const KoColorSpace *cs) const
 bool IccColorSpaceEngine::supportsColorSpace(const QString &colorModelId, const QString &colorDepthId, const KoColorProfile *profile) const
 {
     Q_UNUSED(colorDepthId);
-    return colorModelId != RGBAColorModelID.id() || !profile || profile->name() != "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF";
+    return colorModelId != RGBAColorModelID.id() ||
+        !profile ||
+        (profile->getTransferCharacteristics() != TRC_ITU_R_BT_2100_0_PQ &&
+         profile->name() != "High Dynamic Range UHDTV Wide Color Gamut Display (Rec. 2020) - SMPTE ST 2084 PQ EOTF");
 }

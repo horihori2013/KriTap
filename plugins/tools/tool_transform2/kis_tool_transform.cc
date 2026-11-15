@@ -56,6 +56,8 @@
 #include <KisOptimizedBrushOutline.h>
 
 #include <KoShapeTransformCommand.h>
+#include <KoCanvasController.h>
+#include <kis_display_color_converter.h>
 
 #include "kis_action_registry.h"
 
@@ -291,7 +293,7 @@ void KisToolTransform::paint(QPainter& gc, const KoViewConverter &converter)
         currentStrategy()->externalConfigChanged();
     }
     currentStrategy()->setDecorationThickness(decorationThickness());
-    currentStrategy()->paint(gc);
+    currentStrategy()->paint(gc, m_canvas->displayRendererInterface());
 
 
     if (!m_cursorOutline.isEmpty()) {
@@ -384,6 +386,7 @@ void KisToolTransform::continueActionImpl(KoPointerEvent *event, bool usePrimary
         currentStrategy()->continueAlternateAction(event, action);
     }
 
+    setFunctionalCursor();
     updateOptionWidget();
     outlineChanged();
 }
@@ -540,6 +543,11 @@ void KisToolTransform::applyTransform()
     slotApplyTransform();
 }
 
+void KisToolTransform::setNextActivationTransformMode(KisToolTransform::TransformToolMode mode)
+{
+    nextActivationTransformMode = mode;
+}
+
 KisToolTransform::TransformToolMode KisToolTransform::transformMode() const
 {
     TransformToolMode mode = FreeTransformMode;
@@ -640,11 +648,11 @@ int KisToolTransform::warpPointDensity() const
     return m_currentArgs.numPoints();
 }
 
-void KisToolTransform::setTransformMode(KisToolTransform::TransformToolMode newMode)
+ToolTransformArgs::TransformMode KisToolTransform::toArgsMode(KisToolTransform::TransformToolMode toolMode)
 {
     ToolTransformArgs::TransformMode mode = ToolTransformArgs::FREE_TRANSFORM;
 
-    switch (newMode) {
+    switch (toolMode) {
     case FreeTransformMode:
         mode = ToolTransformArgs::FREE_TRANSFORM;
         break;
@@ -666,6 +674,13 @@ void KisToolTransform::setTransformMode(KisToolTransform::TransformToolMode newM
     default:
         KIS_ASSERT_RECOVER_NOOP(0 && "unexpected transform mode");
     }
+
+    return mode;
+}
+
+void KisToolTransform::setTransformMode(KisToolTransform::TransformToolMode newMode)
+{
+    ToolTransformArgs::TransformMode mode = toArgsMode(newMode);
 
     if( mode != m_currentArgs.mode() ) {
         if( newMode == FreeTransformMode ) {
@@ -763,18 +778,16 @@ void KisToolTransform::initThumbnailImage(KisPaintDeviceSP previewDevice)
 
             QRect thumbRect = scaleTransform.mapRect(m_transaction.originalRect()).toAlignedRect();
 
-            origImg = m_selectedPortionCache->
-                    createThumbnail(thumbRect.width(),
-                                    thumbRect.height(),
-                                    srcRect, 1,
-                                    KoColorConversionTransformation::internalRenderingIntent(),
-                                    KoColorConversionTransformation::internalConversionFlags());
+            QSize size = thumbRect.size();
+            if (size.width() < 1) size.setWidth(1);
+            if (size.height() < 1) size.setHeight(1);
+            KisPaintDeviceSP dev = m_selectedPortionCache->createThumbnailDeviceOversampled(size.width(), size.height(), 1, srcRect);
+            origImg = m_canvas->displayColorConverter()->convertImageToDisplayColorSpace(dev, QRect(QPoint(0, 0), size), true);
+
             thumbToImageTransform = scaleTransform.inverted();
 
         } else {
-            origImg = m_selectedPortionCache->convertToQImage(0, x, y, w, h,
-                                                              KoColorConversionTransformation::internalRenderingIntent(),
-                                                              KoColorConversionTransformation::internalConversionFlags());
+            origImg = m_canvas->displayColorConverter()->convertImageToDisplayColorSpace(m_selectedPortionCache, QRect(x, y, w, h), true);
             thumbToImageTransform = QTransform();
         }
     }
@@ -797,7 +810,7 @@ void KisToolTransform::newActivationWithExternalSource(KisPaintDeviceSP external
         deactivate();
         activate(dummy);
     } else {
-        KoToolManager::instance()->switchToolRequested("KisToolTransform");
+        canvas()->canvasController()->toolManager()->switchToolRequested("KisToolTransform");
     }
 }
 
@@ -825,12 +838,21 @@ void KisToolTransform::activate(const QSet<KoShape*> &shapes)
                                       this, SLOT(slotMoveDiscreteRight()));
     m_actionConnections.addConnection(action("movetool-move-right-more"), SIGNAL(triggered(bool)),
                                       this, SLOT(slotMoveDiscreteRightMore()));
+    m_actionConnections.addConnection(action("increase_brush_size"),
+                                      SIGNAL(triggered()),
+                                      this,
+                                      SLOT(slotIncreaseBrushSize()));
+    m_actionConnections.addConnection(action("decrease_brush_size"),
+                                      SIGNAL(triggered()),
+                                      this,
+                                      SLOT(slotDecreaseBrushSize()));
 
     if (currentNode()) {
         m_transaction = TransformTransactionProperties(QRectF(), &m_currentArgs, KisNodeList(), {});
     }
 
-    startStroke(ToolTransformArgs::FREE_TRANSFORM, false);
+    startStroke(toArgsMode(nextActivationTransformMode), false);
+    nextActivationTransformMode = KisToolTransform::FreeTransformMode;
 }
 
 void KisToolTransform::deactivate()
@@ -843,7 +865,7 @@ void KisToolTransform::deactivate()
 
 void KisToolTransform::requestUndoDuringStroke()
 {
-    if (!m_strokeId || m_transaction.rootNodes().isEmpty()) return;
+    if (!m_strokeId || m_transaction.rootNodes().isEmpty() || mode() != HOVER_MODE) return;
 
     if (!m_changesTracker.canUndo()) {
         cancelStroke();
@@ -905,15 +927,37 @@ void KisToolTransform::startStroke(ToolTransformArgs::TransformMode mode, bool f
     m_currentArgs = ToolTransformArgs();
 
     Q_FOREACH (KisNodeSP currentNode, resources->selectedNodes()) {
-        if (!currentNode || !currentNode->isEditable()) return;
+        KisCanvas2 *kisCanvas = dynamic_cast<KisCanvas2*>(canvas());
+        KIS_ASSERT(kisCanvas);
+
+        if (!currentNode || !currentNode->isEditable()) {
+            if (currentNode && currentNode->userLocked()) {
+                kisCanvas->viewManager()->
+                    showFloatingMessage(
+                        i18nc("floating message in transformation tool",
+                              "Cannot transform locked layers"),
+                        koIcon("object-locked"), 4000, KisFloatingMessage::High);
+            } else if (currentNode && !currentNode->visible()) {
+                kisCanvas->viewManager()->
+                    showFloatingMessage(
+                        i18nc("floating message in transformation tool",
+                              "Cannot transform hidden layers"),
+                        koIcon("object-locked"), 4000, KisFloatingMessage::High);
+            } else {
+                kisCanvas->viewManager()->
+                    showFloatingMessage(
+                        i18nc("floating message in transformation tool",
+                              "Cannot use transform tool on this set of layers"),
+                        koIcon("object-locked"), 4000, KisFloatingMessage::High);
+            }
+
+            return;
+        }
 
         // some layer types cannot be transformed. Give a message and return if a user tries it
         if (currentNode->inherits("KisColorizeMask") ||
             currentNode->inherits("KisFileLayer") ||
             currentNode->inherits("KisCloneLayer")) {
-
-            KisCanvas2 *kisCanvas = dynamic_cast<KisCanvas2*>(canvas());
-            KIS_ASSERT(kisCanvas);
 
             if(currentNode->inherits("KisColorizeMask")){
                 kisCanvas->viewManager()->
@@ -942,7 +986,6 @@ void KisToolTransform::startStroke(ToolTransformArgs::TransformMode mode, bool f
             });
 
         if (impossibleMask) {
-            KisCanvas2 *kisCanvas = dynamic_cast<KisCanvas2*>(canvas());
             kisCanvas->viewManager()->
                 showFloatingMessage(
                     i18nc("floating message in transformation tool",
@@ -956,7 +999,6 @@ void KisToolTransform::startStroke(ToolTransformArgs::TransformMode mode, bool f
          * taken into account.
          */
         if (selection && dynamic_cast<KisTransformMask*>(currentNode.data())) {
-            KisCanvas2 *kisCanvas = dynamic_cast<KisCanvas2*>(canvas());
             kisCanvas->viewManager()->
                 showFloatingMessage(
                     i18nc("floating message in transformation tool",
@@ -1363,6 +1405,16 @@ void KisToolTransform::slotMoveDiscreteRightMore()
     setTranslateX(translateX()+10.0);
 }
 
+void KisToolTransform::slotIncreaseBrushSize()
+{
+    currentStrategy()->increaseBrushSize(canvas());
+}
+
+void KisToolTransform::slotDecreaseBrushSize()
+{
+    currentStrategy()->decreaseBrushSize(canvas());
+}
+
 void KisToolTransform::slotUpdateToWarpType()
 {
     setTransformMode(KisToolTransform::TransformToolMode::WarpTransformMode);
@@ -1437,10 +1489,10 @@ void KisToolTransform::setTranslateX(double translation)
     }
 }
 
-QList<QAction *> KisToolTransformFactory::createActionsImpl()
+QList<QAction *> KisToolTransformFactory::createActionsImpl(KoToolManager *toolManager)
 {
     KisActionRegistry *actionRegistry = KisActionRegistry::instance();
-    QList<QAction *> actions = KisToolPaintFactoryBase::createActionsImpl();
+    QList<QAction *> actions = KisToolPaintFactoryBase::createActionsImpl(toolManager);
 
     actions << actionRegistry->makeQAction("movetool-move-up", this);
     actions << actionRegistry->makeQAction("movetool-move-down", this);
@@ -1451,5 +1503,50 @@ QList<QAction *> KisToolTransformFactory::createActionsImpl()
     actions << actionRegistry->makeQAction("movetool-move-left-more", this);
     actions << actionRegistry->makeQAction("movetool-move-right-more", this);
 
+    QPointer<KoToolManager> toolManagerSafePtr = toolManager;
+
+    auto makeSubtoolAction = [&actionRegistry, &actions, toolManagerSafePtr, this](QString actionName, KisToolTransform::TransformToolMode mode) {
+        QAction *action = actionRegistry->makeQAction(actionName, this);
+        action->setProperty("always_enabled", true); // To allow this action to be triggered when the transform tool isn't already active
+
+        connect(action, &QAction::triggered, this, [toolManagerSafePtr, mode, this] () {
+            KIS_SAFE_ASSERT_RECOVER_RETURN(toolManagerSafePtr);
+            this->activateSubtool(toolManagerSafePtr, mode);
+        });
+
+        actions << action;
+    };
+
+    makeSubtoolAction("KisToolTransformFree", KisToolTransform::FreeTransformMode);
+    makeSubtoolAction("KisToolTransformPerspective", KisToolTransform::PerspectiveTransformMode);
+    makeSubtoolAction("KisToolTransformWarp", KisToolTransform::WarpTransformMode);
+    makeSubtoolAction("KisToolTransformCage", KisToolTransform::CageTransformMode);
+    makeSubtoolAction("KisToolTransformLiquify", KisToolTransform::LiquifyTransformMode);
+    makeSubtoolAction("KisToolTransformMesh", KisToolTransform::MeshTransformMode);
+
     return actions;
+}
+
+void KisToolTransformFactory::activateSubtool(KoToolManager *toolManager, KisToolTransform::TransformToolMode mode)
+{
+    KIS_SAFE_ASSERT_RECOVER_RETURN(toolManager);
+
+    KoCanvasController *canvasController = toolManager->activeCanvasController();
+    if (!canvasController) return;
+    KoCanvasBase *canvas = canvasController->canvas();
+    if (!canvas) return;
+
+    KoToolBase *tool = toolManager->toolById(canvas, id());
+    KIS_SAFE_ASSERT_RECOVER_RETURN(tool);
+    KisToolTransform *transformTool = dynamic_cast<KisToolTransform*>(tool);
+    KIS_SAFE_ASSERT_RECOVER_RETURN(transformTool);
+
+    if (toolManager->activeToolId() == id()) {
+        // Transform tool is already active, switch the current mode
+        transformTool->setTransformMode(mode);
+    } else {
+        // Works like KoToolFactoryBase::activateTool, but tells the tool beforehand which initial transform mode to use
+        transformTool->setNextActivationTransformMode(mode);
+        toolManager->switchToolRequested(id());
+    }
 }

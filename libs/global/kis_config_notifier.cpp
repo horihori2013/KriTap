@@ -60,6 +60,11 @@ void KisConfigNotifier::notifyTouchPaintingChanged()
     Q_EMIT touchPaintingChanged();
 }
 
+void KisConfigNotifier::notifyColorSamplerPreviewStyleChanged()
+{
+    Q_EMIT sigColorSamplerPreviewStyleChanged();
+}
+
 void KisConfigNotifier::notifyColorThemeChanged(const QString &filename)
 {
     Q_EMIT signalColorThemeChanged(filename);
@@ -69,3 +74,20 @@ void KisConfigNotifier::notifyLongPressChanged(bool enabled)
 {
     Q_EMIT sigLongPressChanged(enabled);
 }
+
+#ifdef Q_OS_ANDROID
+void KisConfigNotifier::notifyUsePageUpDownMouseButtonEmulationWorkaroundChanged(bool enabled)
+{
+    Q_EMIT sigUsePageUpDownMouseButtonEmulationWorkaroundChanged(enabled);
+}
+
+void KisConfigNotifier::notifyUseHighFunctionKeyMouseButtonEmulationWorkaroundChanged(bool enabled)
+{
+    Q_EMIT sigUseHighFunctionKeyMouseButtonEmulationWorkaroundChanged(enabled);
+}
+
+void KisConfigNotifier::notifyUseIgnoreHistoricTabletEventsWorkaroundChanged(bool enabled)
+{
+    Q_EMIT sigUseIgnoreHistoricTabletEventsWorkaroundChanged(enabled);
+}
+#endif

@@ -17,15 +17,37 @@ set(krita_SRCS main.cc)
 if (NOT APPLE)
 	file(GLOB ICON_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/*-apps-krita.png")
 else()
-	set(ICON_SRCS
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/16-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/32-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/48-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/128-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/256-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/512-apps-krita.png"
-	     "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/1024-apps-krita.png"
-	)
+    # XCode below 26 cannot work with .icon format
+    if(${XCODE_VERSION} VERSION_GREATER_EQUAL "26.0")
+        find_program(XCRUN_EXECUTABLE NAMES xcrun)
+        set(KRITA_ASSETS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/krita.icon")
+        cmake_path(SET ASSETS_PATH "${CMAKE_CURRENT_BINARY_DIR}/assets")
+
+        set(ASSETS_FILES "${ASSETS_PATH}/Assets.car" "${ASSETS_PATH}/krita.icns")
+        add_custom_command(
+          OUTPUT ${ASSETS_FILES}
+          COMMAND ${CMAKE_COMMAND} ARGS -E make_directory "${ASSETS_PATH}"
+          COMMAND ${XCRUN_EXECUTABLE} ARGS actool "${KRITA_ASSETS_ICON}"
+            --compile ${ASSETS_PATH}
+            --platform macosx --minimum-deployment-target ${MACOS_MINIMUM_VERSION}
+            --app-icon krita --output-partial-info-plist "${CMAKE_CURRENT_BINARY_DIR}/krita_icon.plist"
+            --output-format human-readable-text
+            --standalone-icon-behavior all
+          DEPENDS
+            "${KRITA_ASSETS_ICON}"
+          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+    else()
+        set(ICON_SRCS
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/16-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/32-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/48-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/128-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/256-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/512-apps-krita.png"
+             "${CMAKE_CURRENT_SOURCE_DIR}/pics/branding/${BRANDING}/1024-apps-krita.png"
+        )
+    endif() # XCode version
 endif()
 
 if (WIN32)
@@ -55,6 +77,12 @@ if (WIN32)
             ${CMAKE_CURRENT_BINARY_DIR}/kritafile.ico
         DESTINATION ${CMAKE_INSTALL_PREFIX}/installer
     )
+elseif(APPLE)
+    if(${XCODE_VERSION} VERSION_GREATER_EQUAL "26.0")
+      set_source_files_properties(${ASSETS_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    else()
+      ecm_add_app_icon(krita_SRCS OUTFILE_BASENAME krita ICONS ${ICON_SRCS})
+    endif()
 else()
     ecm_add_app_icon(krita_SRCS ICONS ${ICON_SRCS})
 endif()
@@ -72,9 +100,69 @@ ecm_install_icons(ICONS
     "${CMAKE_CURRENT_SOURCE_DIR}/pics/mimetypes/1024-mimetypes-application-x-krita.png"
     DESTINATION ${KDE_INSTALL_ICONDIR} THEME hicolor)
 
+# Android has a different splash screen.
+if(ANDROID)
+    set(krita_splash_qrc splash-android.qrc)
+else()
+    set(krita_splash_qrc splash.qrc)
+endif()
+
+# ==============================================================================
+# KRITA5.XMLGUI UPDATE
+#
+# The krita5.xmlgui file needs to have its version number updated when it is
+# modified. Failing to do so will cause users who have customized their toolbars
+# to not see the changes, since that equips them with a local krita5.xmlgui file
+# in their application data directory.
+#
+# On the other hand, if you update the file version, some customizations may
+# get lost. If you have changes that are only relevant for certain operating
+# systems, you can choose to only bump that system's version here to limit the
+# potential blast radius.
+#
+
+# Update the version number here. If you have OS-specific changes, put them
+# inside of a condition to only bump the version number on that system. If you
+# make a change that applies to all systems, remove any conditions. The version
+# you specify should always be one higher than any version number you see here,
+# no matter what you're doing. Do not re-use versions.
+set(KRITA5_XMLGUI_VERSION 545)
+
+# After updating the version number properly, put the new hash that the CMake
+# error lists as the "actual hash" here.
+set(krita5_xmlgui_hash_expected "3552fc6831582120dfe9eb0d9df537bc")
+
+# You can stop reading now, the stuff that follows doesn't need to be modified.
+# ==============================================================================
+
+# Read the krita5.xmlgui file, strip all whitespace from it and then make an
+# hash from it. This will also strip whitespace inside of the XML and MD5 isn't
+# a great hash, but that's fine to catch any changes a developer actually makes,
+# we're not trying to build an enterprise file change detection system here.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/krita5.xmlgui" krita5_xmlgui_content)
+string(REGEX REPLACE "[ \t\r\n]+" "" krita5_xmlgui_content "${krita5_xmlgui_content}")
+string(MD5 krita5_xmlgui_hash_actual "${krita5_xmlgui_content}")
+if(NOT krita5_xmlgui_hash_actual STREQUAL krita5_xmlgui_hash_expected)
+    message(FATAL_ERROR
+        "krita5.xmlgui has changed!\n"
+        "Actual hash:   <${krita5_xmlgui_hash_actual}>\n"
+        "Expected hash: <${krita5_xmlgui_hash_expected}>\n"
+        "You have to update the hash and increase the version number.\n"
+        "Look for 'KRITA5.XMLGUI UPDATE' in krita/CMakeLists.txt for instructions."
+    )
+endif()
+
+# Generate a krita5.xmlgui in the build directory with the specified version
+# number and then a krita.qrc that pulls in that file.
+set(KRITA5_XMLGUI_PATH "${CMAKE_CURRENT_BINARY_DIR}/krita5.xmlgui")
+set(KRITA_QRC_PATH "${CMAKE_CURRENT_BINARY_DIR}/krita.qrc")
+set(KRITARC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/data/kritarc")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/krita5.xmlgui" "${KRITA5_XMLGUI_PATH}" @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/krita.qrc" "${KRITA_QRC_PATH}" @ONLY)
+
 # separate listing, both used by Krita and KritaSketch
 set(krita_QRCS
-    ${CMAKE_SOURCE_DIR}/krita/krita.qrc
+    ${KRITA_QRC_PATH}
     ${CMAKE_SOURCE_DIR}/krita/pics/Breeze-dark/breeze-dark-icons.qrc
     ${CMAKE_SOURCE_DIR}/krita/pics/Breeze-light/breeze-light-icons.qrc
     ${CMAKE_SOURCE_DIR}/krita/pics/layerbox/layerbox-icons.qrc
@@ -94,7 +182,7 @@ set(krita_QRCS
     ${CMAKE_SOURCE_DIR}/krita/data/gamutmasks/gamutmasks.qrc
     ${CMAKE_SOURCE_DIR}/plugins/paintops/defaultpresets/defaultpresets.qrc
     ${CMAKE_SOURCE_DIR}/krita/pics/branding/${BRANDING}/branding.qrc
-    ${CMAKE_SOURCE_DIR}/krita/data/splash/splash.qrc
+    ${CMAKE_SOURCE_DIR}/krita/data/splash/${krita_splash_qrc}
     ${CMAKE_SOURCE_DIR}/krita/pics/sponsors/sponsors.qrc
     CACHE INTERNAL "krita_QRCS"
 )
@@ -137,12 +225,11 @@ if (APPLE)
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.template)
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_GUI_IDENTIFIER "org.krita")
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME "Krita")
-    set_target_properties(krita PROPERTIES MACOSX_BUNDLE_ICON_FILE "krita_SRCS.icns")
+    set_target_properties(krita PROPERTIES MACOSX_BUNDLE_ICON_FILE "krita")
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_LONG_VERSION_STRING ${KRITA_VERSION_STRING})
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_SHORT_VERSION_STRING ${KRITA_VERSION_NUMBER_STRING})
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_BUNDLE_VERSION ${KRITA_VERSION_NUMBER_STRING})
     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_COPYRIGHT "GNU Public License, V2 or, at your option, any later version.")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.template ${CMAKE_CURRENT_BINARY_DIR}/Info.plist)
 endif ()
 
 if (NOT ANDROID)
@@ -164,12 +251,39 @@ endif()
 
 
 if(APPLE)
+    set(KRITA_ASSET_KRZ_ICNS "krita-krz.icns" "krita-kra.icns")
+    add_custom_command(
+      OUTPUT ${KRITA_ASSET_KRZ_ICNS}
+      COMMAND ${CMAKE_COMMAND}
+      ARGS -E copy
+      "./pics/mimetypes/krz/krita-krz.icns"
+      "./pics/mimetypes/krita-kra.icns"
+      "${CMAKE_CURRENT_BINARY_DIR}"
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_source_files_properties(${KRITA_ASSET_KRZ_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
+    # make krita depend on assets icons
+    if(${XCODE_VERSION} VERSION_GREATER_EQUAL "26.0")
+      target_sources(krita PRIVATE ${ASSETS_FILES})
+    endif()
+    target_sources(krita PRIVATE ${KRITA_ASSET_KRZ_ICNS})
+
     install(TARGETS krita ${INSTALL_TARGETS_DEFAULT_ARGS} BUNDLE DESTINATION bin)
 else()
     install(TARGETS krita ${INSTALL_TARGETS_DEFAULT_ARGS})
 endif()
 install(FILES org.kde.krita.desktop DESTINATION ${KDE_INSTALL_APPDIR})
-install(FILES  krita.action kritamenu.action DESTINATION ${KDE_INSTALL_DATADIR}/krita/actions)
+
+set(actions_files krita.action kritamenu.action)
+if (ANDROID)
+    # In-app-purchase-related actions are only relevant on Android. They
+    # wouldn't show up in the menu anyway because the application doesn't
+    # instantiate them, but they'd still appear in the keyboard shortcuts.
+    list(APPEND actions_files kritamenu_android.action)
+endif()
+install(FILES ${actions_files} DESTINATION ${KDE_INSTALL_DATADIR}/krita/actions)
+
 install(FILES  org.kde.krita.appdata.xml DESTINATION ${KDE_INSTALL_METAINFODIR} )
 
 install(DIRECTORY DESTINATION ${KDE_INSTALL_DATADIR}/krita/shortcuts)

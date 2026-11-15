@@ -28,6 +28,7 @@
 
 #include <kis_types.h>
 #include <kis_image.h>
+#include <kis_layer_utils.h>
 #include <kis_selection.h>
 #include <kis_paint_device.h>
 #include <kis_selection_manager.h>
@@ -78,23 +79,11 @@ void KisStatusBar::setup()
     addStatusBarItem(m_selectionStatus);
     m_selectionStatus->setVisible(false);
 
-#ifdef Q_OS_ANDROID
-    m_fullscreenToggle = new QToolButton;
-    m_fullscreenToggle->setObjectName("Toggle Fullscreen");
-    m_fullscreenToggle->setCheckable(false);
-    m_fullscreenToggle->setToolTip(i18n("Toggle Fullscreen"));
-    m_fullscreenToggle->setAutoRaise(true);
-    m_fullscreenToggle->setIcon(KisIconUtils::loadIcon("view-fullscreen"));
-    addStatusBarItem(m_fullscreenToggle);
-    m_fullscreenToggle->setVisible(true);
-    connect(m_fullscreenToggle, SIGNAL(clicked()), m_viewManager, SLOT(slotToggleFullscreen()));
-#endif
-
     m_statusBarStatusLabel = new KSqueezedTextLabel();
     m_statusBarStatusLabel->setObjectName("statsBarStatusLabel");
     m_statusBarStatusLabel->setSizePolicy(QSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding));
     m_statusBarStatusLabel->setContentsMargins(5, 5, 5, 5);
-    connect(KoToolManager::instance(), SIGNAL(changedStatusText(QString)),
+    connect(m_viewManager->toolManager(), SIGNAL(changedStatusText(QString)),
             m_statusBarStatusLabel, SLOT(setText(QString)));
     addStatusBarItem(m_statusBarStatusLabel, 2);
     m_statusBarStatusLabel->setVisible(false);
@@ -262,6 +251,23 @@ void KisStatusBar::updateSelectionIcon()
     m_selectionStatus->setIcon(icon);
 }
 
+namespace {
+QVector<KisNodeSP> fetchLayersWithSlowThumbnailGeneration(KisImageSP image)
+{
+    QVector<KisNodeSP> result;
+
+    KisLayerUtils::recursiveApplyNodes(image->root(),
+    [&result] (KisNodeSP node) {
+        if (node->preferredThumbnailBoundsMode() == KisThumbnailBoundsMode::Coarse) {
+            result.append(node);
+        }
+    });
+
+    return result;
+}
+}
+
+
 void KisStatusBar::updateMemoryStatus()
 {
     KisMemoryStatisticsServer::Statistics stats =
@@ -303,7 +309,7 @@ void KisStatusBar::updateMemoryStatus()
     QString longStats = imageStatsMsg + "\n" + memoryStatsMsg;
 
     QString shortStats = format.formatByteSize(stats.imageSize);
-    QIcon icon;
+    bool shouldUseWarningIcon = false;
     const qint64 warnLevel = stats.tilesHardLimit - stats.tilesHardLimit / 8;
 
     if (stats.imageSize > warnLevel ||
@@ -314,7 +320,7 @@ void KisStatusBar::updateMemoryStatus()
             KisUsageLogger::log(QString("WARNING: %1 is running out of memory:%2\n").arg(m_imageView->document()->path()).arg(longStats));
         }
 
-        icon = KisIconUtils::loadIcon("warning");
+        shouldUseWarningIcon = true;
         QString suffix =
                 i18nc("tooltip on statusbar memory reporting button",
                       "\n\nWARNING:\tOut of memory! Swapping has been started.\n"
@@ -324,8 +330,38 @@ void KisStatusBar::updateMemoryStatus()
 
     }
 
+    if (m_imageView) {
+        const QVector<KisNodeSP> slowThumbnailNodes = fetchLayersWithSlowThumbnailGeneration(m_imageView->image());
+        if (!slowThumbnailNodes.isEmpty()) {
+            QString suffix =
+                i18nc("tooltip on statusbar memory reporting button",
+                      "\n\nWARNING:\tSome layers took too much time to calculate\n"
+                      "\t\ttheir thumbnails. They were switched into low-quality\n"
+                      "\t\tthumbnails mode. Try purging unused image data with\n"
+                      "\t\tImage->Purge Unused Image Data action.\n"
+                    "Slow layers: ");
+
+            bool needsSeparator = false;
+            Q_FOREACH(KisNodeSP node, slowThumbnailNodes) {
+                if (needsSeparator) {
+                    suffix += ", ";
+                }
+                suffix.append(QString("\"%1\"").arg(node->name()));
+                needsSeparator = true;
+            }
+            longStats += suffix;
+            shouldUseWarningIcon = true;
+        }
+    }
+
     m_shortMemoryTag = shortStats;
     m_longMemoryTag = longStats;
+
+    QIcon icon;
+    if (shouldUseWarningIcon) {
+        icon = KisIconUtils::loadIcon("warning");
+    }
+
     m_memoryStatusIcon = icon;
 
     m_memoryReportBox->setMaximumMemory(stats.totalMemoryLimit);

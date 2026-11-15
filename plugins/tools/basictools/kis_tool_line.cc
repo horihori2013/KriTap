@@ -44,7 +44,7 @@ const KisCoordinatesConverter* getCoordinatesConverter(KoCanvasBase * canvas)
 
 
 KisToolLine::KisToolLine(KoCanvasBase * canvas)
-    : KisToolShape(canvas, KisCursor::load("tool_line_cursor.png", 6, 6)),
+    : KisToolShape(canvas, KisCursor::loadWithSize("tool_line_cursor.svg", 32, 32, 6, 6)),
       m_showGuideline(true),
       m_strokeIsRunning(false),
       m_infoBuilder(new KisConverterPaintingInformationBuilder(getCoordinatesConverter(canvas))),
@@ -75,7 +75,7 @@ KisToolLine::~KisToolLine()
 void KisToolLine::resetCursorStyle()
 {
     if (isEraser() && (nodePaintAbility() == PAINT)) {
-        useCursor(KisCursor::load("tool_line_eraser_cursor.png", 6, 6));
+        useCursor(KisCursor::loadWithSize("tool_line_eraser_cursor.svg", 32, 32, 6, 6));
     } else {
         KisToolPaint::resetCursorStyle();
     }
@@ -233,6 +233,7 @@ void KisToolLine::beginPrimaryAction(KoPointerEvent *event)
     m_originalStartPoint = m_startPoint;
 
     m_strokeIsRunning = true;
+    m_altInitiallyHeld = event->modifiers().testFlag(Qt::AltModifier);
 
     showSize();
 }
@@ -251,18 +252,36 @@ void KisToolLine::continuePrimaryAction(KoPointerEvent *event)
     CHECK_MODE_SANITY_OR_RETURN(KisTool::PAINT_MODE);
     if (!m_strokeIsRunning) return;
 
+    // If the user was holding Alt at the start of the line, we don't want to
+    // move the origin around because moving the origin of a zero-length line
+    // is silly and this interferes with users coming from PS binding Alt to
+    // the quick switch line tool.
+    Qt::KeyboardModifiers effectiveModifiers = event->modifiers();
+    if (m_altInitiallyHeld){
+        if (effectiveModifiers.testFlag(Qt::AltModifier)) {
+            // Remove the modifier if it was held at the beginning. The checks
+            // in the subsequent code use equality instead of testing the flag,
+            // so this retains the expected behavior without much rejigging.
+            effectiveModifiers.setFlag(Qt::AltModifier, false);
+        } else {
+            // User lifted the Alt key, we'll let them re-press it from this
+            // point on to move the origin after all.
+            m_altInitiallyHeld = false;
+        }
+    }
+
     // First ensure the old guideline is deleted
     updateGuideline();
 
     QPointF pos = convertToPixelCoordAndSnap(event);
 
-    if (event->modifiers() == Qt::AltModifier) {
+    if (effectiveModifiers == Qt::AltModifier) {
         QPointF trans = pos - m_endPoint;
         m_helper->translatePoints(trans);
         m_startPoint += trans;
         m_endPoint += trans;
         m_originalStartPoint += trans; // original start point is only original in terms of snapping to assistants
-    } else if (event->modifiers() == Qt::ShiftModifier) {
+    } else if (effectiveModifiers == Qt::ShiftModifier) {
         pos = straightLine(pos);
         m_helper->addPoint(event, pos);
     } else {
@@ -288,7 +307,7 @@ void KisToolLine::continuePrimaryAction(KoPointerEvent *event)
         }
     }
 
-    if(event->modifiers() == Qt::AltModifier) {
+    if(effectiveModifiers == Qt::AltModifier) {
         KisCanvas2 *kisCanvas =dynamic_cast<KisCanvas2*>(canvas());
         KIS_ASSERT(kisCanvas);
         kisCanvas->viewManager()->showFloatingMessage(i18n("X: %1 px\nY: %2 px", QString::number(m_startPoint.x(), 'f',1)
@@ -443,7 +462,11 @@ void KisToolLine::showSize()
 {
     KisCanvas2 *kisCanvas =dynamic_cast<KisCanvas2*>(canvas());
     KIS_ASSERT(kisCanvas);
-    kisCanvas->viewManager()->showFloatingMessage(i18n("Length: %1 px", QString::number(QLineF(m_startPoint,m_endPoint).length(), 'f',1))
+    const QPointF lineVector = m_endPoint - m_startPoint;
+    const qreal angle = std::atan2(qAbs(lineVector.y()), qAbs(lineVector.x())) * 180.0 / M_PI;
+    kisCanvas->viewManager()->showFloatingMessage(i18nc("%1=length in pixels %2=angle in degrees", "Length: %1 px\nAngle: %2°",
+                                                         QString::number(QLineF(m_startPoint,m_endPoint).length(), 'f', 1),
+                                                         QString::number(angle, 'f', 1))
                                                         , QIcon(), 1000, KisFloatingMessage::High,  Qt::AlignLeft | Qt::TextWordWrap | Qt::AlignVCenter);
 }
 void KisToolLine::paintLine(QPainter& gc, const QRect&)

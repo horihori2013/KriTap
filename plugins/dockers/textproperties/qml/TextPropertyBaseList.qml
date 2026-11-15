@@ -20,6 +20,11 @@ ColumnLayout {
 
     property alias textConfigButtonVisible: configButton.visible;
 
+    enabled: propertiesModel.enabled;
+    onEnabledChanged: {
+        updatePropertyVisibilityState();
+    }
+
     ListModel {
         id: propertyList;
     }
@@ -281,6 +286,10 @@ ColumnLayout {
                     dpi: canvasDPI;
                     properties: propertiesModel;
                 }
+                TextAreaOptions {
+                    dpi: canvasDPI;
+                    properties: propertiesModel;
+                }
             }
         }
     }
@@ -434,5 +443,10 @@ ColumnLayout {
             onClicked: callPropertyVisibilityConfig();
         }
 
+    }
+
+    Item {
+        id: bottomPadding;
+        height: Math.floor(spacing/2);
     }
 }

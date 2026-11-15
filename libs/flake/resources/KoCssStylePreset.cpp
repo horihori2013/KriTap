@@ -43,6 +43,8 @@ struct KoCssStylePreset::Private {
     QString beforeText;
     QString sample = SAMPLE_PLACEHOLDER.toString();
     QString afterText;
+
+    QSizeF paragraphSampleSize = QSizeF(120, 120);
 };
 
 KoCssStylePreset::KoCssStylePreset(const QString &filename)
@@ -91,7 +93,7 @@ KoSvgTextProperties KoCssStylePreset::properties(int ppi, bool removeKraProps) c
     props.removeProperty(KoSvgTextProperties::FillId);
     props.removeProperty(KoSvgTextProperties::StrokeId);
     props.removeProperty(KoSvgTextProperties::Opacity);
-    props.removeProperty(KoSvgTextProperties::Visiblity);
+    props.removeProperty(KoSvgTextProperties::Visibility);
     props.removeProperty(KoSvgTextProperties::TextOrientationId);
     props.removeProperty(KoSvgTextProperties::PaintOrder);
     return props;
@@ -156,7 +158,7 @@ KoShape* KoCssStylePreset::generateSampleShape() const
     const QString after = d->afterText;
     const QString before = d->beforeText;
 
-    QScopedPointer<KoSvgTextShape> sampleText(new KoSvgTextShape());
+    std::unique_ptr<KoSvgTextShape> sampleText(new KoSvgTextShape());
     sampleText->insertText(0, sample.isEmpty()? name().isEmpty()? SAMPLE_PLACEHOLDER.toString(): name(): sample);
     const QString type = styleType().isEmpty()? STYLE_TYPE_CHARACTER: styleType();
 
@@ -164,16 +166,9 @@ KoShape* KoCssStylePreset::generateSampleShape() const
 
     // Remove properties that cannot be edited.
     Q_FOREACH(KoSvgTextProperties::PropertyId p, modifiedProps.properties()) {
-        if (KoSvgTextProperties::propertyIsBlockOnly(p)) {
-            if (removeParagraph) {
-                modifiedProps.removeProperty(p);
-            }
-        } else {
-            if (!removeParagraph) {
-                modifiedProps.removeProperty(p);
-            }
+        if (KoSvgTextProperties::propertyIsBlockOnly(p) && removeParagraph) {
+            modifiedProps.removeProperty(p);
         }
-
     }
     // This one is added after removing, because otherwise, the type is removed...
     modifiedProps.setProperty(KoSvgTextProperties::KraTextStyleType, type);
@@ -189,29 +184,31 @@ KoShape* KoCssStylePreset::generateSampleShape() const
     modifiedProps.removeProperty(KoSvgTextProperties::StrokeId);
     modifiedProps.removeProperty(KoSvgTextProperties::PaintOrder);
     modifiedProps.removeProperty(KoSvgTextProperties::Opacity);
-    modifiedProps.removeProperty(KoSvgTextProperties::Visiblity);
+    modifiedProps.removeProperty(KoSvgTextProperties::Visibility);
     modifiedProps.removeProperty(KoSvgTextProperties::TextOrientationId);
 
     sampleText->setPropertiesAtPos(-1, modifiedProps);
 
+
     if (type == STYLE_TYPE_PARAGRAPH) {
+        const QSizeF sampleSize = d->paragraphSampleSize;
         // For paragraph we'll add a shape, as those will allow wrapping,
         // without being part of the properties like inline-size is.
         KoPathShape *inlineShape = new KoPathShape();
         inlineShape->moveTo(QPointF(0, 0));
-        inlineShape->lineTo(QPointF(120, 0));
-        inlineShape->lineTo(QPointF(120, 120));
-        inlineShape->lineTo(QPointF(0, 120));
+        inlineShape->lineTo(QPointF(sampleSize.width(), 0));
+        inlineShape->lineTo(QPointF(sampleSize.width(), sampleSize.height()));
+        inlineShape->lineTo(QPointF(0, sampleSize.height()));
         inlineShape->lineTo(QPointF(0, 0));
         inlineShape->close();
         sampleText->setShapesInside({inlineShape});
         sampleText->relayout();
 
-        return sampleText.take();
+        return sampleText.release();
     } else {
         /// For character the sample always needs to be set to be a child to
         /// ensure that the character property doesn't include the default props.
-        QScopedPointer<KoSvgTextShape> newShape(new KoSvgTextShape());
+        std::unique_ptr<KoSvgTextShape> newShape(new KoSvgTextShape());
         KoSvgTextProperties paraProps = KoSvgTextProperties::defaultProperties();
         // Set whitespace rule to pre-wrap.
         paraProps.setProperty(KoSvgTextProperties::TextCollapseId, KoSvgText::Preserve);
@@ -224,8 +221,8 @@ KoShape* KoCssStylePreset::generateSampleShape() const
             newShape->insertText(0, before);
         }
 
-        newShape->insertRichText(newShape->posForIndex(before.size()), sampleText.data());
-        return newShape.take();
+        newShape->insertRichText(newShape->posForIndex(before.size()), sampleText.get());
+        return newShape.release();
     }
 
     return nullptr;
@@ -372,6 +369,17 @@ QString KoCssStylePreset::sampleSvg() const
     return m[SAMPLE_SVG].toString();
 }
 
+QSizeF KoCssStylePreset::paragraphSampleSize() const
+{
+    return d->paragraphSampleSize;
+}
+
+void KoCssStylePreset::setParagraphSampleSize(const QSizeF size)
+{
+    d->paragraphSampleSize = size;
+    setDirty(true);
+}
+
 int KoCssStylePreset::storedPPIResolution() const
 {
     QMap<QString, QVariant> m = metadata();
@@ -443,6 +451,11 @@ bool KoCssStylePreset::loadFromDevice(QIODevice *dev, KisResourcesInterfaceSP re
                 d->sample = textShape->plainText().mid(pos.first, pos.second-pos.first);
                 d->beforeText = textShape->plainText().mid(0, pos.first);
                 d->afterText = textShape->plainText().mid(pos.second);
+
+                if (!textShape->shapesInside().isEmpty() && styleType == STYLE_TYPE_PARAGRAPH) {
+                    d->paragraphSampleSize = textShape->shapesInside().first()->size();
+                }
+
             }
 
             addMetaData(STYLE_TYPE, styleType);
@@ -459,7 +472,7 @@ bool KoCssStylePreset::loadFromDevice(QIODevice *dev, KisResourcesInterfaceSP re
 
 bool KoCssStylePreset::saveToDevice(QIODevice *dev) const
 {
-    QScopedPointer<KoShape> shape(generateSampleShape());
+    std::unique_ptr<KoShape> shape(generateSampleShape());
     if (!shape) return false;
 
     QMap<QString, QVariant> m = metadata();
@@ -467,7 +480,7 @@ bool KoCssStylePreset::saveToDevice(QIODevice *dev) const
     shape->setAdditionalAttribute(TITLE, name());
 
     const QRectF boundingRect = shape->boundingRect();
-    SvgWriter writer({shape.take()});
+    SvgWriter writer({shape.release()});
     return writer.save(*dev, boundingRect.size());
 }
 

@@ -66,7 +66,7 @@ DockerPlugins=\\0
 DockerPluginsDisabled=textdocumentinspection
 FlakePlugins=,
 ShapePlugins=,
-ToolsBlacklist=CreatePathTool,KoPencilTool,KarbonFilterEffectsTool,KritaShape/KisToolText
+ToolsBlacklist=CreatePathTool,KoPencilTool,KritaShape/KisToolText
 ToolPlugins=,,
 ToolPluginsDisabled=
 
@@ -368,6 +368,7 @@ enable_documenttools=true
 enable_exportlayers=true
 enable_filtermanager=true
 enable_lastdocumentsdocker=true
+enable_mutator=true
 enable_quick_settings_docker=true
 enable_scripter=true
 enable_tenbrushes=true

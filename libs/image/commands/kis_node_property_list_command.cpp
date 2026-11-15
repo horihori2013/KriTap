@@ -15,6 +15,8 @@
 #include "kis_layer_properties_icons.h"
 #include "kis_command_ids.h"
 
+#include <memory>
+
 // HACK! please refactor out!
 #include "kis_simple_stroke_strategy.h"
 #include "kis_abstract_projection_plane.h"
@@ -228,13 +230,13 @@ void KisNodePropertyListCommand::setNodePropertiesAutoUndo(KisNodeSP node, KisIm
     const QSet<QString> properties = changedProperties(node->sectionModelProperties(), proplist);
 
     const bool undo = !properties.isEmpty() &&
-            properties != QSet<QString>{KisLayerPropertiesIcons::colorizeNeedsUpdate.id()} &&
-            properties != QSet<QString>{KisLayerPropertiesIcons::openFileLayerFile.id()};
+        (properties.size() != 1 ||
+         !KisLayerPropertiesIcons::isStatelessProperty(*properties.begin()));
 
-    QScopedPointer<KUndo2Command> cmd(new KisNodePropertyListCommand(node, proplist));
+    std::unique_ptr<KUndo2Command> cmd(new KisNodePropertyListCommand(node, proplist));
 
     if (undo) {
-        image->undoAdapter()->addCommand(cmd.take());
+        image->undoAdapter()->addCommand(cmd.release());
     }
     else {
         /**
@@ -268,7 +270,7 @@ void KisNodePropertyListCommand::setNodePropertiesAutoUndo(KisNodeSP node, KisIm
             QScopedPointer<KUndo2Command> m_cmd;
         };
 
-        KisStrokeId strokeId = image->startStroke(new SimpleLodResettingStroke(cmd.take()));
+        KisStrokeId strokeId = image->startStroke(new SimpleLodResettingStroke(cmd.release()));
         image->endStroke(strokeId);
     }
 

@@ -67,7 +67,7 @@ public:
     void dismiss() override;
     bool onScreen() override;
     
-    void ensureWithinParent(const QPoint& position, bool useUpperLeft);
+    void ensureWithinParent(const QPoint& globalPos, bool useUpperLeft);
 
 protected:
     void showEvent(QShowEvent *event) override;
@@ -125,7 +125,6 @@ private:
     bool m_useDynamicSlotCount {true};
     int m_hoveredColor {0};
     int m_selectedColor {0};
-    bool m_tabletRightClickPressed {false};
     bool m_touchBeginReceived {false};
     bool m_isOverFgBgColors {false};
     bool m_snapRotation {false};

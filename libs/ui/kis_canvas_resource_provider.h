@@ -8,6 +8,7 @@
 #define KIS_CANVAS_RESOURCE_PROVIDER_H_
 
 #include <QObject>
+#include <QPointF>
 
 #include <KoColor.h>
 #include <KoID.h>
@@ -31,6 +32,7 @@ class KoCanvasBase;
 class KisViewManager;
 
 class KisFilterConfiguration;
+class KisUniqueColorSet;
 
 #include <kis_abstract_perspective_grid.h>
 
@@ -57,8 +59,30 @@ public:
     KoColor fgColor() const;
     void setFGColor(const KoColor& c);
 
-    QList<KoColor> colorHistory() const;
-    void setColorHistory(const QList<KoColor>& colors);
+    /**
+     * Return an internal model for managing the global list
+     * of last used colors. The model can be used to manipulate
+     * the colors and subscribe to updates.
+     */
+    KisUniqueColorSet *colorHistoryModel() const;
+
+    /**
+     * Replaces the global history of the last-used colors,
+     * from the newest to oldest.
+     *
+     * The actual values are stored in the model returned by
+     * colorHistoryModel()
+     */
+    void setColorHistoryColors(const QList<KoColor> &colors);
+
+    /**
+     * Return the global history of the last-used colors,
+     * from the newest to oldest.
+     *
+     * The actual values are stored in the model returned by
+     * colorHistoryModel()
+     */
+    QList<KoColor> colorHistoryColors() const;
 
     float HDRExposure() const;
     void setHDRExposure(float exposure);
@@ -119,6 +143,9 @@ public:
     void setSize(qreal size);
     qreal size() const;
 
+    void setFade(qreal fade);
+    qreal fade() const;
+
     void setBrushRotation(qreal rotation);
     qreal brushRotation() const;
 
@@ -133,6 +160,9 @@ public:
 
     void setTextPropertyData(KoSvgTextPropertyData data);
     KoSvgTextPropertyData textPropertyData() const;
+
+    void setCharacterPropertyData(KoSvgTextPropertyData data);
+    KoSvgTextPropertyData characterTextPropertyData() const;
 
     ///Notify that the workspace is saved and settings should be saved to it
     void notifySavingWorkspace(KisWorkspaceResourceSP workspace);
@@ -191,6 +221,7 @@ Q_SIGNALS:
     void sigGamutMaskDeactivated();
 
     void sigTextPropertiesChanged();
+    void sigCharacterPropertiesChanged();
 
 private:
 

@@ -48,7 +48,7 @@ public:
     WGColorSelectorDock();
     const KisVisualColorModel& colorModel() const;
     KisDisplayColorConverter* displayColorConverter(bool rawPointer = false) const;
-    KisUniqueColorSet* colorHistory() const { return m_colorHistory; }
+    KisUniqueColorSet* colorHistoryModel() const;
 
     bool selectingBackground() const;
     /**
@@ -60,10 +60,10 @@ public:
      */
     void setChannelValues(const QVector4D &values);
 protected:
-    void leaveEvent(QEvent *event) override;
     void setCanvas(KoCanvasBase *canvas) override;
     void unsetCanvas() override;
     void setViewManager(KisViewManager* viewManager) override;
+    bool eventFilter(QObject* obj, QEvent *ev) override;
 
     void disconnectFromCanvas();
     void updateLayout();
@@ -90,7 +90,10 @@ private:
     KisVisualColorSelector *m_selector {0};
     KisColorSourceToggle *m_toggle {0};
     KisSignalCompressor *m_colorChangeCompressor;
-    KisUniqueColorSet *m_colorHistory;
+    KisUniqueColorSet *m_globalColorHistoryModel{0};
+    KisUniqueColorSet *m_documentColorHistoryModel{0};
+    std::unique_ptr<KisUniqueColorSet> m_fallbackColorHistoryModel;
+    bool m_colorHistoryFromDocument{false};
     KisGamutMaskToolbar *m_gamutToolbar;
     WGCommonColorSet *m_commonColorSet {0};
     WGActionManager *m_actionManager {0};
@@ -107,6 +110,8 @@ private:
     ColorSpaceSource m_CSSource {LayerColorSpace};
     bool m_pendingFgUpdate {false};
     bool m_pendingBgUpdate {false};
+
+    QWidget* m_mainWidget;
 };
 
 namespace WGConfig {

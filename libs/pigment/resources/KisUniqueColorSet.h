@@ -22,9 +22,14 @@ public:
     explicit KisUniqueColorSet(QObject *parent = nullptr);
     ~KisUniqueColorSet() override;
 
+    KisUniqueColorSet(const KisUniqueColorSet &rhs, QObject *parent = nullptr);
+
     void addColor(const KoColor &color);
     KoColor color(int index) const;
     int size() const;
+
+    QList<KoColor> colorList() const;
+    void setColorList(const QList<KoColor> &colors);
 
 public Q_SLOTS:
     void clear();

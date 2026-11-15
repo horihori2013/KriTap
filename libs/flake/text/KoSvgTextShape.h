@@ -13,19 +13,23 @@
 #include <KoShapeFactoryBase.h>
 #include <SvgShape.h>
 #include <KoShape.h>
+#include <KoShapeBulkActionInterface.h>
 #include <KoSvgText.h>
 #include "html/HtmlSavingContext.h"
 #include <QFlags>
 
 class KoSvgTextShapeMemento;
 class KoSvgTextNodeIndex;
+struct KoSvgTextCharacterInfo;
+class KoPathShape;
 typedef QSharedPointer<KoSvgTextShapeMemento> KoSvgTextShapeMementoSP;
 
 #define KoSvgTextShape_SHAPEID "KoSvgTextShapeID"
+#define KoSvgTextShape_TEXTCONTOURGROUP "krita:textContourGroup"
 /**
  * KoSvgTextShape is a root chunk of the \<text\> element subtree.
  */
-class KRITAFLAKE_EXPORT KoSvgTextShape : public KoShape, public SvgShape
+class KRITAFLAKE_EXPORT KoSvgTextShape : public KoShape, public SvgShape, public KoShapeBulkActionInterface
 {
 public:
     KoSvgTextShape();
@@ -42,6 +46,9 @@ public:
     QPainterPath outline() const override;
     QRectF outlineRect() const override;
     QRectF boundingRect() const override;
+
+    QSizeF size() const override;
+    void setSize(const QSizeF &size) override;
 
     enum class DebugElement {
         CharBbox = 1 << 0,
@@ -93,6 +100,70 @@ public:
     void setShapesInside(QList<KoShape*> shapesInside);
 
     /**
+     * @brief addShapesContours
+     * Add shapes to the contours that make up the wrapping area.
+     * @param shapes -- shapes to add.
+     * @param inside -- whether to add to shapesInside or shapesSubtract.
+     * If a shape is already in one list, adding them will cause them to be
+     * moved to the other list.
+     */
+    void addShapeContours(QList<KoShape*> shapes, const bool inside = true);
+    /**
+     * @brief shapeInContours
+     * @param shape
+     * @return whether a shape is in any contour.
+     */
+    bool shapeInContours(KoShape *shape);
+
+    /**
+     * @brief removeShapesFromContours
+     * Remove list of shapes from any of the internal lists.
+     * @param shapes -- shapes to remove.
+     * @param update -- whether to call an update.
+     * @param cleanup -- whether to cleanup the textdata.
+     */
+    void removeShapesFromContours(QList<KoShape*> shapes, bool callUpdate = true, bool cleanup = true);
+
+    /**
+     * @brief moveShapeInsideToIndex
+     * Because the order of shapes inside shape-inside affects the text layout,
+     * it can be useful to be able to reorder them.
+     * @param shapeInside -- shape from the shapesInside list. This function will do nothing
+     * @param index -- new index to move the shape inside to. Will be bound to the list size.
+     *
+     * @seealso shapesInside();
+     */
+    void moveShapeInsideToIndex(KoShape* shapeInside, const int index);
+
+    /**
+     * @brief setTextPathOnRange
+     * Set a text path on the specified range.
+     * In SVG text paths are always at the first child.
+     * @param textPath -- TextPath to set.
+     * @param posStart -- Start of the range, as cursor pos.
+     * @param posEnd --  End of the range, as cursor pos.
+     * @return whether successfull.
+     */
+    bool setTextPathOnRange(KoShape *textPath, const int startPos = -1, const int endPos = -1);
+
+    /**
+     * @brief textPathsAtRange
+     * Get a list of textPaths at the given range. This includes textPaths whose
+     * node is only partially overlapped by the range.
+     * @param posStart -- Start of the range, as cursor pos.
+     * @param posEnd --  End of the range, as cursor pos.
+     * @return list of KoShapes that are text paths.
+     */
+    QList<KoShape*> textPathsAtRange(const int startPos = -1, const int endPos = -1);
+
+    /**
+     * @brief addTextPathAtEnd
+     * add a textpath node at the end of the text.
+     * @param textPath -- text path to add.
+     */
+    void addTextPathAtEnd(KoShape *textPath);
+
+    /**
      * @brief shapesInside
      * @return the list of shapes that make up the content area.
      */
@@ -105,10 +176,28 @@ public:
     void setShapesSubtract(QList<KoShape*> shapesSubtract);
 
     /**
+     * @brief textWrappingAreas
+     * The text wrapping areas are computed from shapesInside()
+     * and shapesSubtract(), as well as the text properties
+     * ShapeMargin and ShapePadding. This returns the computed
+     * wrapping areas, in the local coordinates of the shape.
+     *
+     * @seealso outline()
+     * @return a list of computed text wrapping areas.
+     */
+    QList<QPainterPath> textWrappingAreas() const;
+
+    /**
      * @brief shapesSubtract
      * @return list of subtract shapes.
      */
     QList<KoShape*> shapesSubtract() const;
+
+    /**
+     * @brief internalShapeManager
+     * @return access the internal shapes manager for the contour shapes.
+     */
+    KoShapeManager *internalShapeManager() const;
 
     QMap<QString, QString> shapeTypeSpecificStyles(SvgSavingContext &context) const;
 
@@ -246,7 +335,7 @@ public:
 
     /**
      * @brief posForPointLineSensitive
-     * When clicking on an empty space in a wrapped text, it is preferrable to have the
+     * When clicking on an empty space in a wrapped text, it is preferable to have the
      * caret be at the end of the line visually associated with that empty space than
      * the positions above or below that might be closer.
      *
@@ -290,13 +379,13 @@ public:
      * Insert a text somewhere in the KoTextShape.
      * @param pos the cursor position.
      * @param text the text to insert.
-     * @return whether it was succesful in inserting text.
+     * @return whether it was successful in inserting text.
      */
     bool insertText(int pos, QString text);
 
     /**
      * @brief removeText
-     * Where insert text explicitely uses a cursorposition,
+     * Where insert text explicitly uses a cursorposition,
      * remove text uses a string index. It will modify these values
      * so that...
      * - Whole code points are deleted at any time, avoiding
@@ -365,13 +454,41 @@ public:
      * @brief insertRichText
      * Insert rich text at the given cursor pos. This will first split contents at the given pos before inserting the new rich text.
      * @param pos -- cursor pos to insert at.
-     * @param richText -- KoSvgTextShape with rich text data. TODO: make this const once KisForest constness issues have been fixed.
-     * @return whether insertion happened succesfully.
+     * @param richText -- KoSvgTextShape with rich text data.
+     * @param inheritPropertiesIfPossible -- toggle whether to inherit rich text if possible.
+     * @return whether insertion happened successfully.
      */
-    bool insertRichText(int pos, const KoSvgTextShape *richText);
+    bool insertRichText(int pos, const KoSvgTextShape *richText, bool inheritPropertiesIfPossible = false);
 
     /// Cleans up the internal text data. Used by undo commands.
     void cleanUp();
+
+    /**
+     * @brief setCharacterTransformsOnRange
+     * Set SVG 1.1 style character transforms on the given range. Will not work
+     * when the shape is auto wrapping.
+     * @param startPos -- start of range
+     * @param endPos -- end of range
+     * @param positions -- positions, in shape coordinates.
+     * @param rotations -- rotations, in degrees.
+     * @param deltaPosition -- whether to calculate and set the delta positions.
+     * @return whether successful.
+     */
+    bool setCharacterTransformsOnRange(const int startPos, const int endPos, const QVector<QPointF> positions, const QVector<qreal> rotateDegrees, const bool deltaPosition = true);
+
+    /**
+     * @brief getPositionsAndRotationsForRange
+     * @param startPos -- start of range.
+     * @param endPos -- end of range, not inclusive.
+     * @param includeLastAdvance -- include a transform at the end that represents the last transform+advance.
+     * @return list of qpairs, with the first value being the final position, and the second the final rotation.
+     */
+    QList<KoSvgTextCharacterInfo> getPositionsAndRotationsForRange(const int startPos, const int endPos) const;
+
+    /**
+     * Remove local transforms from the given range.
+     */
+    void removeTransformsFromRange(const int startPos, const int endPos);
 
 /*****************************************************************************
  * KoSvgTextNodeIndex functions.
@@ -400,6 +517,27 @@ public:
      */
     QPair<int, int> findRangeForNodeIndex(const KoSvgTextNodeIndex &node) const;
 
+    /**
+     * @brief topLevelNodeForPos
+     * Get, if possible, an index for the child element of the root at pos.
+     * If not possible, returns an index for the root. This is used primarily for text-on-path.
+     * @param pos -- cursor position at which to find the index.
+     * @return if the text only has a root, it will still return the index for the root,
+     * but otherwise it will return a child element of root at pos.
+     */
+    KoSvgTextNodeIndex topLevelNodeForPos(int pos) const;
+
+    /**
+     * @brief nodeForTextPath
+     * TextPaths are set on toplevel content elements. This function
+     * allows for searching which node has said textPath, which should be
+     * less clunky than running topLevelNodeForPos for every pos.
+     * @param textPath -- the text path to find the node for.
+     * @return toplevel node that has the given shape set at it's text path.
+     * Returns the root node when none is found.
+     */
+    KoSvgTextNodeIndex nodeForTextPath(KoShape *textPath) const;
+
     /*--------------- Properties ---------------*/
 
     KoSvgTextProperties textProperties() const;
@@ -425,6 +563,21 @@ public:
      * @return the writing mode of this text.
      */
     KoSvgText::WritingMode writingMode() const;
+
+    /**
+     * @brief direction
+     * Whether the text is left to right or right to left.
+     * @return the paragraph-direction of this text.
+     */
+    KoSvgText::Direction direction() const;
+
+    /**
+     * @brief singleNode
+     * Sometimes it is useful to know whether there's only a single text node
+     * for UX purposes.
+     * @return whether there's only a single root node, or there's a full fledged tree.
+     */
+    bool singleNode() const;
 
     /// ShapeChangeListener so we can inform any text cursors that the cursor needs updating.
     struct KRITAFLAKE_EXPORT TextCursorChangeListener : public ShapeChangeListener {
@@ -509,10 +662,23 @@ public:
      */
     bool fontMatchingDisabled() const;
 
+    /**
+     * @brief generateTextAreas
+     * Generates text areas with the given shapes and properties.
+     * This is used to paint previews in the PaddingMargin strategy.
+     * @param shapesInside -- the shapes inside to compute the text areas from.
+     * @param shapesSubtract -- the subtract shapes to remove from the text areas.
+     * @param props -- the properties to use. ShapePadding and ShapeMargin id will be taken from this.
+     * @return list of QPainterPaths.
+     */
+    static QList<QPainterPath> generateTextAreas(const QList<KoShape*> shapesInside, const QList<KoShape*> shapesSubtract, const KoSvgTextProperties &props);
+
+    void startBulkAction() override;
+    QRectF endBulkAction() override;
+
 protected:
 
     void shapeChanged(ChangeType type, KoShape *shape) override;
-
 private:
     friend class TestSvgText;
     friend class KoSvgTextLoader;
@@ -598,6 +764,41 @@ private:
     struct Private;
     QScopedPointer<Private> d;
 
+};
+
+/**
+ * @brief The KoSvgTextCharacterInfo class
+ * This is a small struct to convey information about
+ * character positioning inside a textShape.
+ * It's functionally a simplified readonly version
+ * of CharacterResult inside the TextShape.
+ *
+ * Currently used for character transform adjustments.
+ */
+struct KoSvgTextCharacterInfo {
+    QPointF finalPos;
+    QPointF advance;
+    qreal rotateDeg; // Rotation in radians.
+    int visualIndex = -1;
+    int logicalIndex = -1;
+    bool rtl = false;
+    bool middle = false; /// <Whether the character is in the middle of a cluster.
+    KoSvgText::FontMetrics metrics;
+
+    // For use with std::sort
+    static bool visualLessThan(const KoSvgTextCharacterInfo &a, const KoSvgTextCharacterInfo &b) {
+        bool compare = false;
+        if (a.visualIndex >= 0
+                && b.visualIndex >= 0) {
+            compare = a.visualIndex < b.visualIndex;
+        } else {
+            compare = a.logicalIndex < b.logicalIndex;
+        }
+        return compare;
+    }
+    static bool logicalLessThan(const KoSvgTextCharacterInfo &a, const KoSvgTextCharacterInfo &b) {
+        return a.logicalIndex < b.logicalIndex;
+    }
 };
 
 class KoSvgTextShapeFactory : public KoShapeFactoryBase

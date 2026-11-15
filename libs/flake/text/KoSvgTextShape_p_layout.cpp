@@ -109,6 +109,18 @@ QString langToLibUnibreakLang(const QString lang) {
     return lang;
 }
 
+
+void KoSvgTextShape::Private::updateTextWrappingAreas()
+{
+    KoSvgTextProperties rootProperties = textData.empty()? KoSvgTextProperties::defaultProperties(): textData.childBegin()->properties;
+    currentTextWrappingAreas = getShapes(shapesInside, shapesSubtract, rootProperties);
+    relayout();
+}
+
+QList<QPainterPath> KoSvgTextShape::Private::generateShapes(const QList<KoShape *> shapesInside, const QList<KoShape *> shapesSubtract, const KoSvgTextProperties &properties)
+{
+    return getShapes(shapesInside, shapesSubtract, properties);
+}
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void KoSvgTextShape::Private::relayout()
 {
@@ -210,8 +222,8 @@ void KoSvgTextShape::Private::relayout()
     int globalIndex = 0;
     QVector<CharacterResult> result(text.size());
     // HACK ALERT!
-    // Apparantly feeding a bidi algorithm a hardbreak makes it go 'ok, not doing any
-    // bidi', which makes sense, Bidi is supossed to be done 'after' line breaking.
+    // Apparently feeding a bidi algorithm a hardbreak makes it go 'ok, not doing any
+    // bidi', which makes sense, Bidi is supposed to be done 'after' line breaking.
     // Without replacing hardbreaks with spaces, hardbreaks in rtl will break the bidi.
     for (int i = 0; i < text.size(); i++) {
         if (lineBreaks[i] == LINEBREAK_MUSTBREAK) {
@@ -248,7 +260,7 @@ void KoSvgTextShape::Private::relayout()
     }
     this->resolveTransforms(textData.childBegin(), text, result, globalIndex, isHorizontal, wrapped, false, resolvedTransforms, collapseChars, KoSvgTextProperties::defaultProperties(), true);
 
-    // pass everything to a css-compatible text-layout algortihm.
+    // pass everything to a css-compatible text-layout algorithm.
     raqm_t_sp layout(raqm_create());
 
     if (raqm_set_text_utf16(layout.data(), text.utf16(), static_cast<size_t>(text.size()))) {
@@ -508,7 +520,7 @@ void KoSvgTextShape::Private::relayout()
     }
 
     // 2. Set flags and assign initial positions
-    // We also retreive a glyph path here.
+    // We also retrieve a glyph path here.
     size_t count = 0;
     const raqm_glyph_t *glyphs = raqm_get_glyphs(layout.data(), &count);
     if (!glyphs) {
@@ -521,6 +533,10 @@ void KoSvgTextShape::Private::relayout()
 
 
     KIS_ASSERT(count <= INT32_MAX);
+
+    // For detecting ligatures.
+    int previousGlyph = -1;
+    int previousCluster = -1;
 
     for (int i = 0; i < static_cast<int>(count); i++) {
         raqm_glyph_t currentGlyph = glyphs[i];
@@ -553,12 +569,28 @@ void KoSvgTextShape::Private::relayout()
             continue;
         }
 
+        /// Ligature caret testing. We try to test when there's a gap between clusters and glyphs.
+        /// This gap happens because a single glyph covers multiple clusters.
+        /// We do this because testing for caret positions is surprisingly heavy.
+        if (((cluster - previousCluster) > (i-previousGlyph)) && previousCluster >= 0) {
+            raqm_glyph_t previousGlyph = glyphs[i];
+            result[previousCluster].cursorInfo.offsets = getLigatureCarets(resHandler, isHorizontal, previousGlyph);
+        }
+        // Always test last one.
+        if (i+1 == count) {
+            charResult.cursorInfo.offsets = getLigatureCarets(resHandler, isHorizontal, currentGlyph);
+        }
+
         charResult.visualIndex = i;
         logicalToVisual.insert(cluster, i);
 
         charResult.middle = false;
 
         result[cluster] = charResult;
+        if (previousCluster != cluster) {
+            previousGlyph = i;
+            previousCluster = cluster;
+        }
     }
 
     // fix it so that characters that are in the 'middle' due to either being
@@ -640,13 +672,12 @@ void KoSvgTextShape::Private::relayout()
 
     // Compute baseline alignment.
     globalIndex = 0;
-    this->computeFontMetrics(textData.childBegin(), KoSvgTextProperties::defaultProperties(), KoSvgText::FontMetrics(), KoSvgText::BaselineAuto, QPointF(), QPointF(), result, globalIndex, resHandler, isHorizontal, disableFontMatching);
+    this->computeFontMetrics(textData.childBegin(), KoSvgTextProperties::defaultProperties(), KoSvgTextProperties::defaultProperties().metrics(false, false), KoSvgText::BaselineAuto, result, globalIndex, resHandler, isHorizontal, disableFontMatching);
 
     // Handle linebreaking.
     QPointF startPos = resolvedTransforms.value(0).absolutePos() - result.value(0).dominantBaselineOffset;
-    if (!this->shapesInside.isEmpty()) {
-        QList<QPainterPath> shapes = getShapes(this->shapesInside, this->shapesSubtract, rootProperties);
-        this->lineBoxes = flowTextInShapes(rootProperties, logicalToVisual, result, shapes, startPos, resHandler);
+    if (!this->currentTextWrappingAreas.isEmpty()) {
+        this->lineBoxes = flowTextInShapes(rootProperties, logicalToVisual, result, this->currentTextWrappingAreas, startPos, resHandler);
     } else {
         this->lineBoxes = breakLines(rootProperties, logicalToVisual, result, startPos, resHandler);
     }
@@ -739,12 +770,12 @@ void KoSvgTextShape::Private::relayout()
                                   globalIndex,
                                   isHorizontal,
                                   direction == KoSvgText::DirectionLeftToRight,
-                                  false, KoSvgTextProperties::defaultProperties());
+                                  false, KoSvgTextProperties::defaultProperties(), this->textPaths);
 
         // 8. Position on path
 
         debugFlake << "8. Position on path";
-        this->applyTextPath(textData.childBegin(), result, isHorizontal, startPos, KoSvgTextProperties::defaultProperties());
+        this->applyTextPath(textData.childBegin(), result, isHorizontal, startPos, KoSvgTextProperties::defaultProperties(), this->textPaths);
     } else {
         globalIndex = 0;
         debugFlake << "Computing text-decorationsfor inline-size";
@@ -758,7 +789,7 @@ void KoSvgTextShape::Private::relayout()
                                   globalIndex,
                                   isHorizontal,
                                   direction == KoSvgText::DirectionLeftToRight,
-                                  true, KoSvgTextProperties::defaultProperties());
+                                  true, KoSvgTextProperties::defaultProperties(), this->textPaths);
     }
 
     // 9. return result.
@@ -866,7 +897,7 @@ void KoSvgTextShape::Private::resolveTransforms(KisForest<KoSvgTextContentElemen
     int index = currentIndex;
     int j = index + numChars(currentTextElement, withControls, resolvedProps);
 
-    if (currentTextElement->textPath) {
+    if (!currentTextElement->textPathId.isEmpty()) {
         textInPath = true;
     } else {
         int i = 0;
@@ -878,7 +909,7 @@ void KoSvgTextShape::Private::resolveTransforms(KisForest<KoSvgTextContentElemen
             bool bidi = bidiControls.contains(text.at(k));
             bool softHyphen = text.at(k) == QChar::SoftHyphen;
 
-            // Apparantly when there's bidi controls in the text, they participate in line-wrapping,
+            // Apparently when there's bidi controls in the text, they participate in line-wrapping,
             // so we don't check for it when wrapping.
             if (collapsedChars[k] || (bidi && !wrapped) || softHyphen) {
                 result[k].addressable = false;
@@ -911,7 +942,7 @@ void KoSvgTextShape::Private::resolveTransforms(KisForest<KoSvgTextContentElemen
 
     }
 
-    if (currentTextElement->textPath) {
+    if (!currentTextElement->textPathId.isEmpty()) {
         bool first = true;
         for (int k = index; k < j; k++ ) {
 
@@ -1009,6 +1040,7 @@ void KoSvgTextShape::Private::applyTextLength(KisForest<KoSvgTextContentElement>
             CharacterResult cr = result[visualToLogical.value(k)];
             if (cr.addressable) {
                 cr.finalPosition += shift;
+                cr.textLengthOffset += shift;
                 if (spacingAndGlyphs) {
                     QPointF scale(d.x() != 0 ? (d.x() / cr.advance.x()) + 1 : 1.0, d.y() != 0 ? (d.y() / cr.advance.y()) + 1 : 1.0);
                     cr.scaleCharacterResult(scale.x(), scale.y());
@@ -1025,7 +1057,7 @@ void KoSvgTextShape::Private::applyTextLength(KisForest<KoSvgTextContentElement>
         }
         resolvedDescendentNodes += 1;
 
-        // apply the shift to all consequetive chars as long as they don't start
+        // apply the shift to all consecutive chars as long as they don't start
         // a new chunk.
         int lastVisualValue = visualToLogical.keys().last();
         visualToLogical.clear();
@@ -1063,8 +1095,6 @@ void KoSvgTextShape::Private::computeFontMetrics(// NOLINT(readability-function-
     const KoSvgTextProperties &parentProps,
     const KoSvgText::FontMetrics &parentBaselineTable,
     const KoSvgText::Baseline parentBaseline,
-    const QPointF superScript,
-    const QPointF subScript,
     QVector<CharacterResult> &result,
     int &currentIndex,
     const KoSvgText::ResolutionHandler resHandler,
@@ -1076,14 +1106,17 @@ void KoSvgTextShape::Private::computeFontMetrics(// NOLINT(readability-function-
 
     KoSvgTextProperties properties = parent->properties;
     properties.inheritFrom(parentProps, true);
+    const QTransform ftTf = resHandler.freeTypeToPointTransform();
 
     const KoSvgText::CssLengthPercentage baselineShift = properties.property(KoSvgTextProperties::BaselineShiftValueId).value<KoSvgText::CssLengthPercentage>();
     QPointF baselineShiftTotal;
     KoSvgText::BaselineShiftMode baselineShiftMode = KoSvgText::BaselineShiftMode(properties.property(KoSvgTextProperties::BaselineShiftModeId).toInt());
 
     if (baselineShiftMode == KoSvgText::ShiftSuper) {
+        QPointF superScript = ftTf.map(QPointF(parentBaselineTable.superScriptOffset.first, parentBaselineTable.superScriptOffset.second));
         baselineShiftTotal = isHorizontal ? superScript : QPointF(-superScript.y(), superScript.x());
     } else if (baselineShiftMode == KoSvgText::ShiftSub) {
+        QPointF subScript = ftTf.map(QPointF(parentBaselineTable.subScriptOffset.first, parentBaselineTable.subScriptOffset.second));
         baselineShiftTotal = isHorizontal ? subScript : QPointF(-subScript.y(), subScript.x());
     } else if (baselineShiftMode == KoSvgText::ShiftLengthPercentage) {
         // Positive baseline-shift goes up in the inline-direction, which is up in horizontal and right in vertical.
@@ -1091,11 +1124,17 @@ void KoSvgTextShape::Private::computeFontMetrics(// NOLINT(readability-function-
     }
     baselineShiftTotal = resHandler.adjust(baselineShiftTotal);
 
+    /**
+     * Metrics are supossed to be generated from the first available font in a span,
+     * hence we're loading the font here... (CSS-Inline-3 section 3.3)
+     * CSS-Fonts specifies that such a first-available-font needs to resolve against
+     * the space character.
+     */
     QVector<int> lengths;
     const std::vector<FT_FaceSP> faces = KoFontRegistry::instance()->facesForCSSValues(
         lengths,
         properties.cssFontInfo(),
-        QString(),
+        QString(" "),
         static_cast<quint32>(resHandler.xRes),
         static_cast<quint32>(resHandler.yRes),
         disableFontMatching);
@@ -1116,13 +1155,8 @@ void KoSvgTextShape::Private::computeFontMetrics(// NOLINT(readability-function-
         dominantBaseline = defaultBaseline;
     }
 
-    // Get underline and super/subscripts.
-    const QTransform ftTf = resHandler.freeTypeToPointTransform();
-    const QPointF newSuperScript = ftTf.map(QPointF(metrics.superScriptOffset.first, metrics.superScriptOffset.second));
-    const QPointF newSubScript = ftTf.map(QPointF(metrics.subScriptOffset.first, -metrics.subScriptOffset.second));
-
     for (auto child = KisForestDetail::childBegin(parent); child != KisForestDetail::childEnd(parent); child++) {
-        computeFontMetrics(child, properties, metrics, dominantBaseline, newSuperScript, newSubScript, result, currentIndex, resHandler, isHorizontal, disableFontMatching);
+        computeFontMetrics(child, properties, metrics, dominantBaseline, result, currentIndex, resHandler, isHorizontal, disableFontMatching);
     }
 
     KoSvgText::Baseline baselineAdjust = KoSvgText::Baseline(properties.propertyOrDefault(KoSvgTextProperties::AlignmentBaselineId).toInt());
@@ -1250,7 +1284,8 @@ void KoSvgTextShape::Private::computeTextDecorations(// NOLINT(readability-funct
     bool isHorizontal,
     bool ltr,
     bool wrapping,
-    const KoSvgTextProperties resolvedProps)
+    const KoSvgTextProperties resolvedProps,
+                                                     QList<KoShape *> textPaths)
 {
 
     const int i = currentIndex;
@@ -1261,9 +1296,10 @@ void KoSvgTextShape::Private::computeTextDecorations(// NOLINT(readability-funct
     qreal currentTextPathOffset = textPathoffset;
     bool textPathSide = side;
     if (!wrapping) {
-        currentTextPath = textPath ? textPath : dynamic_cast<KoPathShape *>(currentTextElement->textPath.data());
+        KoShape *cTextPath = KoSvgTextShape::Private::textPathByName(currentTextElement->textPathId, textPaths);
+        currentTextPath = textPath ? textPath : dynamic_cast<KoPathShape *>(cTextPath);
 
-        if (currentTextElement->textPath) {
+        if (cTextPath) {
             textPathSide = currentTextElement->textPathInfo.side == TextPathSideRight;
             if (currentTextElement->textPathInfo.startOffsetIsPercentage) {
                 KIS_ASSERT(currentTextPath);
@@ -1292,7 +1328,7 @@ void KoSvgTextShape::Private::computeTextDecorations(// NOLINT(readability-funct
                                isHorizontal,
                                ltr,
                                wrapping,
-                               properties
+                               properties, textPaths
                                );
     }
 
@@ -1679,27 +1715,29 @@ KoSvgTextShape::Private::generateDecorationPaths(const int &start, const int &en
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void KoSvgTextShape::Private::applyAnchoring(QVector<CharacterResult> &result, bool isHorizontal, const KoSvgText::ResolutionHandler resHandler)
 {
-    int i = 0;
+    int end = 0;
     int start = 0;
 
     while (start < result.size()) {
 
-        qreal shift = anchoredChunkShift(result, isHorizontal, start, i);
+        qreal shift = anchoredChunkShift(result, isHorizontal, start, end);
 
         const QPointF shiftP = resHandler.adjust(isHorizontal ? QPointF(shift, 0) : QPointF(0, shift));
 
-        for (int j = start; j < i; j++) {
+        for (int j = start; j < end; j++) {
             result[j].finalPosition += shiftP;
+            result[j].textPathAndAnchoringOffset += shiftP;
         }
-        start = i;
+        start = end;
     }
 }
 
-qreal KoSvgTextShape::Private::anchoredChunkShift(const QVector<CharacterResult> &result, const bool isHorizontal, const int start, int &i)
+qreal KoSvgTextShape::Private::anchoredChunkShift(const QVector<CharacterResult> &result, const bool isHorizontal, const int start, int &end)
 {
     qreal a = 0;
     qreal b = 0;
-    for (i = start; i < result.size(); i++) {
+    int i = start;
+    for (; i < result.size(); i++) {
         if (!result.at(i).addressable) {
             continue;
         }
@@ -1718,18 +1756,22 @@ qreal KoSvgTextShape::Private::anchoredChunkShift(const QVector<CharacterResult>
         }
     }
 
-    const bool rtl = result.at(start).direction == KoSvgText::DirectionRightToLeft;
-    qreal shift = isHorizontal ? result.at(start).finalPosition.x() : result.at(start).finalPosition.y();
+    const CharacterResult startRes = result.at(start);
 
-    if ((result.at(start).anchor == KoSvgText::AnchorStart && !rtl) || (result.at(start).anchor == KoSvgText::AnchorEnd && rtl)) {
+    const bool rtl = startRes.direction == KoSvgText::DirectionRightToLeft;
+    qreal shift = isHorizontal ? startRes.finalPosition.x() : startRes.finalPosition.y();
+
+    if ((startRes.anchor == KoSvgText::AnchorStart && !rtl)
+            || (startRes.anchor == KoSvgText::AnchorEnd && rtl)) {
         shift = shift - a;
 
-    } else if ((result.at(start).anchor == KoSvgText::AnchorEnd && !rtl) || (result.at(start).anchor == KoSvgText::AnchorStart && rtl)) {
+    } else if ((startRes.anchor == KoSvgText::AnchorEnd && !rtl)
+               || (startRes.anchor == KoSvgText::AnchorStart && rtl)) {
         shift = shift - b;
-
     } else {
         shift = shift - (a + b) * 0.5;
     }
+    end = i;
     return shift;
 }
 
@@ -1817,9 +1859,9 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
                                             QVector<CharacterResult> &result,
                                             bool isHorizontal,
                                             QPointF &startPos,
-                                            const KoSvgTextProperties resolvedProps)
+                                            const KoSvgTextProperties resolvedProps, QList<KoShape *> textPaths)
 {
-    // Unlike all the other applying functions, this one only iterrates over the
+    // Unlike all the other applying functions, this one only iterates over the
     // top-level. SVG is not designed to have nested textPaths. Source:
     // https://github.com/w3c/svgwg/issues/580
     bool inPath = false;
@@ -1829,7 +1871,8 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
     for (auto textShapeElement = KisForestDetail::childBegin(root); textShapeElement != KisForestDetail::childEnd(root); textShapeElement++) {
         int endIndex = currentIndex + numChars(textShapeElement, true, resolvedProps);
 
-        KoPathShape *shape = dynamic_cast<KoPathShape *>(textShapeElement->textPath.data());
+        KoShape *cTextPath = KoSvgTextShape::Private::textPathByName(textShapeElement->textPathId, textPaths);
+        KoPathShape *shape = dynamic_cast<KoPathShape *>(cTextPath);
         if (shape) {
             QPainterPath path = shape->outline();
             path = shape->transformation().map(path);
@@ -1872,6 +1915,7 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
                             tAngle = 0 - (360 - tAngle);
                         }
                         const QPointF vectorT(qCos(qDegreesToRadians(tAngle)), -qSin(qDegreesToRadians(tAngle)));
+                        const QPointF originalPos = cr.finalPosition;
                         if (isHorizontal) {
                             cr.rotate -= qDegreesToRadians(tAngle);
                             QPointF vectorN(-vectorT.y(), vectorT.x());
@@ -1883,6 +1927,7 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
                             const qreal o = (cr.advance.y() * 0.5);
                             cr.finalPosition = pos - (o * vectorT) + (cr.finalPosition.x() * vectorN);
                         }
+                        cr.textPathAndAnchoringOffset += (cr.finalPosition - originalPos);
                         // FIXME: What about other glyph formats?
                         if (stretch && outlineGlyph) {
                             const QTransform tf = cr.finalTransform();
@@ -1906,6 +1951,7 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
                         afterPath = false;
                     } else {
                         cr.finalPosition += pathEnd;
+                        cr.textPathAndAnchoringOffset += pathEnd;
                         result[i] = cr;
                     }
                 }
@@ -1917,7 +1963,8 @@ void KoSvgTextShape::Private::applyTextPath(KisForest<KoSvgTextContentElement>::
 QVector<SubChunk> KoSvgTextShape::Private::collectSubChunks(KisForest<KoSvgTextContentElement>::child_iterator it, KoSvgTextProperties parentProps, bool textInPath, bool &firstTextInPath)
 {
     QVector<SubChunk> result;
-    if (it->textPath) {
+
+    if (!it->textPathId.isEmpty()) {
         textInPath = true;
         firstTextInPath = true;
     }
@@ -1964,7 +2011,7 @@ QVector<SubChunk> KoSvgTextShape::Private::collectSubChunks(KisForest<KoSvgTextC
         firstTextInPath = false;
     }
 
-    if (it->textPath) {
+    if (!it->textPathId.isEmpty()) {
         textInPath = false;
         firstTextInPath = false;
     }

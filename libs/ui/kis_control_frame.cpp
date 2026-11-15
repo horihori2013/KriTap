@@ -24,7 +24,13 @@
 #include <klocalizedstring.h>
 #include <QAction>
 #include <kactioncollection.h>
+
 #include <KoDualColorButton.h>
+#include <KoForegroundColour.h>
+#include <KoBackgroundColour.h>
+#include <KoSwapBgFgColours.h>
+#include <KoResetBgFgColours.h>
+
 #include <resources/KoAbstractGradient.h>
 #include <KoResourceServer.h>
 #include <KoResourceServerProvider.h>
@@ -83,28 +89,105 @@ void KisControlFrame::setup(QWidget *parent)
     m_viewManager->actionCollection()->addAction(ResourceType::Gradients, action);
     action->setDefaultWidget(m_gradientWidget);
     connect(action, SIGNAL(triggered()), m_gradientWidget, SLOT(showPopupWidget()));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_gradientWidget, SLOT(update()));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_gradientWidget, SLOT(update()));
     m_gradientChooserPopup->addAction(action);
 
 
     // XXX: KOMVC we don't have a canvas here yet, needs a setImageView
     const KoColorDisplayRendererInterface *displayRenderer = \
         KisDisplayColorConverter::dumbConverterInstance()->displayRendererInterface();
-    m_dual = new KoDualColorButton(m_viewManager->canvasResourceProvider()->fgColor(),
-                                                     m_viewManager->canvasResourceProvider()->bgColor(), displayRenderer,
-                                                     m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget());
+    m_dual = new KoDualColorButton(m_viewManager->canvasResourceProvider(), displayRenderer,
+                                                     m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget()); 
     m_dual->setPopDialog(true);
     action = new QWidgetAction(this);
     action->setText(i18n("&Choose foreground and background colors"));
+    action->setIcon(KisIconUtils::loadIcon("dual_colour"));
     m_viewManager->actionCollection()->addAction("dual", action);
     action->setDefaultWidget(m_dual);
     connect(m_dual, SIGNAL(foregroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetFGColor(KoColor)));
     connect(m_dual, SIGNAL(backgroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetBGColor(KoColor)));
     connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_dual, SLOT(setBackgroundColor(KoColor)));
     connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_dual, SLOT(setForegroundColor(KoColor)));
-    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_gradientWidget, SLOT(update()));
-    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_gradientWidget, SLOT(update()));
     m_dual->setFixedSize(28, 28);
-    connect(m_viewManager, SIGNAL(viewChanged()), SLOT(slotUpdateDisplayRenderer()));
+    connect(m_viewManager, &KisViewManager::viewChanged, this, [this]() {
+        slotUpdateDisplayRenderer(m_dual);
+    });
+
+
+    m_foreground = new KoForegroundColour(m_viewManager->canvasResourceProvider(), displayRenderer,
+                                                    m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget());
+    m_foreground->setPopDialog(true);
+    action = new QWidgetAction(this);
+    action->setText(i18n("&Choose foreground colour"));
+    action->setIcon(KisIconUtils::loadIcon("forgound_colour"));
+    m_viewManager->actionCollection()->addAction("chooseForegroundColor", action);
+    action->setDefaultWidget(m_foreground);
+    connect(m_foreground, SIGNAL(foregroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetFGColor(KoColor)));
+    connect(m_foreground, SIGNAL(backgroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetBGColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_foreground, SLOT(setBackgroundColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_foreground, SLOT(setForegroundColor(KoColor)));
+    m_foreground->setFixedSize(28, 28);
+    connect(action, SIGNAL(triggered()), m_foreground, SLOT(openForegroundDialog()));
+    connect(m_viewManager, &KisViewManager::viewChanged, this, [this](){
+        slotUpdateDisplayRenderer(m_foreground);
+    });
+
+
+    m_background = new KoBackgroundColour(m_viewManager->canvasResourceProvider(), displayRenderer,
+                                                    m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget());
+    m_background->setPopDialog(true);
+    action = new QWidgetAction(this);
+    action->setText(i18n("&Choose background colour"));
+    action->setIcon(KisIconUtils::loadIcon("background_colour"));
+    m_viewManager->actionCollection()->addAction("chooseBackgroundColor", action);
+    action->setDefaultWidget(m_background);
+    connect(m_background, SIGNAL(foregroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetFGColor(KoColor)));
+    connect(m_background, SIGNAL(backgroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetBGColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_background, SLOT(setBackgroundColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_background, SLOT(setForegroundColor(KoColor)));
+    m_background->setFixedSize(28, 28);
+    connect(action, SIGNAL(triggered()), m_background, SLOT(openBackgroundDialog()));
+    connect(m_viewManager, &KisViewManager::viewChanged,this, [this]() {
+        slotUpdateDisplayRenderer(m_background);
+    });
+
+
+    m_swap = new KoSwapBgFgColours(m_viewManager->canvasResourceProvider(), displayRenderer,
+                                                    m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget());
+    m_swap->setPopDialog(true);
+    action = new QWidgetAction(this);
+    action->setText(i18n("&Swap Foreground and Background Colors"));
+    action->setIcon(KisIconUtils::loadIcon("swap_colour"));
+    m_viewManager->actionCollection()->addAction("toggle_fg_bg", action);
+    action->setDefaultWidget(m_swap);
+    connect(m_swap, SIGNAL(foregroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetFGColor(KoColor)));
+    connect(m_swap, SIGNAL(backgroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetBGColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigBGColorChanged(KoColor)), m_swap, SLOT(setBackgroundColor(KoColor)));
+    connect(m_viewManager->canvasResourceProvider(), SIGNAL(sigFGColorChanged(KoColor)), m_swap, SLOT(setForegroundColor(KoColor)));
+    m_swap->setFixedSize(28, 28);
+    connect(action, SIGNAL(triggered()), m_swap, SLOT(swapColours()));
+    connect(m_viewManager, &KisViewManager::viewChanged, this, [this]() {
+        slotUpdateDisplayRenderer(m_swap);
+    });
+
+
+    m_reset = new KoResetBgFgColours(m_viewManager->canvasResourceProvider(), displayRenderer,
+                                                    m_viewManager->mainWindowAsQWidget(), m_viewManager->mainWindowAsQWidget());
+    m_reset->setPopDialog(true);
+    action = new QWidgetAction(this);
+    action->setText(i18n("&reset Foreground and Background Colors"));
+    action->setIcon(KisIconUtils::loadIcon("reset_colour"));
+    m_viewManager->actionCollection()->addAction("reset_fg_bg", action);
+    action->setDefaultWidget(m_reset);
+    connect(m_reset, SIGNAL(foregroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetFGColor(KoColor)));
+    connect(m_reset, SIGNAL(backgroundColorChanged(KoColor)), m_viewManager->canvasResourceProvider(), SLOT(slotSetBGColor(KoColor)));
+    m_reset->setFixedSize(28, 28);
+    connect(action, SIGNAL(triggered()), m_reset, SLOT(ResetColours()));
+    connect(m_viewManager, &KisViewManager::viewChanged, this, [this]() {
+        slotUpdateDisplayRenderer(m_reset);
+    });
+    
 
     m_paintopBox = new KisPaintopBox(m_viewManager, parent, "paintopbox");
 
@@ -113,15 +196,6 @@ void KisControlFrame::setup(QWidget *parent)
     m_viewManager->actionCollection()->addAction("paintops", action);
     action->setDefaultWidget(m_paintopBox);
 
-    action = new QWidgetAction(this);
-    action->setText(i18n("&Open Foreground color selector"));
-    m_viewManager->actionCollection()->addAction("chooseForegroundColor", action);
-    connect(action, SIGNAL(triggered()), m_dual, SLOT(openForegroundDialog()));
-
-    action = new QWidgetAction(this);
-    action->setText(i18n("&Open Background color selector"));
-    m_viewManager->actionCollection()->addAction("chooseBackgroundColor", action);
-    connect(action, SIGNAL(triggered()), m_dual, SLOT(openBackgroundDialog()));
 
     createDockerBox(m_viewManager);
 
@@ -131,17 +205,19 @@ void KisControlFrame::setup(QWidget *parent)
     action->setDefaultWidget(m_dockerPopupButton);
 }
 
-void KisControlFrame::slotUpdateDisplayRenderer()
+void KisControlFrame::slotUpdateDisplayRenderer(KoDualColorButton* colourSelector)
 {
-    if (m_viewManager->canvasBase()){
-        m_dual->setDisplayRenderer(m_viewManager->canvasBase()->displayColorConverter()->displayRendererInterface());
-        m_dual->setColorSpace(m_viewManager->canvasBase()->image()->colorSpace());
-        m_viewManager->canvasBase()->image()->disconnect(m_dual);
-        connect(m_viewManager->canvasBase()->image(), SIGNAL(sigColorSpaceChanged(const KoColorSpace*)), m_dual, SLOT(setColorSpace(const KoColorSpace*)), Qt::UniqueConnection);
-    } else if (m_viewManager->viewCount()==0) {
-        m_dual->setDisplayRenderer();
+    KoColorDisplayRendererInterface *displayRenderer = nullptr;
+
+    if (m_viewManager->canvasBase()) {
+        displayRenderer = m_viewManager->canvasBase()->displayColorConverter()->displayRendererInterface();
+    } else {
+        displayRenderer = KoDumbColorDisplayRenderer::instance();
     }
+
+    colourSelector->setDisplayRenderer(displayRenderer);
 }
+
 
 void KisControlFrame::slotSetPattern(KoPatternSP pattern)
 {
@@ -149,8 +225,13 @@ void KisControlFrame::slotSetPattern(KoPatternSP pattern)
     m_patternWidget->setThumbnail(pattern->image());
     m_patternChooser->setCurrentPattern(pattern);
 }
-
 void KisControlFrame::slotSetGradient(KoAbstractGradientSP gradient)
+{
+    m_gradientChooser->setCurrentResource(gradient);
+    updateGradientPreviewOnPopupButton(gradient);
+}
+
+void KisControlFrame::updateGradientPreviewOnPopupButton(KoAbstractGradientSP gradient)
 {
     const QSize iconSize = m_gradientWidget->preferredIconSize();
 
@@ -207,7 +288,7 @@ void KisControlFrame::createPatternsChooser(KisViewManager * view)
             &KisCanvasResourceProvider::sigPatternChanged,
             this,
             &KisControlFrame::slotSetPattern);
-
+    
     m_patternChooser->setCurrentItem(0);
     if (m_patternChooser->currentResource() && view->canvasResourceProvider()) {
         view->canvasResourceProvider()->slotPatternActivated(m_patternChooser->currentResource());
@@ -248,21 +329,21 @@ void KisControlFrame::createGradientsChooser(KisViewManager * view)
     connect(view->canvasResourceProvider(), SIGNAL(sigGradientChanged(KoAbstractGradientSP)),
             this, SLOT(slotSetGradient(KoAbstractGradientSP)));
     connect(m_gradientChooser, SIGNAL(gradientEdited(KoAbstractGradientSP)),
-            this, SLOT(slotSetGradient(KoAbstractGradientSP)));
+            this, SLOT(updateGradientPreviewOnPopupButton(KoAbstractGradientSP)));
 
 
     // set the Foreground to Transparent gradient as default on startup
     KisResourceModel resModel(ResourceType::Gradients);
     QVector<KoResourceSP> resources = resModel.resourcesForFilename("Foreground to Transparent.svg");
+
     if (resources.size() > 0) {
-        m_gradientChooser->setCurrentResource(resources[0]);
+        m_gradientChooser->setCurrentResource(resources.first());
+        if (view->canvasResourceProvider()) {
+            view->canvasResourceProvider()->slotGradientActivated(resources.first());
+        }
     }
 
-    if (m_gradientChooser->currentResource() && view->canvasResourceProvider()) {
-        view->canvasResourceProvider()->slotGradientActivated(m_gradientChooser->currentResource());
-    }
     m_gradientWidget->setPopupWidget(m_gradientChooserPopup);
-
 }
 
 

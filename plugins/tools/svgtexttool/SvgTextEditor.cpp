@@ -88,6 +88,9 @@ SvgTextEditor::SvgTextEditor(QWidget *parent, Qt::WindowFlags flags)
     connect(m_textEditorWidget.buttons, SIGNAL(rejected()), this, SLOT(slotCloseEditor()));
     connect(m_textEditorWidget.buttons, SIGNAL(clicked(QAbstractButton*)), this, SLOT(dialogButtonClicked(QAbstractButton*)));
 
+    connect(m_textEditorWidget.tabWidget, SIGNAL(currentChanged(int)), this, SLOT(tabChanged(int)));
+    tabChanged(m_textEditorWidget.tabWidget->currentIndex());
+
     KConfigGroup cg(KSharedConfig::openConfig(), "SvgTextTool");
     actionCollection()->setConfigGroup("SvgTextTool");
     actionCollection()->setComponentName("svgtexttool");
@@ -123,13 +126,10 @@ SvgTextEditor::SvgTextEditor(QWidget *parent, Qt::WindowFlags flags)
 
     setAcceptDrops(true);
     //setStandardToolBarMenuEnabled(true);
-#ifdef Q_OS_MACOS
-    setUnifiedTitleAndToolBarOnMac(true);
-#endif
     setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
 
     m_syntaxHighlighter = new BasicXMLSyntaxHighlighter(m_textEditorWidget.svgTextEdit);
-    m_textEditorWidget.svgTextEdit->setFont(QFontDatabase().systemFont(QFontDatabase::FixedFont));
+    m_textEditorWidget.svgTextEdit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
 
     createActions();
     // If we have customized the toolbars, load that first
@@ -487,4 +487,13 @@ bool SvgTextEditor::eventFilter(QObject *const watched, QEvent *const event)
     }
     return false;
     return KXmlGuiWindow::eventFilter(watched, event);
+}
+
+void SvgTextEditor::tabChanged(int index)
+{
+    if (index == 0) {
+        m_currentEditor = m_textEditorWidget.svgTextEdit;
+    } else {
+        m_currentEditor = m_textEditorWidget.svgStylesEdit;
+    }
 }
