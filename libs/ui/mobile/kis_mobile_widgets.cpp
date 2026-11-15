@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace

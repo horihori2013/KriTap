@@ -204,7 +204,7 @@ void KisMobileChromeHost::relayout()
     m_topBar->raise();
     m_bottomBar->raise();
 
-    if (m_sheetOpen && windowVisible) {
+    if (m_sheetOpen && m_window && m_window->isVisible() && !m_window->isMinimized()) {
         m_scrim->raise();
         m_sheet->raise();
     }

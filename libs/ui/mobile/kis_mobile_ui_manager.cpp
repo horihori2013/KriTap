@@ -18,6 +18,7 @@
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QMenuBar>
+#include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>

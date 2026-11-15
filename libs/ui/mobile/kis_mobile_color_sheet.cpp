@@ -11,6 +11,7 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QVBoxLayout>

@@ -8,6 +8,7 @@
 
 #include "kis_mobile_style.h"
 
+#include <QAction>
 #include <QGridLayout>
 #include <QToolButton>
 

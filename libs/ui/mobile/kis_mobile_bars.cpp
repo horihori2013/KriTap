@@ -13,6 +13,7 @@
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QSizePolicy>
 #include <QToolButton>

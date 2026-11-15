@@ -13,12 +13,14 @@
 #include <QCursor>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QTimer>

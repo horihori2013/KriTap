@@ -6,10 +6,19 @@
 
 #include "kis_mobile_style.h"
 
+#include <QAbstractItemView>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFont>
+#include <QFrame>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QScrollBar>
 #include <QSlider>
+#include <QSpinBox>
 #include <QToolButton>
+#include <QTreeView>
 #include <QVBoxLayout>
 
 namespace
