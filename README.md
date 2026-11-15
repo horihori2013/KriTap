@@ -22,6 +22,13 @@ Bring **all the high-end functionality of Krita** to mobile devices, with a **UI
 **Installation & Build**
 This fork is intended for **Android (via Qt for Android)**. Refer to the build instructions in the repository for setting up the environment and compiling the app.  
 
+**Mobile UI**
+The smartphone-friendly (ibisPaint-style) UI lives in `libs/ui/mobile/`: a floating top bar (menu / title / undo / redo), a bottom bar (tools, brushes, eraser, quick size/opacity/flow sliders, color, layers) and slide-up sheets for tools, brush presets, color picking, layers and file actions.
+
+- **Android:** the mobile UI is enabled by default.
+- **Desktop:** enable it with the `KRITA_MOBILE_UI=1` environment variable, or the `mobileUiEnabled` config entry. `KRITA_MOBILE_UI=0` forces the desktop UI.
+- Switch back to the desktop UI at any time from the **⋯ menu → Desktop UI**; the desktop chrome is restored automatically.
+
 ---
 
 **日本語**
@@ -46,6 +53,13 @@ Kritaの**高機能をそのまま保持**しつつ、**タッチ操作に最適
 **インストールとビルド**
 このフォークは **Android（Qt for Android 経由）向け** を想定しています。  
 環境構築とビルド方法はリポジトリ内のドキュメントを参照してください。
+
+**モバイルUI**
+スマホフレンドリー（ibisPaint風）のUIは `libs/ui/mobile/` にあります。フローティングな上部バー（メニュー / タイトル / 元に戻す / やり直し）、下部バー（ツール・ブラシ・消し塗り・サイズ/不透明度/流量スライダー・カラー・レイヤー）と、ツール・ブラシプリセット・カラーピッカー・レイヤー・ファイル操作のスライドアップシートで構成されます。
+
+- **Android:** モバイルUIはデフォルトで有効です。
+- **デスクトップ:** 環境変数 `KRITA_MOBILE_UI=1`、または設定項目 `mobileUiEnabled` で有効化できます。`KRITA_MOBILE_UI=0` でデスクトップUIを強制します。
+- **⋯ メニュー → Desktop UI** でいつでもデスクトップUIに戻せます（デスクトップのUI構成は自動復元されます）。
 
 
 ## It's original readme from Krita!! Thanks Krita!

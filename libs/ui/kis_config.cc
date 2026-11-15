@@ -2456,6 +2456,22 @@ void KisConfig::setToolOptionsInDocker(bool inDocker)
     m_cfg.writeEntry("ToolOptionsInDocker", inDocker);
 }
 
+bool KisConfig::mobileUiEnabled(bool defaultValue) const
+{
+    const bool platformDefault =
+#ifdef Q_OS_ANDROID
+        true;
+#else
+        false;
+#endif
+    return (defaultValue ? platformDefault : m_cfg.readEntry("mobileUiEnabled", platformDefault));
+}
+
+void KisConfig::setMobileUiEnabled(bool enabled)
+{
+    m_cfg.writeEntry("mobileUiEnabled", enabled);
+}
+
 bool KisConfig::kineticScrollingEnabled(bool defaultValue) const
 {
     return (defaultValue ? true : m_cfg.readEntry("KineticScrollingEnabled", true));

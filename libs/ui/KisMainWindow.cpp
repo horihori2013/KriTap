@@ -115,6 +115,7 @@
 #include "KisApplication.h"
 #include "kis_canvas2.h"
 #include "kis_canvas_controller.h"
+#include "mobile/kis_mobile_ui_manager.h"
 #include "kis_canvas_resource_provider.h"
 #include "kis_clipboard.h"
 #include "kis_config.h"
@@ -677,10 +678,17 @@ KisMainWindow::KisMainWindow(QUuid uuid)
     }
 
     applyMainWindowSettings(d->windowStateConfig);
+
+    if (KisMobileUiManager::shouldUseMobileUi()) {
+        KisMobileUiManager::instance()->install(this);
+    }
 }
 
 KisMainWindow::~KisMainWindow()
 {
+    // detach the mobile UI chrome before anything else is destroyed
+    KisMobileUiManager::instance()->uninstall();
+
     //    Q_FOREACH (QAction *ac, actionCollection()->actions()) {
     //        QAction *action = qobject_cast<QAction*>(ac);
     //        if (action) {

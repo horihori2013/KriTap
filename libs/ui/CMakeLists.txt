@@ -152,6 +152,15 @@ set(kritaui_LIB_SRCS
     kis_paintop_options_model.cpp
     kis_paintop_settings_widget.cpp
     kis_popup_palette.cpp
+    mobile/kis_mobile_style.cpp
+    mobile/kis_mobile_widgets.cpp
+    mobile/kis_mobile_bars.cpp
+    mobile/kis_mobile_sheets.cpp
+    mobile/kis_mobile_color_sheet.cpp
+    mobile/kis_mobile_brush_sheet.cpp
+    mobile/kis_mobile_layers_sheet.cpp
+    mobile/kis_mobile_chrome_host.cpp
+    mobile/kis_mobile_ui_manager.cpp
     kis_png_converter.cpp
     kis_preference_set_registry.cpp
     KisResourceServerProvider.cpp

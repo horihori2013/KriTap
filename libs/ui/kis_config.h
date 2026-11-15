@@ -700,6 +700,15 @@ public:
     bool toolOptionsInDocker(bool defaultValue = false) const;
     void setToolOptionsInDocker(bool inDocker);
 
+    /**
+     * Whether the smartphone-friendly (mobile/ibisPaint-style) UI should be
+     * used instead of the desktop UI. Defaults to true on Android and false
+     * on other platforms. The KRITA_MOBILE_UI environment variable overrides
+     * the stored value.
+     */
+    bool mobileUiEnabled(bool defaultValue = false) const;
+    void setMobileUiEnabled(bool enabled);
+
     bool kineticScrollingEnabled(bool defaultValue = false) const;
     void setKineticScrollingEnabled(bool enabled);
 
