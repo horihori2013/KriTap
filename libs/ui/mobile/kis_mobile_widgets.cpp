@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -22,16 +23,6 @@
 namespace
 {
     const int dragDismissThreshold = 60;
-
-    void paintRoundedPanel(QPaintEvent *event, QWidget *widget, const QColor &background, int cornerRadius)
-    {
-        QPainter painter(widget);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setClipRect(event->rect());
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(background);
-        painter.drawRoundedRect(widget->rect().adjusted(0, 0, -1, -1), cornerRadius, cornerRadius);
-    }
 }
 
 /******************************************************************/
@@ -134,7 +125,27 @@ bool KisMobileSheet::inHeaderArea(const QPoint &pos) const
 
 void KisMobileSheet::paintEvent(QPaintEvent *event)
 {
-    paintRoundedPanel(event, this, KisMobileStyle::sheetBackgroundColor(), KisMobileStyle::sheetCornerRadius);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(event->rect());
+
+    // bottom-sheet shape: rounded top corners only, flush at the lower edge
+    const int radius = KisMobileStyle::sheetCornerRadius;
+    QPainterPath path;
+    path.moveTo(0, height());
+    path.lineTo(0, radius);
+    path.arcTo(0, 0, 2 * radius, 2 * radius, 180, -90);
+    path.lineTo(width() - radius, 0);
+    path.arcTo(width() - 2 * radius, 0, 2 * radius, 2 * radius, 90, -90);
+    path.lineTo(width(), height());
+    path.closeSubpath();
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(KisMobileStyle::sheetBackgroundColor());
+    painter.drawPath(path);
+
+    // grab handle
+    painter.setBrush(QColor(255, 255, 255, 70));
+    painter.drawRoundedRect(QRect(width() / 2 - 26, 8, 52, 5), 2, 2);
 }
 
 void KisMobileSheet::mousePressEvent(QMouseEvent *event)

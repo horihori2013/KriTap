@@ -13,6 +13,7 @@
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QSizePolicy>
@@ -24,16 +25,27 @@
 
 namespace
 {
-    void paintFloatingPanel(QPaintEvent *event, QWidget *widget)
+    void paintEdgeStrip(QPaintEvent *event, QWidget *widget, bool topEdge)
     {
         QPainter painter(widget);
-        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::Antialiasing, false);
         painter.setClipRect(event->rect());
-        painter.setPen(QPen(KisMobileStyle::separatorColor(), 1.0));
-        painter.setBrush(KisMobileStyle::barBackgroundColor());
-        painter.drawRoundedRect(widget->rect().adjusted(0, 0, -1, -1),
-                                KisMobileStyle::sheetCornerRadius,
-                                KisMobileStyle::sheetCornerRadius);
+
+        // translucent strip fading towards the canvas
+        QLinearGradient gradient(0, 0, 0, widget->height());
+        if (topEdge) {
+            gradient.setColorAt(0.0, QColor(22, 22, 27, 238));
+            gradient.setColorAt(1.0, QColor(22, 22, 27, 165));
+        } else {
+            gradient.setColorAt(0.0, QColor(22, 22, 27, 165));
+            gradient.setColorAt(1.0, QColor(22, 22, 27, 238));
+        }
+        painter.fillRect(widget->rect(), gradient);
+
+        // hairline separator on the inner edge
+        painter.fillRect(topEdge ? QRect(0, widget->height() - 1, widget->width(), 1)
+                                 : QRect(0, 0, widget->width(), 1),
+                         KisMobileStyle::separatorColor());
     }
 }
 
@@ -106,7 +118,7 @@ QToolButton *KisMobileTopBar::canvasOnlyButton() const { return m_canvasOnlyButt
 
 void KisMobileTopBar::paintEvent(QPaintEvent *event)
 {
-    paintFloatingPanel(event, this);
+    paintEdgeStrip(event, this, true);
 }
 
 /******************************************************************/
@@ -217,5 +229,5 @@ QSize KisMobileBottomBar::sizeHint() const
 
 void KisMobileBottomBar::paintEvent(QPaintEvent *event)
 {
-    paintFloatingPanel(event, this);
+    paintEdgeStrip(event, this, false);
 }

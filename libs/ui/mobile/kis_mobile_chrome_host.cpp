@@ -153,36 +153,29 @@ void KisMobileChromeHost::placeWidget(QWidget *widget, const QRect &geometry) co
 QRect KisMobileChromeHost::topBarGeometry() const
 {
     const QRect area = m_window ? m_window->rect() : QRect(0, 0, 800, 600);
-    const int margin = KisMobileStyle::panelMargin;
-    return QRect(area.left() + margin, area.top() + margin,
-                 area.width() - 2 * margin, KisMobileStyle::barHeight);
+    // edge-anchored full-width strip (ibisPaint-style)
+    return QRect(0, 0, area.width(), KisMobileStyle::barHeight);
 }
 
 QRect KisMobileChromeHost::bottomBarGeometry() const
 {
     const QRect area = m_window ? m_window->rect() : QRect(0, 0, 800, 600);
-    const int margin = KisMobileStyle::panelMargin;
     const int height = m_bottomBar->sizeHint().height();
-    return QRect(area.left() + margin, area.bottom() - margin - height,
-                 area.width() - 2 * margin, height);
+    return QRect(0, area.height() - height, area.width(), height);
 }
 
 QRect KisMobileChromeHost::sheetGeometry() const
 {
     const QRect area = m_window ? m_window->rect() : QRect(0, 0, 800, 600);
-    const int margin = KisMobileStyle::panelMargin;
 
     int height = m_sheet->preferredHeight();
     if (height <= 0) {
         height = qBound(240, area.height() * 3 / 5, maxSheetHeight);
     }
-    height = qMin(height, area.height() - 2 * margin);
+    height = qMin(height, area.height() - 2 * KisMobileStyle::panelMargin);
 
-    const int width = qMin(area.width() - 2 * margin, 620);
-
-    return QRect(area.center().x() - width / 2,
-                 area.bottom() - margin - height,
-                 width, height);
+    // full-width bottom sheet anchored to the lower edge
+    return QRect(0, area.height() - height, area.width(), height);
 }
 
 void KisMobileChromeHost::relayout()
@@ -194,8 +187,8 @@ void KisMobileChromeHost::relayout()
     placeWidget(m_sheet, sheetGeometry());
     placeWidget(m_scrim, m_window->rect());
     placeWidget(m_restoreButton,
-                QRect(topBarGeometry().right() - KisMobileStyle::smallButtonSize,
-                      topBarGeometry().top(),
+                QRect(topBarGeometry().width() - KisMobileStyle::smallButtonSize - 8,
+                      8,
                       KisMobileStyle::smallButtonSize,
                       KisMobileStyle::smallButtonSize));
 

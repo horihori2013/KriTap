@@ -377,7 +377,7 @@ void KisMobileLayersSheet::setCanvas(KisCanvas2 *canvas)
     m_nodeModel->setDummiesFacade(dummiesFacade,
                                   m_image,
                                   shapeController,
-                                  m_selectionAdapter.data(),
+                                  m_selectionAdapter.get(),
                                   m_nodeManager);
     m_nodeModel->setIdleTaskManager(m_canvas->viewManager()->idleTasksManager());
 

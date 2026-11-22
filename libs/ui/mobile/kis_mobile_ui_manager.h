@@ -7,9 +7,12 @@
 #ifndef KIS_MOBILE_UI_MANAGER_H
 #define KIS_MOBILE_UI_MANAGER_H
 
+#include <QHash>
 #include <QList>
 #include <QPointer>
 #include <QObject>
+
+class QWidget;
 
 class KisCanvasResourceProvider;
 class KisMainWindow;
@@ -66,6 +69,9 @@ private Q_SLOTS:
     void slotUpdateTitle();
     void slotRehideDesktopChrome();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     explicit KisMobileUiManager(QObject *parent = nullptr);
 
@@ -89,7 +95,8 @@ private:
 
     QPointer<KisCanvasResourceProvider> m_provider;
 
-    QList<QWidget *> m_hiddenChromeWidgets;
+    /// desktop chrome widgets hidden in mobile mode -> their original visibility
+    QHash<QWidget *, bool> m_desktopChrome;
     bool m_installed {false};
 };
 

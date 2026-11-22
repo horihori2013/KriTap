@@ -50,6 +50,11 @@ namespace KisMobileStyle
     /// Style sheet applied to every root widget of the mobile UI
     QString rootStyleSheet();
 
+    /// Apply/restore a dark phone-like theme to the whole application
+    /// (dialog boxes and desktop widgets included).
+    void applyApplicationTheme();
+    void restoreApplicationTheme();
+
     /// Create a large square touch button (icon only)
     QToolButton *createIconButton(QWidget *parent,
                                   const QString &toolTip,

@@ -7,6 +7,7 @@
 #include "kis_mobile_style.h"
 
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFont>
@@ -14,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPalette>
 #include <QScrollBar>
 #include <QSlider>
 #include <QSpinBox>
@@ -27,6 +29,34 @@ namespace
     {
         return QStringLiteral("rgba(%1, %2, %3, %4)")
                 .arg(color.red()).arg(color.green()).arg(color.blue()).arg(color.alpha());
+    }
+
+    QPalette s_savedPalette;
+    bool s_themeApplied = false;
+
+    QPalette mobileDarkPalette()
+    {
+        QPalette palette;
+        const QColor background(26, 26, 31);
+        const QColor base(34, 34, 40);
+        const QColor alt(42, 42, 49);
+        palette.setColor(QPalette::Window, background);
+        palette.setColor(QPalette::WindowText, KisMobileStyle::textColor());
+        palette.setColor(QPalette::Base, base);
+        palette.setColor(QPalette::AlternateBase, alt);
+        palette.setColor(QPalette::ToolTipBase, KisMobileStyle::sheetBackgroundColor());
+        palette.setColor(QPalette::ToolTipText, KisMobileStyle::textColor());
+        palette.setColor(QPalette::Text, KisMobileStyle::textColor());
+        palette.setColor(QPalette::Button, alt);
+        palette.setColor(QPalette::ButtonText, KisMobileStyle::textColor());
+        palette.setColor(QPalette::BrightText, QColor(255, 120, 120));
+        palette.setColor(QPalette::Link, KisMobileStyle::accentColor());
+        palette.setColor(QPalette::Highlight, KisMobileStyle::accentColor());
+        palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255));
+#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
+        palette.setColor(QPalette::PlaceholderText, KisMobileStyle::dimTextColor());
+#endif
+        return palette;
     }
 }
 
@@ -190,6 +220,25 @@ void tuneSlider(QSlider *slider)
     slider->setOrientation(Qt::Horizontal);
     slider->setMinimumHeight(32);
     slider->setAttribute(Qt::WA_AcceptTouchEvents, true);
+}
+
+void applyApplicationTheme()
+{
+    QApplication *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+    if (!app || s_themeApplied) return;
+
+    s_savedPalette = app->palette();
+    app->setPalette(mobileDarkPalette());
+    s_themeApplied = true;
+}
+
+void restoreApplicationTheme()
+{
+    QApplication *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+    if (!app || !s_themeApplied) return;
+
+    app->setPalette(s_savedPalette);
+    s_themeApplied = false;
 }
 
 }

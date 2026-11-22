@@ -12,11 +12,15 @@
 #include "kis_mobile_color_sheet.h"
 #include "kis_mobile_layers_sheet.h"
 #include "kis_mobile_sheets.h"
+#include "kis_mobile_style.h"
 #include "kis_mobile_widgets.h"
 
 #include <QAbstractButton>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDockWidget>
+#include <QEvent>
+#include <QLayout>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QTimer>
@@ -71,6 +75,20 @@ void KisMobileUiManager::install(KisMainWindow *window)
 
     hideDesktopChrome();
 
+    // make the canvas the window: no desktop margins around the central widget
+    if (QLayout *layout = m_window->layout()) {
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+    }
+
+#ifdef Q_OS_ANDROID
+    // immersive drawing surface like other phone painting apps
+    m_window->setWindowState(Qt::WindowFullScreen);
+#endif
+
+    // dialogs and remaining desktop widgets follow the phone theme
+    KisMobileStyle::applyApplicationTheme();
+
     m_chromeHost = new KisMobileChromeHost(window, this);
     createSheets();
     wireChrome();
@@ -115,6 +133,7 @@ void KisMobileUiManager::uninstall()
     }
 
     showDesktopChrome();
+    KisMobileStyle::restoreApplicationTheme();
 
     m_installed = false;
 }
@@ -166,13 +185,14 @@ void KisMobileUiManager::hideDesktopChrome()
 
 void KisMobileUiManager::showDesktopChrome()
 {
-    const QList<QWidget *> widgets = m_hiddenChromeWidgets;
-    m_hiddenChromeWidgets.clear();
+    const QHash<QWidget *, bool> widgets = m_desktopChrome;
+    m_desktopChrome.clear();
 
-    for (QWidget *widget : widgets) {
-        if (widget) {
-            widget->show();
-        }
+    for (auto it = widgets.constBegin(); it != widgets.constEnd(); ++it) {
+        QWidget *widget = it.key();
+        if (!widget) continue;
+        widget->removeEventFilter(this);
+        widget->setVisible(it.value());
     }
 }
 
@@ -180,10 +200,24 @@ void KisMobileUiManager::rememberAndHide(QWidget *widget)
 {
     if (!widget) return;
 
-    if (widget->isVisible() && !m_hiddenChromeWidgets.contains(widget)) {
-        m_hiddenChromeWidgets.append(widget);
+    if (!m_desktopChrome.contains(widget)) {
+        m_desktopChrome.insert(widget, widget->isVisible());
+        widget->installEventFilter(this);
     }
     widget->hide();
+}
+
+bool KisMobileUiManager::eventFilter(QObject *watched, QEvent *event)
+{
+    // Desktop chrome must never come back while the mobile UI owns the window:
+    // Krita actions (canvas-only mode, view changes, …) try to re-show it.
+    if (m_installed && event->type() == QEvent::Show) {
+        QWidget *widget = qobject_cast<QWidget *>(watched);
+        if (widget && m_desktopChrome.contains(widget)) {
+            widget->hide();
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void KisMobileUiManager::slotRehideDesktopChrome()
