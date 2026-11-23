@@ -8,6 +8,7 @@
 
 #include "KisWelcomePageWidget.h"
 #include "KisRecentDocumentsModelWrapper.h"
+#include "mobile/kis_mobile_ui_manager.h"
 #include <QDesktopServices>
 #include <QMimeData>
 #include <QPixmap>
@@ -84,6 +85,11 @@
 #ifdef Q_OS_ANDROID
 #include "KisAndroidDonations.h"
 #include <QFontMetrics>
+#include <QFont>
+#include <QHBoxLayout>
+#include <QLayout>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QPaintDevice>
 #include <QPainter>
 #include <QPainterPath>
@@ -124,6 +130,9 @@ KisWelcomePageWidget::KisWelcomePageWidget(QWidget *parent)
     : QWidget(parent)
 {
     setupUi(this);
+
+    // branding: the app is called KriTap
+    startTitleLabel->setText(i18n("KriTap"));
 
     // URLs that go to web browser...
     devBuildIcon->setIcon(KisIconUtils::loadIcon("warning"));
@@ -276,6 +285,84 @@ void KisWelcomePageWidget::setMainWindow(KisMainWindow* mainWin)
         connect(recentFilesModel, SIGNAL(sigModelIsUpToDate()), this, SLOT(slotRecentFilesModelIsUpToDate()));
         recentDocumentsListView->setModel(&recentFilesModel->model());
         slotRecentFilesModelIsUpToDate();
+
+        if (KisMobileUiManager::shouldUseMobileUi()) {
+            applyMobileLayout();
+        }
+    }
+}
+
+void KisWelcomePageWidget::applyMobileLayout()
+{
+    // the desktop side column (news / updater / support badge) is of no use here
+    if (widgetRight) {
+        widgetRight->hide();
+    }
+
+    // keyboard shortcut hints only make sense with a keyboard
+    if (newFileLinkShortcut) newFileLinkShortcut->hide();
+    if (openFileShortcut) openFileShortcut->hide();
+
+    // the desktop help/links grid moves out of the way
+    const QList<QWidget *> linkWidgets {
+        helpTitleLabel,
+        userManualIcon, manualLink,
+        supportKritaIcon, supportKritaLink,
+        kdeIcon, poweredByKDELink,
+        sourceCodeIcon, sourceCodeLink,
+        gettingStartedIcon, gettingStartedLink,
+        userCommunityIcon, userCommunityLink,
+        kritaWebsiteIcon, kritaWebsiteLink
+    };
+    for (QWidget *widget : linkWidgets) {
+        if (widget) widget->hide();
+    }
+
+    // title + start buttons sized for fingers
+    QFont titleFont = startTitleLabel->font();
+    titleFont.setPixelSize(30);
+    startTitleLabel->setFont(titleFont);
+
+    const QList<QToolButton *> startButtons { newFileLink, openFileLink };
+    for (QToolButton *button : startButtons) {
+        if (!button) continue;
+        button->setIconSize(QSize(40, 40));
+        button->setMinimumHeight(64);
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
+
+    // phone layout: New / Open on top, recent documents own the full width below
+    if (widgetCenter) {
+        if (QLayout *oldLayout = widgetCenter->layout()) {
+            delete oldLayout;
+        }
+
+        QVBoxLayout *mobileLayout = new QVBoxLayout(widgetCenter);
+        mobileLayout->setContentsMargins(24, 12, 24, 24);
+        mobileLayout->setSpacing(14);
+
+        QHBoxLayout *titleRow = new QHBoxLayout;
+        titleRow->addWidget(startTitleLabel);
+        titleRow->addStretch(1);
+        mobileLayout->addLayout(titleRow);
+
+        QHBoxLayout *buttonsRow = new QHBoxLayout;
+        buttonsRow->setSpacing(12);
+        if (newFileLink) buttonsRow->addWidget(newFileLink, 1);
+        if (openFileLink) buttonsRow->addWidget(openFileLink, 1);
+        mobileLayout->addLayout(buttonsRow);
+
+        if (widgetRecentImagesColumn) {
+            mobileLayout->addWidget(widgetRecentImagesColumn, 1);
+        }
+    }
+
+    // recent documents flick-scroll already
+    if (recentDocumentsListView) {
+        recentDocumentsListView->setResizeMode(QListView::Adjust);
+    }
+    if (clearRecentFilesLink) {
+        clearRecentFilesLink->setMinimumHeight(36);
     }
 }
 
@@ -731,7 +818,7 @@ void KisWelcomePageWidget::slotSetUpdateStatus(KisUpdaterStatus updateStatus)
 
 void KisWelcomePageWidget::slotShowUpdaterErrorDetails()
 {
-    QMessageBox::warning(qApp->activeWindow(), i18nc("@title:window", "Krita"), m_updaterStatus.updaterOutput());
+    QMessageBox::warning(qApp->activeWindow(), i18nc("@title:window", "KriTap"), m_updaterStatus.updaterOutput());
 }
 
 void KisWelcomePageWidget::updateVersionUpdaterFrame()

@@ -324,7 +324,7 @@ void KisLayerManager::layerProperties()
             QString scalingFilterNew = dlg.scalingFilter();
 
             if(fileNameNew.isEmpty()){
-                QMessageBox::critical(m_view->mainWindow(), i18nc("@title:window", "Krita"), i18n("No file name specified"));
+                QMessageBox::critical(m_view->mainWindow(), i18nc("@title:window", "KriTap"), i18n("No file name specified"));
                 return;
             }
 
@@ -1042,7 +1042,7 @@ KisNodeSP KisLayerManager::addFileLayer(KisNodeSP activeNode)
         QString fileName = dlg.fileName();
 
         if(fileName.isEmpty()){
-            QMessageBox::critical(m_view->mainWindow(), i18nc("@title:window", "Krita"), i18n("No file name specified"));
+            QMessageBox::critical(m_view->mainWindow(), i18nc("@title:window", "KriTap"), i18n("No file name specified"));
             return 0;
         }
 

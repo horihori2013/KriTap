@@ -104,6 +104,9 @@ private:
     void setupNewsLangSelection(QMenu *newsOptionMenu);
     void showDevVersionHighlight();
 
+    /// phone-friendly start screen: large buttons, no desktop-side panels
+    void applyMobileLayout();
+
     static void updateShortcutLink(QToolButton *button, QLabel *label, QAction *action);
 
 #ifdef ENABLE_UPDATERS

@@ -15,6 +15,7 @@
 class QWidget;
 
 class KisCanvasResourceProvider;
+class QDockWidget;
 class KisMainWindow;
 class KisMobileBrushSheet;
 class KisMobileChromeHost;
@@ -83,6 +84,12 @@ private:
     void destroySheets();
     void wireChrome();
 
+    /// popup windows (dialogs, tool windows) must stay on the screen
+    void fitPopupWindowToScreen(QWidget *window);
+    /// tool windows (dockers) open as near-fullscreen mobile sheets
+    void presentDockerInSheet(QDockWidget *dock);
+    void restoreDockerContent();
+
 private:
     QPointer<KisMainWindow> m_window;
     KisMobileChromeHost *m_chromeHost {nullptr};
@@ -97,6 +104,11 @@ private:
 
     /// desktop chrome widgets hidden in mobile mode -> their original visibility
     QHash<QWidget *, bool> m_desktopChrome;
+
+    /// tool window currently presented inside the mobile sheet
+    QPointer<QDockWidget> m_sheetDocker;
+    QPointer<QWidget> m_sheetDockerContent;
+
     bool m_installed {false};
 };
 

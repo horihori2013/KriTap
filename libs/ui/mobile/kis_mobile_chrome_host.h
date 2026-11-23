@@ -52,6 +52,7 @@ public:
 
 Q_SIGNALS:
     void barsVisibilityChanged(bool visible);
+    void sheetClosed();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

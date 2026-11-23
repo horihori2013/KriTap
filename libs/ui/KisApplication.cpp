@@ -1227,10 +1227,10 @@ bool KisApplication::createNewDocFromTemplate(const QString &fileName, KisMainWi
         }
 
         if (paths.isEmpty()) {
-            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "Krita"),
+            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "KriTap"),
                                   i18n("No template found for: %1", desktopName));
         } else if (paths.count() > 1) {
-            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "Krita"),
+            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "KriTap"),
                                   i18n("Too many templates found for: %1", desktopName));
         } else {
             templatePath = paths.at(0);
@@ -1246,7 +1246,7 @@ bool KisApplication::createNewDocFromTemplate(const QString &fileName, KisMainWi
             return true;
         }
         else {
-            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "Krita"),
+            QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "KriTap"),
                                   i18n("Template %1 failed to load.", fileName));
         }
     }
@@ -1278,7 +1278,7 @@ void KisApplication::resetConfig()
             }
 
             QMessageBox::information(qApp->activeWindow(),
-                                 i18nc("@title:window", "Krita"),
+                                 i18nc("@title:window", "KriTap"),
                                  i18n("Krita configurations reset!\n\n"
                                       "Backup file was created at: %1\n\n"
                                       "Restart Krita for changes to take effect.",
@@ -1292,7 +1292,7 @@ void KisApplication::resetConfig()
         }
         else {
             QMessageBox::warning(qApp->activeWindow(),
-                                 i18nc("@title:window", "Krita"),
+                                 i18nc("@title:window", "KriTap"),
                                  i18n("Failed to clear %1\n\n"
                                       "Please make sure no other program is using the file and try again.",
                                       kritarcPath),
@@ -1320,7 +1320,7 @@ void KisApplication::resetConfig()
 void KisApplication::askResetConfig()
 {
     bool ok = QMessageBox::question(qApp->activeWindow(),
-                                    i18nc("@title:window", "Krita"),
+                                    i18nc("@title:window", "KriTap"),
                                     i18n("Do you want to clear the settings file?"),
                                     QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
     if (ok) {

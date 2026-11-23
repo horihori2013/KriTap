@@ -1200,7 +1200,7 @@ void GeneralTab::getBackgroundImage()
 
     QImage image(fn);
     if (image.isNull()) {
-        QMessageBox::warning(this, i18nc("@title:window", "Krita"), i18n("%1 is not a valid image file!", fn));
+        QMessageBox::warning(this, i18nc("@title:window", "KriTap"), i18n("%1 is not a valid image file!", fn));
     }
     else {
         m_backgroundimage->setText(fn);

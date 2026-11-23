@@ -21,7 +21,7 @@
 
 namespace
 {
-    const int maxSheetHeight = 900;
+    int sheetTopInset() { return 24; }
 }
 
 KisMobileChromeHost::KisMobileChromeHost(KisMainWindow *window, QObject *parent)
@@ -42,6 +42,7 @@ KisMobileChromeHost::KisMobileChromeHost(KisMainWindow *window, QObject *parent)
 
     QList<QWidget*> chromeWidgets {m_topBar, m_bottomBar, m_scrim, m_sheet, m_restoreButton};
     for (QWidget *widget : chromeWidgets) {
+        widget->setProperty("kisMobileChrome", true);
         if (m_useSeparateWindows) {
             widget->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
             widget->setAttribute(Qt::WA_TranslucentBackground);
@@ -88,6 +89,9 @@ void KisMobileChromeHost::showSheetContent(QWidget *content, const QString &titl
 
     m_sheet->setTitle(title);
     m_sheet->setContentWidget(content);
+
+    // everything inside a sheet must be scrollable with a finger
+    KisMobileTouch::enableTouchScrolling(content);
     content->show();
     m_sheetOpen = true;
 
@@ -105,6 +109,7 @@ void KisMobileChromeHost::hideSheet()
     m_sheetOpen = false;
     m_sheet->hide();
     m_scrim->hide();
+    Q_EMIT sheetClosed();
 }
 
 bool KisMobileChromeHost::sheetVisible() const
@@ -168,11 +173,13 @@ QRect KisMobileChromeHost::sheetGeometry() const
 {
     const QRect area = m_window ? m_window->rect() : QRect(0, 0, 800, 600);
 
+    // near-fullscreen bottom sheet that never leaves the window
+    const int maxVisible = area.height() - sheetTopInset();
     int height = m_sheet->preferredHeight();
     if (height <= 0) {
-        height = qBound(240, area.height() * 3 / 5, maxSheetHeight);
+        height = area.height() * 4 / 5;
     }
-    height = qMin(height, area.height() - 2 * KisMobileStyle::panelMargin);
+    height = qBound(qMin(300, maxVisible), height, maxVisible);
 
     // full-width bottom sheet anchored to the lower edge
     return QRect(0, area.height() - height, area.width(), height);

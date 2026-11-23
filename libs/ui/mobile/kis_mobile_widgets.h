@@ -11,6 +11,7 @@
 #include <QColor>
 #include <QLabel>
 #include <QPointer>
+#include <QScrollArea>
 #include <QWidget>
 
 class QSlider;
@@ -131,5 +132,22 @@ private:
     qreal m_maximum {1.0};
     int m_steps {1000};
 };
+
+/**
+ * A scroll area with kinetic finger scrolling (drag anywhere inside,
+ * including on top of buttons, without triggering them by accident).
+ */
+class KisMobileScrollArea : public QScrollArea
+{
+    Q_OBJECT
+public:
+    explicit KisMobileScrollArea(QWidget *parent = nullptr);
+};
+
+namespace KisMobileTouch
+{
+    /// Enable kinetic finger scrolling on every scrollable widget below root.
+    void enableTouchScrolling(QWidget *root);
+}
 
 #endif /* KIS_MOBILE_WIDGETS_H */

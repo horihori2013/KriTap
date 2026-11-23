@@ -118,7 +118,7 @@ KisTabletDebugger* KisTabletDebugger::instance()
 void KisTabletDebugger::toggleDebugging()
 {
     m_debugEnabled = !m_debugEnabled;
-    QMessageBox::information(qApp->activeWindow(), i18nc("@title:window", "Krita"), m_debugEnabled ?
+    QMessageBox::information(qApp->activeWindow(), i18nc("@title:window", "KriTap"), m_debugEnabled ?
                              i18n("Tablet Event Logging Enabled") :
                              i18n("Tablet Event Logging Disabled"));
     if (m_debugEnabled) {

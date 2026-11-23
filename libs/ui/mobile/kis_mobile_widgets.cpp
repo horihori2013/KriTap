@@ -15,6 +15,8 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScroller>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QToolButton>
@@ -325,4 +327,48 @@ void KisMobileSliderRow::slotSliderMoved(int position)
 QString KisMobileSliderRow::formatValue(qreal value) const
 {
     return QString::number(qRound(value));
+}
+
+/******************************************************************/
+/* KisMobileScrollArea                                            */
+/******************************************************************/
+
+KisMobileScrollArea::KisMobileScrollArea(QWidget *parent)
+    : QScrollArea(parent)
+{
+    setWidgetResizable(true);
+    setFrameShape(QFrame::NoFrame);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setStyleSheet(KisMobileStyle::rootStyleSheet());
+    setAttribute(Qt::WA_AcceptTouchEvents, true);
+
+    if (viewport()) {
+        QScroller::grabGesture(viewport(), QScroller::LeftMouseButtonGesture);
+    }
+}
+
+/******************************************************************/
+/* KisMobileTouch                                                 */
+/******************************************************************/
+
+namespace KisMobileTouch
+{
+
+void enableTouchScrolling(QWidget *root)
+{
+    if (!root) return;
+
+    QList<QAbstractScrollArea *> areas = root->findChildren<QAbstractScrollArea *>();
+    if (QAbstractScrollArea *self = qobject_cast<QAbstractScrollArea *>(root)) {
+        areas.append(self);
+    }
+
+    for (QAbstractScrollArea *area : areas) {
+        if (area->viewport()) {
+            QScroller::grabGesture(area->viewport(), QScroller::LeftMouseButtonGesture);
+        }
+    }
+}
+
 }

@@ -693,7 +693,7 @@ void LutDockerDock::slotBakeCurrentConfigIntoNewImage()
         projection->convertTo(ocioCs);
 
         QProgressDialog progress(win->canvasWindow());
-        progress.setWindowTitle(i18nc("@title:window", "Krita"));
+        progress.setWindowTitle(i18nc("@title:window", "KriTap"));
         progress.setLabelText(i18nc("Message for ocio baking progress bar.", "Baking configuration into image..."));
         progress.setWindowModality(Qt::ApplicationModal);
         progress.setWindowFlag(Qt::WindowCloseButtonHint, false);

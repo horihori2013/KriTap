@@ -18,10 +18,13 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QDockWidget>
 #include <QEvent>
 #include <QLayout>
 #include <QMenuBar>
+#include <QScreen>
+#include <QSignalBlocker>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
@@ -89,9 +92,17 @@ void KisMobileUiManager::install(KisMainWindow *window)
     // dialogs and remaining desktop widgets follow the phone theme
     KisMobileStyle::applyApplicationTheme();
 
+    // keep every popup window on the screen and finger-scrollable
+    if (QCoreApplication::instance()) {
+        QCoreApplication::instance()->installEventFilter(this);
+    }
+
     m_chromeHost = new KisMobileChromeHost(window, this);
     createSheets();
     wireChrome();
+
+    connect(m_chromeHost, &KisMobileChromeHost::sheetClosed,
+            this, &KisMobileUiManager::restoreDockerContent);
 
     KisViewManager *viewManager = window->viewManager();
     if (viewManager) {
@@ -118,6 +129,12 @@ void KisMobileUiManager::install(KisMainWindow *window)
 void KisMobileUiManager::uninstall()
 {
     if (!m_installed) return;
+
+    if (QCoreApplication::instance()) {
+        QCoreApplication::instance()->removeEventFilter(this);
+    }
+
+    restoreDockerContent();
 
     if (m_chromeHost) {
         m_chromeHost->hideSheet();
@@ -209,15 +226,94 @@ void KisMobileUiManager::rememberAndHide(QWidget *widget)
 
 bool KisMobileUiManager::eventFilter(QObject *watched, QEvent *event)
 {
+    if (!m_installed || event->type() != QEvent::Show) {
+        return QObject::eventFilter(watched, event);
+    }
+
+    QWidget *widget = qobject_cast<QWidget *>(watched);
+    if (!widget) return QObject::eventFilter(watched, event);
+
     // Desktop chrome must never come back while the mobile UI owns the window:
     // Krita actions (canvas-only mode, view changes, …) try to re-show it.
-    if (m_installed && event->type() == QEvent::Show) {
-        QWidget *widget = qobject_cast<QWidget *>(watched);
-        if (widget && m_desktopChrome.contains(widget)) {
-            widget->hide();
+    if (m_desktopChrome.contains(widget)) {
+        widget->hide();
+        if (QDockWidget *dock = qobject_cast<QDockWidget *>(widget)) {
+            presentDockerInSheet(dock);
         }
+        return true;
     }
+
+    // Popup windows: dialogs own the screen, tool windows clamp inside it.
+    const Qt::WindowType type = widget->windowType();
+    if (widget->isWindow() && !widget->property("kisMobileChrome").toBool()
+        && (type == Qt::Dialog || type == Qt::Tool)) {
+        fitPopupWindowToScreen(widget);
+    }
+
     return QObject::eventFilter(watched, event);
+}
+
+void KisMobileUiManager::fitPopupWindowToScreen(QWidget *window)
+{
+    if (!window) return;
+
+    QScreen *screen = window->screen();
+    const QRect avail = screen ? screen->availableGeometry() : QRect();
+    if (!avail.isValid()) return;
+
+    // everything shown as a popup must be scrollable with a finger
+    KisMobileTouch::enableTouchScrolling(window);
+
+    const bool isDialog = window->windowType() == Qt::Dialog;
+    const QSize target = isDialog
+            ? avail.size() - QSize(16, 16)
+            : window->size().boundedTo(avail.size() - QSize(8, 8));
+
+    // Regardless of the fixed/minimum size the window was created with: the
+    // screen size wins.  setFixedSize() first lifts whatever constraint the
+    // widget was born with and then pins it, so its layout can never grow the
+    // window out of the screen afterwards.
+    window->setMinimumSize(0, 0);
+    window->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+    window->setFixedSize(target);
+
+    QPoint pos = isDialog
+            ? QPoint(avail.x() + 8, avail.y() + 8)
+            : avail.center() - QPoint(target.width() / 2, target.height() / 2);
+    pos.setX(qBound(avail.left(), pos.x(), avail.right() - target.width()));
+    pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - target.height()));
+    window->move(pos);
+}
+
+void KisMobileUiManager::presentDockerInSheet(QDockWidget *dock)
+{
+    if (!dock || !m_chromeHost) return;
+
+    restoreDockerContent();
+
+    QWidget *content = dock->widget();
+    if (!content) return;
+
+    m_sheetDocker = dock;
+    m_sheetDockerContent = content;
+
+    const QString title = dock->windowTitle().isEmpty()
+            ? i18n("Tool window") : dock->windowTitle();
+    m_chromeHost->showSheetContent(content, title);
+}
+
+void KisMobileUiManager::restoreDockerContent()
+{
+    if (m_sheetDocker && m_sheetDockerContent) {
+        m_sheetDocker->setWidget(m_sheetDockerContent);
+        if (QAction *toggle = m_sheetDocker->toggleViewAction()) {
+            QSignalBlocker blocker(toggle);
+            toggle->setChecked(false);
+        }
+        m_sheetDocker->hide();
+    }
+    m_sheetDocker = nullptr;
+    m_sheetDockerContent = nullptr;
 }
 
 void KisMobileUiManager::slotRehideDesktopChrome()
@@ -254,16 +350,19 @@ void KisMobileUiManager::createSheets()
         if (m_chromeHost) m_chromeHost->hideSheet();
     });
 
+    connect(m_toolsSheet, &KisMobileToolsSheet::finished, this, [this]() {
+        if (m_chromeHost) m_chromeHost->hideSheet();
+    });
+
+    connect(m_moreSheet, &KisMobileMoreSheet::finished, this, [this]() {
+        if (m_chromeHost) m_chromeHost->hideSheet();
+    });
+
     connect(m_moreSheet, &KisMobileMoreSheet::hideUiRequested, this, [this]() {
         if (m_chromeHost) {
             m_chromeHost->hideSheet();
             m_chromeHost->setBarsVisible(false);
         }
-    });
-
-    connect(m_moreSheet, &KisMobileMoreSheet::disableMobileUiRequested, this, [this]() {
-        if (m_chromeHost) m_chromeHost->hideSheet();
-        setMobileUiEnabled(false);
     });
 }
 
@@ -285,6 +384,7 @@ void KisMobileUiManager::destroySheets()
 void KisMobileUiManager::openSheet(QWidget *content, const QString &title)
 {
     if (!m_chromeHost || !content) return;
+    restoreDockerContent();
     m_chromeHost->showSheetContent(content, title);
 }
 
